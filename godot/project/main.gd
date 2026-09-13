@@ -58,20 +58,45 @@ const MAGNITUDE_LIMIT := 7.96
 ## so that the aft sky can be hunted for after it goes out.
 const EXPOSURE_LEVELS := [0.0158, 0.0501, 0.1585, 0.5012, 1.5849]
 
-## Free look. WASD and not IJKL because L is already the light-time toggle, and
-## `L` for light is worth more than `L` for a camera axis.
-const LOOK_SPEED_KEY := 1.4          ## rad/s while a key is held
-const LOOK_SPEED_MOUSE := 0.0035     ## rad per pixel of mouse travel
-## Pitch stops just short of vertical. This is an INPUT limit on a camera angle,
-## not a physical bound -- the distinction rule 13 is about. Past 90 degrees the
-## up vector flips and the controls invert under the player's hands, which is a
-## usability failure and not a statement about the world.
+## Two different camera controls, because they answer two different questions.
+##
+##   ORBIT   moves the camera AROUND the focus, which keeps the subject centred
+##           and shows it -- and the sky behind it -- from any side. This is the
+##           one you want almost always, and it is what WASD and the mouse do.
+##   LOOK    turns the camera in place, leaving the subject behind. Held under
+##           Shift, because a view that wanders off the thing you are flying is
+##           the exception, not the default.
+##
+## WASD and not IJKL because `L` is already the light-time toggle, and `L` for
+## light is worth more than `L` for a camera axis.
+const ORBIT_SPEED_KEY := 1.4         ## rad/s while a key is held
+const ORBIT_SPEED_MOUSE := 0.006     ## rad per pixel of mouse travel
+const LOOK_SPEED_KEY := 1.4
+const LOOK_SPEED_MOUSE := 0.0035
+
+## Elevation and pitch stop just short of vertical. These are INPUT limits on a
+## camera angle, not physical bounds -- the distinction rule 13 is about. Past 90
+## degrees the up vector flips and the controls invert under the player's hands,
+## which is a usability failure and not a statement about the world.
 const LOOK_PITCH_LIMIT := 1.5533     ## 89 degrees
 
-## Where the camera points before the free-look offsets are added.
-## "chase" is the Milestone 2 behaviour; the other two are the comparison this
-## milestone exists for -- the forward cone against the sky that went out.
+## Zoom, as a multiplier on the focus's natural distance, so the same range works
+## for a 20 m ship and for Jupiter.
+const ZOOM_STEP := 1.15
+const ZOOM_MIN := 0.15
+const ZOOM_MAX := 40.0
+
+## Where the camera SITS before the free-look offsets are added, as an azimuth
+## about the velocity axis. "chase" is the Milestone 2 view; the other two are
+## the comparison this milestone exists for -- the forward cone against the sky
+## that went out.
+##
+## Azimuth is measured from the velocity: 0 puts the camera AHEAD of the ship
+## looking back down the aft sky, 180 puts it behind looking into the forward
+## cone.
 const LOOK_MODES := ["chase", "prograde", "retrograde"]
+const LOOK_MODE_AZIMUTH := [PI, PI, 0.0]
+const LOOK_MODE_ELEVATION := [0.4363, 0.0, 0.0]   ## 25 deg for chase, 0 for the two locks
 
 var simulation: SpaceflightSimulation
 var camera: Camera3D
@@ -90,8 +115,11 @@ var exposure_index := 2
 var show_apparent := true
 var look_yaw := 0.0
 var look_pitch := 0.0
+var orbit_azimuth := PI
+var orbit_elevation := 0.4363
+var orbit_zoom := 1.0
 var look_mode := 0
-var _mouse_look := false
+var _mouse_drag := false
 ## Headless printing is counted in FRAMES, not wall seconds. `--quit-after N` is
 ## a frame count, so gating the print on elapsed real time made the verification
 ## depend on how fast the machine happened to be: at 143 fps the old 1-second
@@ -347,7 +375,7 @@ func _process(delta: float) -> void:
 		return
 
 	_apply_manual_rcs()
-	_apply_free_look(delta)
+	_apply_camera_input(delta)
 
 	# The frame rate decides how much coordinate time to ask for. It never
 	# reaches the integrator, which picks its own steps (rule 21).
@@ -459,70 +487,61 @@ func _warn_if_camera_is_inside_a_body() -> void:
 
 
 func _place_camera() -> void:
-	## Chase camera, in scene units. The projection origin is the focus itself, so
-	## the camera sits a fraction of a unit from the origin and the float
-	## precision stays microscopic (docs/architecture/rendering.md).
+	## Orbit camera, in scene units. The projection origin is the focus itself, so
+	## the camera sits a fraction of a unit from the origin and the float precision
+	## stays microscopic (docs/architecture/rendering.md).
 	##
-	## Orientation matters more than distance here. From a 400 km orbit the Earth
-	## subtends 140 degrees: pointing the camera along the velocity leaves the
-	## planet starting 20 degrees off-axis and mostly out of frame. Offsetting the
-	## camera OUTWARD (away from the planet) and using that outward direction as
-	## "up" puts the planet in the lower part of the screen, where it belongs,
-	## with the horizon visible above it.
-	##
-	## The free look is applied on top, in _aim_camera, and is a pure OFFSET: the
-	## base orientation is rebuilt from scratch every frame, so yaw and pitch never
-	## accumulate drift and "recentre" is just setting them back to zero.
-	if focus_index >= 0:
-		var body_target := body_meshes[focus_index].position
-		var body_distance := maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
-		camera.position = body_target + Vector3(0.0, body_distance * 0.35, body_distance)
-		_aim_camera(body_target - camera.position, Vector3.UP)
-		return
-
+	## The camera is placed on a sphere around the focus, at (azimuth, elevation)
+	## in a frame built from the VELOCITY -- not from the world axes. That is what
+	## makes the orbit mean something here: azimuth 180 is behind the ship, looking
+	## into the forward cone, and azimuth 0 is ahead of it, looking down the sky
+	## that went dark. Turning the camera with A and D sweeps between the two, and
+	## the HUD reads out the Doppler factor the whole way.
 	var target := ship_mesh.position
-	# "Down" is towards the reference body; the ship is the projection origin, so
-	# the body's render position already IS the nadir direction.
+	var natural := CHASE_DISTANCE
+	if focus_index >= 0:
+		target = body_meshes[focus_index].position
+		natural = maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
+
+	# The orbit frame. `forward` is the axis the sky is aberrated about; `up` is
+	# outward from the reference body, so elevation is "climb away from the
+	# planet" and the horizon stays where the eye expects it.
+	var forward := Vector3(simulation.get_beta_vector()).normalized()
+	if forward.length() < 0.5:
+		forward = Vector3.FORWARD
 	var nadir := _reference_body_position() - target
-	var outward := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
+	var up := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
+	var right := forward.cross(up)
+	if right.length() < 1.0e-6:
+		# Looking along the radial: any perpendicular will do, and the choice only
+		# rotates the azimuth's zero, which nothing downstream depends on.
+		right = forward.cross(Vector3.UP)
+		if right.length() < 1.0e-6:
+			right = forward.cross(Vector3.RIGHT)
+	right = right.normalized()
+	up = right.cross(forward).normalized()
 
-	var back := -simulation.get_spacecraft_velocity_direction()
-	if back.length() < 0.5:
-		back = Vector3.BACK
+	var offset := (forward * (cos(orbit_elevation) * cos(orbit_azimuth))
+		+ right * (cos(orbit_elevation) * sin(orbit_azimuth))
+		+ up * sin(orbit_elevation))
 
-	camera.position = target + outward * (CHASE_DISTANCE * 0.5) + back * CHASE_DISTANCE
-	_aim_camera(target - camera.position, outward)
-
-
-func _base_look_direction(chase_direction: Vector3) -> Vector3:
-	## Prograde and retrograde are not a convenience: they are the two views the
-	## optics differ most between, and flipping between them is the whole
-	## demonstration. Neither touches the ship -- the ATTITUDE is still wherever
-	## the RCS put it, and turning the camera is not a manoeuvre.
-	##
-	## Along the BARYCENTRIC velocity, because that is the axis the sky is
-	## aberrated about -- the stars are at rest in that frame, not in the Earth's.
-	## Locking to the cockpit's prograde would point the camera 30 degrees off the
-	## cone it is meant to be showing.
-	var axis := Vector3(simulation.get_beta_vector()).normalized()
-	if axis.length() < 0.5:
-		return chase_direction
-	match LOOK_MODES[look_mode]:
-		"prograde": return axis
-		"retrograde": return -axis
-		_: return chase_direction
+	camera.position = target + offset * (natural * orbit_zoom)
+	_aim_camera(target - camera.position, up)
 
 
-func _aim_camera(chase_direction: Vector3, up: Vector3) -> void:
-	var forward := _base_look_direction(chase_direction)
+func _aim_camera(to_target: Vector3, up: Vector3) -> void:
+	## The camera looks at the focus, and the free-look offsets are applied AFTER,
+	## in the camera's own axes. Because the base orientation is rebuilt from
+	## scratch every frame the offsets never accumulate drift, and "recentre" is
+	## just setting two numbers back to zero.
+	var forward := to_target
 	if forward.length() < 1.0e-9:
 		return
 	forward = forward.normalized()
 
 	# look_at fails outright when the forward direction and the up hint are
-	# parallel -- which happens the moment you lock prograde while the camera's
-	# "up" is the outward radial and the ship is at the top of its orbit. Any
-	# perpendicular will do as a replacement; the free-look roll is zero anyway.
+	# parallel -- which happens the moment the camera climbs to the pole of its
+	# own orbit. Any perpendicular will do as a replacement.
 	var hint := up.normalized() if up.length() > 0.0 else Vector3.UP
 	if absf(forward.dot(hint)) > 0.999:
 		hint = forward.cross(Vector3.RIGHT)
@@ -531,52 +550,105 @@ func _aim_camera(chase_direction: Vector3, up: Vector3) -> void:
 		hint = hint.normalized()
 
 	camera.look_at(camera.position + forward, hint)
-	# Offsets last, in the camera's own axes, so yaw is always "turn left" and
-	# pitch is always "look up" no matter what the base orientation is.
 	camera.rotate_object_local(Vector3.UP, look_yaw)
 	camera.rotate_object_local(Vector3.RIGHT, look_pitch)
 
 
-func _apply_free_look(delta: float) -> void:
-	var step := LOOK_SPEED_KEY * delta
+func _apply_camera_input(delta: float) -> void:
+	## Shift turns the same four keys from "move around the subject" into "turn in
+	## place and leave it behind".
+	var step := (LOOK_SPEED_KEY if _free_look_held() else ORBIT_SPEED_KEY) * delta
+	var horizontal := 0.0
+	var vertical := 0.0
 	if Input.is_key_pressed(KEY_A):
-		look_yaw += step
+		horizontal += step
 	if Input.is_key_pressed(KEY_D):
-		look_yaw -= step
+		horizontal -= step
 	if Input.is_key_pressed(KEY_W):
-		look_pitch += step
+		vertical += step
 	if Input.is_key_pressed(KEY_S):
-		look_pitch -= step
-	_settle_look()
+		vertical -= step
+
+	if _free_look_held():
+		look_yaw += horizontal
+		look_pitch += vertical
+	else:
+		orbit_azimuth += horizontal
+		orbit_elevation += vertical
+	_settle_camera()
 
 
-func _settle_look() -> void:
+func _free_look_held() -> bool:
+	return Input.is_key_pressed(KEY_SHIFT)
+
+
+func _settle_camera() -> void:
+	orbit_azimuth = wrapf(orbit_azimuth, -PI, PI)
+	orbit_elevation = clampf(orbit_elevation, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
 	look_yaw = wrapf(look_yaw, -PI, PI)
 	look_pitch = clampf(look_pitch, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
 
 
-func _recentre_look() -> void:
+func _apply_look_preset() -> void:
+	## Snap to the preset, keeping the zoom: flipping between the forward cone and
+	## the aft sky should not undo how close you had got to the ship.
+	orbit_azimuth = LOOK_MODE_AZIMUTH[look_mode]
+	orbit_elevation = LOOK_MODE_ELEVATION[look_mode]
 	look_yaw = 0.0
 	look_pitch = 0.0
 
 
+func _recentre_camera() -> void:
+	## Everything back, zoom included. One key out of any orientation, because
+	## getting lost pointing at empty sky is the failure mode of every camera like
+	## this.
+	_apply_look_preset()
+	orbit_zoom = 1.0
+
+
+func _at_look_preset() -> bool:
+	## Whether the camera is actually where the preset puts it. The HUD needs this
+	## because a label that keeps saying "prograde" after you have orbited away
+	## from prograde is a readout that lies -- the same failure as measuring the
+	## angle from one axis and the Doppler factor from another, one screen earlier.
+	return (absf(wrapf(orbit_azimuth - LOOK_MODE_AZIMUTH[look_mode], -PI, PI)) < 0.02
+		and absf(orbit_elevation - LOOK_MODE_ELEVATION[look_mode]) < 0.02
+		and absf(look_yaw) < 0.02 and absf(look_pitch) < 0.02)
+
+
+func _zoom_camera(steps: float) -> void:
+	orbit_zoom = clampf(orbit_zoom * pow(ZOOM_STEP, steps), ZOOM_MIN, ZOOM_MAX)
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	## Hold the right mouse button to look. Captured rather than confined so that
-	## the pointer cannot run off the window mid-turn, and released the moment the
+	## Hold the right mouse button to move the camera around the subject; add
+	## Shift to turn it in place instead. Captured rather than confined so the
+	## pointer cannot run off the window mid-turn, and released the moment the
 	## button is -- a simulator that steals the cursor is a simulator you cannot
 	## quit.
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
-		if button.button_index == MOUSE_BUTTON_RIGHT:
-			_mouse_look = button.pressed
-			if DisplayServer.get_name() != "headless":
-				Input.mouse_mode = (Input.MOUSE_MODE_CAPTURED if _mouse_look
-					else Input.MOUSE_MODE_VISIBLE)
-	elif event is InputEventMouseMotion and _mouse_look:
+		match button.button_index:
+			MOUSE_BUTTON_RIGHT:
+				_mouse_drag = button.pressed
+				if DisplayServer.get_name() != "headless":
+					Input.mouse_mode = (Input.MOUSE_MODE_CAPTURED if _mouse_drag
+						else Input.MOUSE_MODE_VISIBLE)
+			MOUSE_BUTTON_WHEEL_UP:
+				if button.pressed:
+					_zoom_camera(-1.0)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if button.pressed:
+					_zoom_camera(1.0)
+	elif event is InputEventMouseMotion and _mouse_drag:
 		var motion := event as InputEventMouseMotion
-		look_yaw -= motion.relative.x * LOOK_SPEED_MOUSE
-		look_pitch -= motion.relative.y * LOOK_SPEED_MOUSE
-		_settle_look()
+		if _free_look_held():
+			look_yaw -= motion.relative.x * LOOK_SPEED_MOUSE
+			look_pitch -= motion.relative.y * LOOK_SPEED_MOUSE
+		else:
+			orbit_azimuth -= motion.relative.x * ORBIT_SPEED_MOUSE
+			orbit_elevation += motion.relative.y * ORBIT_SPEED_MOUSE
+		_settle_camera()
 
 
 func _headless_warp_schedule(snapshot: Dictionary) -> void:
@@ -663,9 +735,11 @@ func _look_lines(d: Dictionary) -> Array:
 	var axis := Vector3(simulation.get_beta_vector()).normalized()
 	var angle := rad_to_deg(forward.angle_to(axis)) if axis.length() > 0.5 else 0.0
 	var inside := "  INSIDE the forward cone" if angle <= float(d["forward_cone_deg"]) else ""
+	var where: String = LOOK_MODES[look_mode] if _at_look_preset() else "free"
+	var zoom := "" if is_equal_approx(orbit_zoom, 1.0) else "   zoom %.2fx" % orbit_zoom
 	return [
-		"look           %s   %.1f deg off the aberration axis%s"
-			% [LOOK_MODES[look_mode], angle, inside],
+		"look           %s   %.1f deg off the aberration axis%s%s"
+			% [where, angle, inside, zoom],
 		"looking into   D = %.6f" % sky.get_doppler_in_direction(forward),
 		"",
 	]
@@ -754,7 +828,8 @@ func _update_readout() -> void:
 		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
 		"(M: engine mode IMPULSE <-> CRUISE)",
 		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
-		"(WASD or hold right mouse: look   V: chase/prograde/retrograde   H: recentre)",
+		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
+		"(V: chase/prograde/retrograde   H: recentre)",
 	])
 	readout.text = "\n".join(lines)
 
@@ -863,8 +938,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			simulation.set_time_warp(WARP_LEVELS[warp_index])
 		KEY_V:
 			look_mode = (look_mode + 1) % LOOK_MODES.size()
-			_recentre_look()
-		KEY_H: _recentre_look()
+			_apply_look_preset()
+		KEY_H: _recentre_camera()
+		KEY_BRACKETLEFT: _zoom_camera(1.0)
+		KEY_BRACKETRIGHT: _zoom_camera(-1.0)
 		KEY_M: simulation.cycle_engine_mode()
 		KEY_Z: _set_throttle(1.0)
 		KEY_X: _set_throttle(0.0)

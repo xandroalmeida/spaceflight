@@ -179,6 +179,42 @@ acrescentou; a demonstração da queima precisa de mais.
 lados; o que muda é qual pergunta o renderizador faz. É a forma mais rápida de
 ver quanto a Lua anda em 1,2 segundos-luz.
 
+### Orbitar, e girar no lugar
+
+São duas coisas diferentes e têm controles diferentes porque respondem a
+perguntas diferentes:
+
+* **orbitar** move a câmera *em volta* do alvo, que continua centralizado — é
+  como se olha um objeto por todos os lados, e como se troca o céu que está
+  atrás dele. É o que `WASD` e o mouse fazem, porque é o que se quer quase
+  sempre;
+* **girar no lugar** deixa o alvo para trás e aponta para o vazio. Fica sob
+  `Shift`, porque é a exceção.
+
+A órbita é parametrizada num referencial construído a partir da **velocidade**, e
+não dos eixos do mundo — é isso que faz o azimute significar alguma coisa aqui:
+
+| azimute | onde a câmera fica | para onde se olha |
+|---|---|---|
+| 180° | atrás da nave | dentro do cone de aberração |
+| 90° | de través | perpendicular, `D = γ` (Doppler transverso) |
+| 0° | à frente da nave | o céu de ré, o que apagou |
+
+Conferido, com a nave a `β = 1,0075·10⁻⁴`:
+
+```
+az 180, el  0   ->    0,0 deg off the aberration axis   D = 1.000101
+az   0, el  0   ->  180,0 deg off the aberration axis   D = 0.999899
+az  90, el  0   ->   90,0 deg off the aberration axis   D = 1.000000
+az 180, el 89   ->   89,0 deg off the aberration axis   D = 1.000002
+```
+
+Os dois primeiros multiplicados dão 1,000000. O terceiro é `γ`, que a `β = 10⁻⁴`
+vale `1 + 5·10⁻⁹` e arredonda para 1 no mostrador — o Doppler transverso existe e
+é pequeno, como tem de ser. O quarto é o polo da órbita, onde o `look_at` do Godot
+falharia se o vetor "para cima" não fosse trocado; é por isso que ele está na
+lista.
+
 ### Olhar em volta é uma medição
 
 O `V` alterna entre as duas vistas em que a ótica mais difere, e o HUD diz o que
@@ -209,6 +245,11 @@ mentindo assim mesmo.
 
 Girar a câmera **não é manobra**: a atitude da nave continua onde o RCS a deixou,
 e nada no estado muda.
+
+O rótulo (`chase`, `prograde`, `retrograde`) vira `free` assim que a câmera sai do
+preset, em vez de continuar afirmando uma posição que ela não tem mais. É o mesmo
+cuidado do parágrafo acima: um mostrador cujos números estão todos certos ainda
+pode mentir.
 
 ## A regra que esta pasta existe para respeitar
 
