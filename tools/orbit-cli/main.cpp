@@ -11,6 +11,7 @@
 #include "core/gravity/composite_force_model.hpp"
 #include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
+#include "core/navigation/b_plane.hpp"
 #include "core/navigation/mission.hpp"
 #include "core/navigation/targeting.hpp"
 #include "core/navigation/trajectory_planner.hpp"
@@ -52,6 +53,8 @@ Usage:
   orbit-cli lambert --to <body> --depart <epoch> --tof <days> [--center <body>] [--from <body|x,y,z>]
   orbit-cli intercept <scenario.json> --to <body> --tof <days> [--csv <file>]
                     [--no-retarget] [--tolerance-km <n>]
+                    [--flyby-altitude-km <n>] [--b-plane-angle <deg>]
+                    [--insert] [--insert-apoapsis-km <n>]
 
 Options:
   --date <epoch>    Any format SPICE accepts: "2026-01-01", "2026-01-01T12:00:00",
@@ -61,6 +64,18 @@ Options:
   --j2              Add the central body's J2 oblateness term (docs/physics/geopotential.md).
   --tof <days>      Time of flight for the Lambert transfer.
   --from <x,y,z>    Departure position relative to --center, in metres; or a body name.
+  --flyby-altitude-km <n>
+                    Aim a FLYBY at this altitude instead of the body's centre, by
+                    B-plane targeting (docs/physics/b-plane.md).  Without it the
+                    intercept aims at the centre, which is an impact.
+  --b-plane-angle <deg>
+                    Which side the flyby passes, as the angle of B from T towards
+                    R.  0 is perpendicular to the J2000 pole, 90 is polar.
+                    Default 0.  There is no natural choice; this is the mission's.
+  --insert          Also report the lunar-orbit-insertion burn at periapsis.
+  --insert-apoapsis-km <n>
+                    Capture into an ellipse with this apoapsis altitude instead of
+                    circularising.
   --kernels <dir>   Kernel directory.  Default: $SPACEFLIGHT_KERNEL_DIR or the build-time path.
 
 All output is SI: metres, metres per second, seconds, kilograms.
@@ -500,8 +515,8 @@ int command_intercept(const Args& args) {
         navigation::ManeuverPlan plan;
     };
 
-    auto fly = [&](const Vec3& departure_velocity, propagation::Trajectory* arc,
-                   bool stop_on_impact) -> Flight {
+    auto fly_until = [&](const Vec3& departure_velocity, propagation::Trajectory* arc,
+                         bool stop_on_impact, time::CoordinateTime end) -> Flight {
         const Vec3 impulse = departure_velocity - scenario.velocity;
         Flight flight{};
 
@@ -523,9 +538,110 @@ int command_intercept(const Args& args) {
         auto integrator = scenario.integrator;
         integrator.stop_inside_body = stop_on_impact;
         propagation::DormandPrince54Propagator propagator{forces, integrator};
-        flight.mission = navigation::run_mission(propagator, executor, initial, t0, t1, arc);
+        flight.mission = navigation::run_mission(propagator, executor, initial, t0, end, arc);
         return flight;
     };
+    auto fly = [&](const Vec3& departure_velocity, propagation::Trajectory* arc,
+                   bool stop_on_impact) -> Flight {
+        return fly_until(departure_velocity, arc, stop_on_impact, t1);
+    };
+
+    // The B-plane probe flies PAST the nominal arrival. Closest approach has to be
+    // INTERIOR to the window or it is pinned at the end of it -- and then the time
+    // of closest approach stops responding to the departure velocity, the third
+    // row of the Jacobian goes to zero, and Newton has nothing to solve. Measured
+    // before the fix: d(time component)/dv = 2e-6 m per m/s, against 1e6 for the
+    // other two.
+    const auto t_probe_end = t1 + time::Duration::seconds(tof.seconds() * 0.25);
+
+    // ---- closest approach, refined ------------------------------------------
+    //
+    // The B-plane is read off the osculating hyperbola about the target, and that
+    // only describes the trajectory where the target dominates -- so it is
+    // evaluated at the closest approach (docs/physics/b-plane.md section 6).
+    //
+    // Refined, not just argmin over samples: the corrector differences this map,
+    // and an argmin over a fixed grid is a STAIRCASE. The time of closest approach
+    // is itself one of the three targeted quantities, and quantised to the sample
+    // spacing it would be useless as well as non-differentiable.
+    struct Approach {
+        time::CoordinateTime time{};
+        double distance{std::numeric_limits<double>::infinity()};
+        Vec3 relative_position{};
+        Vec3 relative_velocity{};
+        bool valid{false};
+    };
+
+    auto separation_at = [&](const propagation::Trajectory& arc_in,
+                             time::CoordinateTime t) -> double {
+        const auto state = arc_in.state_at(t);
+        const auto body = ctx.provider->state(target, t, ssb);
+        return (state.state.position - body.state.position).norm();
+    };
+
+    auto find_approach = [&](const propagation::Trajectory& arc_in) -> Approach {
+        Approach best{};
+        if (arc_in.empty()) {
+            return best;
+        }
+        // Coarse bracket first.
+        const auto samples = arc_in.sample(2000);
+        std::size_t index = 0;
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            const auto body = ctx.provider->state(target, samples[i].first, ssb);
+            const double distance =
+                (samples[i].second.state.position - body.state.position).norm();
+            if (distance < best.distance) {
+                best.distance = distance;
+                best.time = samples[i].first;
+                index = i;
+            }
+        }
+        if (samples.size() < 3) {
+            return best;
+        }
+
+        // Golden-section on the bracketing interval. 60 iterations takes a 4.5-day
+        // arc's 200 s sampling down to well below a microsecond, which is far finer
+        // than the finite-difference step needs.
+        const std::size_t lo_index = index > 0 ? index - 1 : 0;
+        const std::size_t hi_index = std::min(index + 1, samples.size() - 1);
+        double lo = samples[lo_index].first.seconds_since_j2000();
+        double hi = samples[hi_index].first.seconds_since_j2000();
+        constexpr double kInvPhi = 0.6180339887498949;
+        for (int i = 0; i < 60 && hi - lo > 1.0e-6; ++i) {
+            const double a = hi - (hi - lo) * kInvPhi;
+            const double b = lo + (hi - lo) * kInvPhi;
+            const auto ta = time::CoordinateTime::from_seconds_since_j2000(a);
+            const auto tb = time::CoordinateTime::from_seconds_since_j2000(b);
+            if (!arc_in.contains(ta) || !arc_in.contains(tb)) {
+                break;
+            }
+            if (separation_at(arc_in, ta) < separation_at(arc_in, tb)) {
+                hi = b;
+            } else {
+                lo = a;
+            }
+        }
+        const auto t_ca = time::CoordinateTime::from_seconds_since_j2000(0.5 * (lo + hi));
+        if (!arc_in.contains(t_ca)) {
+            return best;
+        }
+        const auto state = arc_in.state_at(t_ca);
+        const auto body = ctx.provider->state(target, t_ca, ssb);
+        best.time = t_ca;
+        best.relative_position = state.state.position - body.state.position;
+        best.relative_velocity = state.state.velocity - body.state.velocity;
+        best.distance = best.relative_position.norm();
+        best.valid = true;
+        return best;
+    };
+
+    const double target_gm = ctx.provider->gravitational_parameter(target);
+    const double target_radius_for_aim = ctx.provider->mean_radius(target);
+    const auto flyby_altitude = args.option("flyby-altitude-km");
+    const double b_plane_angle =
+        units::deg_to_rad(std::stod(args.option_or("b-plane-angle", "0")));
 
     Vec3 departure_velocity = solution.departure_velocity;
 
@@ -537,6 +653,150 @@ int command_intercept(const Args& args) {
         if (const auto step = args.option("fd-step"); step.has_value()) {
             targeting.velocity_step = std::stod(*step);
         }
+
+        if (flyby_altitude.has_value()) {
+            if (!(target_radius_for_aim > 0.0) || !(target_gm > 0.0)) {
+                throw std::runtime_error(
+                    "--flyby-altitude-km needs a target with a radius and a GM in the kernels");
+            }
+            const double wanted_periapsis =
+                target_radius_for_aim + std::stod(*flyby_altitude) * 1000.0;
+            // How close the periapsis has to land. --tolerance-km means PERIAPSIS
+            // here, which is what somebody asking for a 100 km flyby means by it.
+            const double wanted_periapsis_tolerance =
+                std::stod(args.option_or("tolerance-km", "1.0")) * 1000.0;
+
+            // The map the corrector inverts: departure velocity -> (B.T, B.R,
+            // along-track timing error). Three outputs for three inputs, and all
+            // three in METRES, so that the norm the corrector tests against a
+            // tolerance means something (section 5).
+            double v_infinity_estimate = 0.0;
+            auto b_plane_of = [&](const Vec3& v) -> std::optional<navigation::BPlane> {
+                propagation::Trajectory probe;
+                (void)fly_until(v, &probe, false, t_probe_end);
+                const Approach approach = find_approach(probe);
+                if (!approach.valid) {
+                    return std::nullopt;
+                }
+                try {
+                    return navigation::b_plane_from_state(approach.relative_position,
+                                                          approach.relative_velocity, target_gm);
+                } catch (const std::domain_error&) {
+                    return std::nullopt;   // not hyperbolic about the target
+                }
+            };
+
+            // v_infinity is needed to turn "100 km altitude" into a |B|, and it is
+            // itself a property of the trajectory. So: measure it, aim, re-measure.
+            // It barely moves -- the transfer geometry sets it, not the aim point --
+            // and the outer loop is there to prove that rather than to assume it.
+            navigation::TargetingResult correction{};
+
+            // Stage one: the ORDINARY position targeting, aimed at the body centre.
+            //
+            // Not an optimisation -- a necessity. From the raw Lambert solution the
+            // trajectory misses by 363 000 km, and at that distance there is no
+            // hyperbolic flyby to read a B-plane off: the three Jacobian columns
+            // come out nearly parallel and Newton has no direction to move in.
+            // Measured. So the first stage gets the spacecraft to the Moon at all,
+            // and only then is there a flyby to shape.
+            const auto reach = navigation::correct_departure(
+                [&](const Vec3& v) { return fly(v, nullptr, false).mission.state.state.position; },
+                solution.departure_velocity, target_at_arrival_ssb, targeting);
+            std::cout << "\nstage 1, reach the body (position targeting):\n"
+                      << "  initial miss   : " << fmt(reach.initial_miss / 1000.0, 10) << " km\n"
+                      << "  final miss     : " << fmt(reach.miss_distance / 1000.0, 10)
+                      << " km   " << reach.message << "\n";
+
+            Vec3 guess = reach.departure_velocity;
+            std::cout << "\nstage 2, open the periapsis (B-plane targeting), aiming a flyby at "
+                      << fmt(std::stod(*flyby_altitude), 6) << " km altitude:\n";
+
+            for (int pass = 0; pass < 4; ++pass) {
+                const auto measured = b_plane_of(guess);
+                if (!measured.has_value()) {
+                    std::cout << "  pass " << pass + 1
+                              << "        : no hyperbolic approach to read v_inf from; "
+                                 "the transfer does not reach the target\n";
+                    break;
+                }
+                v_infinity_estimate = measured->v_infinity;
+                const auto aim = navigation::aim_for_periapsis(wanted_periapsis, target_gm,
+                                                               v_infinity_estimate,
+                                                               b_plane_angle);
+
+                // The corrector's tolerance is on |B|, but what the mission cares
+                // about is the PERIAPSIS. Differentiating b^2 = r_p^2 + 2 mu r_p /
+                // v_inf^2 gives
+                //
+                //     dr_p / db = b / (r_p + mu / v_inf^2)
+                //
+                // which here is 0.61: a 10 km slack on B is 6 km of periapsis, and
+                // the first version of this stopped 5.4 km short of the altitude
+                // asked for because of exactly that. So the tolerance is converted
+                // rather than shared.
+                const double aim_magnitude = std::hypot(aim.b_dot_t, aim.b_dot_r);
+                const double dr_p_db =
+                    aim_magnitude / (wanted_periapsis +
+                                     target_gm / (v_infinity_estimate * v_infinity_estimate));
+                auto b_targeting = targeting;
+                b_targeting.position_tolerance = wanted_periapsis_tolerance / dr_p_db;
+                // The third constraint is the time of flight that was asked for:
+                // closest approach should happen at the nominal arrival epoch.
+                const double t_target = t1.seconds_since_j2000();
+
+                std::cout << "  pass " << pass + 1 << "        : v_inf "
+                          << fmt(v_infinity_estimate, 8) << " m/s, aim |B| "
+                          << fmt(aim_magnitude / 1000.0, 9) << " km (focusing x"
+                          << fmt(aim_magnitude / wanted_periapsis, 5) << "), r_p now "
+                          << fmt(measured->periapsis_radius / 1000.0, 9) << " km\n";
+
+                correction = navigation::correct_departure(
+                    [&](const Vec3& v) -> Vec3 {
+                        propagation::Trajectory probe;
+                        (void)fly_until(v, &probe, false, t_probe_end);
+                        const Approach approach = find_approach(probe);
+                        if (!approach.valid) {
+                            return Vec3{1.0e12, 1.0e12, 1.0e12};   // push the solver away
+                        }
+                        try {
+                            const auto bp = navigation::b_plane_from_state(
+                                approach.relative_position, approach.relative_velocity,
+                                target_gm);
+                            return Vec3{bp.b_dot_t, bp.b_dot_r,
+                                        bp.v_infinity *
+                                            (approach.time.seconds_since_j2000() - t_target)};
+                        } catch (const std::domain_error&) {
+                            return Vec3{1.0e12, 1.0e12, 1.0e12};
+                        }
+                    },
+                    guess, Vec3{aim.b_dot_t, aim.b_dot_r, 0.0}, b_targeting);
+                guess = correction.departure_velocity;
+
+                const auto achieved = b_plane_of(guess);
+                if (!achieved.has_value()) {
+                    break;
+                }
+                if (std::abs(achieved->periapsis_radius - wanted_periapsis) <
+                    wanted_periapsis_tolerance) {
+                    std::cout << "  converged     : r_p "
+                              << fmt(achieved->periapsis_radius / 1000.0, 9) << " km, wanted "
+                              << fmt(wanted_periapsis / 1000.0, 9) << " km\n";
+                    break;
+                }
+            }
+
+            std::cout << "  initial miss   : " << fmt(correction.initial_miss / 1000.0, 10)
+                      << " km (in the B-plane)\n"
+                      << "  final miss     : " << fmt(correction.miss_distance / 1000.0, 10)
+                      << " km\n"
+                      << "  iterations     : " << correction.iterations << " ("
+                      << correction.evaluations << " trajectories)\n"
+                      << "  status         : " << correction.message << "\n";
+            print_vector("  correction to the Lambert velocity",
+                         correction.departure_velocity - solution.departure_velocity, "m/s");
+            departure_velocity = correction.departure_velocity;
+        } else {
 
         const auto correction = navigation::correct_departure(
             // Targeting flies THROUGH the target if it has to: an iterate that
@@ -554,6 +814,7 @@ int command_intercept(const Args& args) {
         print_vector("  correction to the Lambert velocity",
                      correction.departure_velocity - solution.departure_velocity, "m/s");
         departure_velocity = correction.departure_velocity;
+        }
     }
 
     propagation::Trajectory arc;
@@ -594,9 +855,12 @@ int command_intercept(const Args& args) {
               << ctx.time->to_utc_string(closest_time, 0);
     if (target_radius > 0.0 && closest_approach < target_radius) {
         std::cout << "\n                   *** that is INSIDE " << target.name()
-                  << ": this is an impact trajectory, not a flyby. Aiming for a"
-                     "\n                       flyby altitude needs B-plane targeting, which is"
-                     "\n                       not implemented ***";
+                  << ": this is an impact trajectory, not a flyby."
+                     "\n                       Aim one with --flyby-altitude-km"
+                     " (docs/physics/b-plane.md) ***";
+    } else if (target_radius > 0.0) {
+        std::cout << "  (altitude " << fmt((closest_approach - target_radius) / 1000.0, 8)
+                  << " km)";
     }
     std::cout << "\nrelative speed   : "
               << fmt((mission.state.state.velocity - target_final.state.velocity).norm(), 10)
@@ -608,6 +872,116 @@ int command_intercept(const Args& args) {
                       : "\nThe corrector inverted the FULL model, so the residual miss is the\n"
                         "corrector's own tolerance, not a modelling error.\n")
               << "\nintegrator: " << mission.stats.to_string() << "\n";
+
+    // ---- lunar orbit insertion ----------------------------------------------
+    //
+    // Arriving is not staying. The flyby is hyperbolic by construction, so without
+    // a burn the spacecraft passes the target and leaves. This plans the burn at
+    // periapsis, then EXECUTES it in the same full model -- finite, with its own
+    // gravity loss -- and reports the orbit it actually ends up in.
+    if (args.has_flag("insert")) {
+        propagation::Trajectory approach_arc;
+        const Flight approach_flight =
+            fly_until(departure_velocity, &approach_arc, false, t_probe_end);
+        const Approach approach = find_approach(approach_arc);
+        if (!approach.valid || !(target_gm > 0.0)) {
+            std::cout << "\ninsertion: no usable approach to insert from\n";
+        } else {
+            const double apoapsis_altitude =
+                std::stod(args.option_or("insert-apoapsis-km", "0")) * 1000.0;
+            const double apoapsis_radius =
+                apoapsis_altitude > 0.0 ? target_radius + apoapsis_altitude : 0.0;
+
+            const auto bp = navigation::b_plane_from_state(approach.relative_position,
+                                                           approach.relative_velocity, target_gm);
+            const auto burn = navigation::plan_insertion(bp.periapsis_radius, target_gm,
+                                                         bp.v_infinity, apoapsis_radius);
+
+            std::cout << "\ninsertion at periapsis (" << ctx.time->to_utc_string(approach.time, 0)
+                      << "):\n"
+                      << "  v_infinity     : " << fmt(bp.v_infinity, 10) << " m/s\n"
+                      << "  periapsis      : " << fmt(bp.periapsis_radius / 1000.0, 10)
+                      << " km  (altitude " << fmt((bp.periapsis_radius - target_radius) / 1000.0, 8)
+                      << " km)\n"
+                      << "  speed there    : " << fmt(burn.periapsis_speed, 10) << " m/s\n"
+                      << "  target speed   : " << fmt(burn.target_speed, 10) << " m/s\n"
+                      << "  delta-v needed : " << fmt(burn.delta_v, 10) << " m/s  (retrograde)\n"
+                      << "  orbit period   : " << fmt(burn.period / 60.0, 8) << " min\n";
+
+            // Execute it. Retrograde guidance about the target, centred on
+            // periapsis, so the finite burn straddles the point it was planned for
+            // instead of starting there and drifting off.
+            const double mass_at_periapsis = approach_flight.mission.state.mass;
+            auto insertion = navigation::maneuver_for_delta_v(
+                *scenario.craft, mass_at_periapsis, burn.delta_v, approach.time,
+                navigation::GuidanceMode::Retrograde, target, 1.0, "lunar orbit insertion",
+                navigation::BurnCentering::CenterOnIgnition);
+
+            navigation::ManeuverPlan plan;
+            {
+                const Vec3 impulse = departure_velocity - scenario.velocity;
+                auto injection = navigation::maneuver_for_delta_v(
+                    *scenario.craft, scenario.craft->initial_mass(), impulse.norm(), t0,
+                    navigation::GuidanceMode::Inertial, center, 1.0, "lambert injection");
+                injection.ignition = t0;
+                injection.inertial_direction = impulse.normalized();
+                plan.add(std::move(injection));
+            }
+            plan.add(std::move(insertion));
+
+            gravity::CompositeForceModel forces;
+            forces.add(std::make_unique<gravity::PointMassGravity>(*ctx.provider, catalog, ssb));
+            for (const auto body : scenario.j2_bodies) {
+                forces.add(gravity::OblatenessGravity::for_body(*ctx.provider, *ctx.provider,
+                                                                body, ssb));
+            }
+            navigation::ManeuverExecutor executor{*ctx.provider, *scenario.craft, plan, ssb};
+            forces.add_reference(executor);
+
+            auto integrator = scenario.integrator;
+            integrator.stop_inside_body = true;
+            propagation::DormandPrince54Propagator propagator{forces, integrator};
+
+            // Two orbits past the burn, so the result is an ORBIT and not a lucky
+            // instant: the elements are reported after a full revolution.
+            const auto t_end = approach.time + time::Duration::seconds(burn.period * 2.0);
+            propagation::Trajectory captured_arc;
+            const auto captured = navigation::run_mission(propagator, executor, initial, t0,
+                                                          t_end, &captured_arc);
+
+            std::cout << "\n" << captured.describe_burns() << "\n";
+            if (!captured.ok()) {
+                std::cout << "propagation stopped: " << propagation::to_string(captured.status)
+                          << " -- " << captured.message << "\n";
+            }
+
+            const auto moon_final = ctx.provider->state(target, captured.time, ssb);
+            coordinates::StateVector relative_state{};
+            relative_state.position = captured.state.state.position - moon_final.state.position;
+            relative_state.velocity = captured.state.state.velocity - moon_final.state.velocity;
+            const auto relative = trajectory::elements_from_state(relative_state, target_gm);
+
+            std::cout << "\norbit about " << target.name() << ", one revolution after the burn:\n"
+                      << "  periapsis      : " << fmt(relative.periapsis_radius / 1000.0, 10)
+                      << " km  (altitude "
+                      << fmt((relative.periapsis_radius - target_radius) / 1000.0, 8) << " km)\n"
+                      << "  apoapsis       : " << fmt(relative.apoapsis_radius / 1000.0, 10)
+                      << " km  (altitude "
+                      << fmt((relative.apoapsis_radius - target_radius) / 1000.0, 8) << " km)\n"
+                      << "  eccentricity   : " << fmt(relative.eccentricity, 10) << "\n"
+                      << "  inclination    : " << fmt(units::rad_to_deg(relative.inclination), 8)
+                      << " deg\n"
+                      << "  period         : " << fmt(relative.period / 60.0, 8) << " min\n"
+                      << "  propellant left: " << fmt(captured.state.mass -
+                                                      scenario.craft->dry_mass(), 10) << " kg\n";
+            if (relative.eccentricity < 1.0) {
+                std::cout << "\nCAPTURED: the orbit is closed about " << target.name() << ".\n";
+            } else {
+                std::cout << "\nNOT captured: still hyperbolic (e = "
+                          << fmt(relative.eccentricity, 6) << ").\n";
+            }
+        }
+    }
 
     if (const auto csv = args.option("csv"); csv.has_value()) {
         std::ofstream out{*csv};

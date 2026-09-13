@@ -27,6 +27,7 @@ add_library(spaceflight_core STATIC
     propulsion/engine.cpp
     propulsion/main_engine_force.cpp
     spacecraft/spacecraft.cpp
+    navigation/b_plane.cpp
     navigation/maneuver.cpp
     navigation/maneuver_executor.cpp
     navigation/mission.cpp
