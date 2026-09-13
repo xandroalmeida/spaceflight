@@ -1,5 +1,6 @@
 #include "sky_node.hpp"
 
+#include "core/relativity/optics.hpp"
 #include "core/render/blackbody.hpp"
 #include "core/units/constants.hpp"
 
@@ -68,6 +69,8 @@ void SpaceflightSky::_bind_methods() {
     godot::ClassDB::bind_method(D_METHOD("get_diagnostics"), &SpaceflightSky::get_diagnostics);
     godot::ClassDB::bind_method(D_METHOD("get_diagnostics_at", "beta"),
                                 &SpaceflightSky::get_diagnostics_at);
+    godot::ClassDB::bind_method(D_METHOD("get_doppler_in_direction", "to_source"),
+                                &SpaceflightSky::get_doppler_in_direction);
 }
 
 bool SpaceflightSky::load_catalogue(const godot::String& path) {
@@ -213,6 +216,14 @@ godot::Dictionary to_dictionary(const sf::render::SkyDiagnostics& d, std::size_t
 }
 
 }  // namespace
+
+double SpaceflightSky::get_doppler_in_direction(const godot::Vector3& to_source) const {
+    const sf::math::Vec3 direction{to_source.x, to_source.y, to_source.z};
+    if (direction.norm_squared() <= 0.0) {
+        return 1.0;
+    }
+    return sf::relativity::doppler_factor_to_source(direction, beta_);
+}
 
 godot::Dictionary SpaceflightSky::get_diagnostics() const {
     if (sky_ == nullptr) {

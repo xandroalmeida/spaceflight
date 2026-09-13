@@ -58,6 +58,21 @@ const MAGNITUDE_LIMIT := 7.96
 ## so that the aft sky can be hunted for after it goes out.
 const EXPOSURE_LEVELS := [0.0158, 0.0501, 0.1585, 0.5012, 1.5849]
 
+## Free look. WASD and not IJKL because L is already the light-time toggle, and
+## `L` for light is worth more than `L` for a camera axis.
+const LOOK_SPEED_KEY := 1.4          ## rad/s while a key is held
+const LOOK_SPEED_MOUSE := 0.0035     ## rad per pixel of mouse travel
+## Pitch stops just short of vertical. This is an INPUT limit on a camera angle,
+## not a physical bound -- the distinction rule 13 is about. Past 90 degrees the
+## up vector flips and the controls invert under the player's hands, which is a
+## usability failure and not a statement about the world.
+const LOOK_PITCH_LIMIT := 1.5533     ## 89 degrees
+
+## Where the camera points before the free-look offsets are added.
+## "chase" is the Milestone 2 behaviour; the other two are the comparison this
+## milestone exists for -- the forward cone against the sky that went out.
+const LOOK_MODES := ["chase", "prograde", "retrograde"]
+
 var simulation: SpaceflightSimulation
 var camera: Camera3D
 var readout: Label
@@ -73,6 +88,10 @@ var warp_index := 0
 var exaggeration_index := 0
 var exposure_index := 2
 var show_apparent := true
+var look_yaw := 0.0
+var look_pitch := 0.0
+var look_mode := 0
+var _mouse_look := false
 ## Headless printing is counted in FRAMES, not wall seconds. `--quit-after N` is
 ## a frame count, so gating the print on elapsed real time made the verification
 ## depend on how fast the machine happened to be: at 143 fps the old 1-second
@@ -328,6 +347,7 @@ func _process(delta: float) -> void:
 		return
 
 	_apply_manual_rcs()
+	_apply_free_look(delta)
 
 	# The frame rate decides how much coordinate time to ask for. It never
 	# reaches the integrator, which picks its own steps (rule 21).
@@ -449,11 +469,15 @@ func _place_camera() -> void:
 	## camera OUTWARD (away from the planet) and using that outward direction as
 	## "up" puts the planet in the lower part of the screen, where it belongs,
 	## with the horizon visible above it.
+	##
+	## The free look is applied on top, in _aim_camera, and is a pure OFFSET: the
+	## base orientation is rebuilt from scratch every frame, so yaw and pitch never
+	## accumulate drift and "recentre" is just setting them back to zero.
 	if focus_index >= 0:
 		var body_target := body_meshes[focus_index].position
 		var body_distance := maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
 		camera.position = body_target + Vector3(0.0, body_distance * 0.35, body_distance)
-		camera.look_at(body_target, Vector3.UP)
+		_aim_camera(body_target - camera.position, Vector3.UP)
 		return
 
 	var target := ship_mesh.position
@@ -467,7 +491,92 @@ func _place_camera() -> void:
 		back = Vector3.BACK
 
 	camera.position = target + outward * (CHASE_DISTANCE * 0.5) + back * CHASE_DISTANCE
-	camera.look_at(target, outward)
+	_aim_camera(target - camera.position, outward)
+
+
+func _base_look_direction(chase_direction: Vector3) -> Vector3:
+	## Prograde and retrograde are not a convenience: they are the two views the
+	## optics differ most between, and flipping between them is the whole
+	## demonstration. Neither touches the ship -- the ATTITUDE is still wherever
+	## the RCS put it, and turning the camera is not a manoeuvre.
+	##
+	## Along the BARYCENTRIC velocity, because that is the axis the sky is
+	## aberrated about -- the stars are at rest in that frame, not in the Earth's.
+	## Locking to the cockpit's prograde would point the camera 30 degrees off the
+	## cone it is meant to be showing.
+	var axis := Vector3(simulation.get_beta_vector()).normalized()
+	if axis.length() < 0.5:
+		return chase_direction
+	match LOOK_MODES[look_mode]:
+		"prograde": return axis
+		"retrograde": return -axis
+		_: return chase_direction
+
+
+func _aim_camera(chase_direction: Vector3, up: Vector3) -> void:
+	var forward := _base_look_direction(chase_direction)
+	if forward.length() < 1.0e-9:
+		return
+	forward = forward.normalized()
+
+	# look_at fails outright when the forward direction and the up hint are
+	# parallel -- which happens the moment you lock prograde while the camera's
+	# "up" is the outward radial and the ship is at the top of its orbit. Any
+	# perpendicular will do as a replacement; the free-look roll is zero anyway.
+	var hint := up.normalized() if up.length() > 0.0 else Vector3.UP
+	if absf(forward.dot(hint)) > 0.999:
+		hint = forward.cross(Vector3.RIGHT)
+		if hint.length() < 1.0e-6:
+			hint = forward.cross(Vector3.UP)
+		hint = hint.normalized()
+
+	camera.look_at(camera.position + forward, hint)
+	# Offsets last, in the camera's own axes, so yaw is always "turn left" and
+	# pitch is always "look up" no matter what the base orientation is.
+	camera.rotate_object_local(Vector3.UP, look_yaw)
+	camera.rotate_object_local(Vector3.RIGHT, look_pitch)
+
+
+func _apply_free_look(delta: float) -> void:
+	var step := LOOK_SPEED_KEY * delta
+	if Input.is_key_pressed(KEY_A):
+		look_yaw += step
+	if Input.is_key_pressed(KEY_D):
+		look_yaw -= step
+	if Input.is_key_pressed(KEY_W):
+		look_pitch += step
+	if Input.is_key_pressed(KEY_S):
+		look_pitch -= step
+	_settle_look()
+
+
+func _settle_look() -> void:
+	look_yaw = wrapf(look_yaw, -PI, PI)
+	look_pitch = clampf(look_pitch, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
+
+
+func _recentre_look() -> void:
+	look_yaw = 0.0
+	look_pitch = 0.0
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	## Hold the right mouse button to look. Captured rather than confined so that
+	## the pointer cannot run off the window mid-turn, and released the moment the
+	## button is -- a simulator that steals the cursor is a simulator you cannot
+	## quit.
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index == MOUSE_BUTTON_RIGHT:
+			_mouse_look = button.pressed
+			if DisplayServer.get_name() != "headless":
+				Input.mouse_mode = (Input.MOUSE_MODE_CAPTURED if _mouse_look
+					else Input.MOUSE_MODE_VISIBLE)
+	elif event is InputEventMouseMotion and _mouse_look:
+		var motion := event as InputEventMouseMotion
+		look_yaw -= motion.relative.x * LOOK_SPEED_MOUSE
+		look_pitch -= motion.relative.y * LOOK_SPEED_MOUSE
+		_settle_look()
 
 
 func _headless_warp_schedule(snapshot: Dictionary) -> void:
@@ -529,6 +638,35 @@ func _sky_lines() -> Array:
 			   String.num_scientific(d["reference_aft_visible"])],
 		"exposure       %.4f half-saturation flux" % sky.get_half_saturation(),
 		"light time     Moon %.4f s" % moon_light,
+	] + _look_lines(d)
+
+
+func _look_lines(d: Dictionary) -> Array:
+	## Where the camera points, and what it is pointing into. The angle is the
+	## camera's own geometry and is measured here; the Doppler factor is NOT --
+	## it comes from core/relativity/optics.hpp through the sky, because it is
+	## physics and this file does not do physics.
+	##
+	## This is what makes the free look an instrument: turn towards the velocity
+	## and D climbs to gamma(1+beta); turn away and it falls to gamma(1-beta),
+	## with the star field doing visibly what the number says.
+	##
+	## The angle is measured from the BARYCENTRIC velocity, not from prograde, and
+	## the difference is not pedantry: prograde in this cockpit is relative to the
+	## reference body (7.7 km/s around the Earth) while the sky is aberrated by the
+	## velocity in the frame the stars are at rest in (30.7 km/s, dominated by the
+	## Earth's own orbit). They point 30-odd degrees apart in LEO. Measuring the
+	## angle from one and the Doppler factor from the other put two different
+	## references on adjacent lines, which is how a readout lies without any number
+	## in it being wrong.
+	var forward := -camera.global_transform.basis.z
+	var axis := Vector3(simulation.get_beta_vector()).normalized()
+	var angle := rad_to_deg(forward.angle_to(axis)) if axis.length() > 0.5 else 0.0
+	var inside := "  INSIDE the forward cone" if angle <= float(d["forward_cone_deg"]) else ""
+	return [
+		"look           %s   %.1f deg off the aberration axis%s"
+			% [LOOK_MODES[look_mode], angle, inside],
+		"looking into   D = %.6f" % sky.get_doppler_in_direction(forward),
 		"",
 	]
 
@@ -616,6 +754,7 @@ func _update_readout() -> void:
 		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
 		"(M: engine mode IMPULSE <-> CRUISE)",
 		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
+		"(WASD or hold right mouse: look   V: chase/prograde/retrograde   H: recentre)",
 	])
 	readout.text = "\n".join(lines)
 
@@ -722,6 +861,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_set_throttle(1.0)
 			warp_index = WARP_LEVELS.size() - 1
 			simulation.set_time_warp(WARP_LEVELS[warp_index])
+		KEY_V:
+			look_mode = (look_mode + 1) % LOOK_MODES.size()
+			_recentre_look()
+		KEY_H: _recentre_look()
 		KEY_M: simulation.cycle_engine_mode()
 		KEY_Z: _set_throttle(1.0)
 		KEY_X: _set_throttle(0.0)

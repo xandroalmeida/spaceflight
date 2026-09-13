@@ -81,6 +81,17 @@ public:
     // exactly as it found them.
     godot::Dictionary get_diagnostics_at(const godot::Vector3& beta);
 
+    // The Doppler factor for one direction on the sky, at the beta of the last
+    // update_sky().  Exists so that a camera can report what it is pointing into
+    // -- turning the head becomes a measurement -- without GDScript ever
+    // computing gamma (1 - beta.n) itself.
+    //
+    // `to_source` is in SCENE axes, which are the coordinate frame's axes: the
+    // RenderTransform translates and scales and never rotates
+    // (docs/architecture/rendering.md section 2), so the camera's forward vector
+    // and beta are directly comparable.
+    double get_doppler_in_direction(const godot::Vector3& to_source) const;
+
 protected:
     static void _bind_methods();
 

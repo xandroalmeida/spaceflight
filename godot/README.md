@@ -171,10 +171,44 @@ acrescentou; a demonstração da queima precisa de mais.
 | `E` `Q` | exposição do céu (§10.4) |
 | `L` | tempo de luz + aberração: liga/desliga |
 | `C` | queima de cruzeiro: CRUZEIRO + prógrado + acelerador cheio + warp 10⁸ |
+| `W` `A` `S` `D`, ou botão direito do mouse | olhar em volta |
+| `V` | trava da câmera: perseguição → prógrado → retrógrado |
+| `H` | recentra o olhar |
 
 `L` desliga a **ótica**, não a física. O estado é bit a bit o mesmo dos dois
 lados; o que muda é qual pergunta o renderizador faz. É a forma mais rápida de
 ver quanto a Lua anda em 1,2 segundos-luz.
+
+### Olhar em volta é uma medição
+
+O `V` alterna entre as duas vistas em que a ótica mais difere, e o HUD diz o que
+a câmera está enquadrando:
+
+```
+look           prograde   0.0 deg off the aberration axis  INSIDE the forward cone
+looking into   D = 1.000101
+```
+
+```
+look           retrograde   180.0 deg off the aberration axis
+looking into   D = 0.999899
+```
+
+Os dois `D` multiplicados dão 1,000000 — a reciprocidade exata de
+`docs/physics/relativistic-rendering.md` §4, lida do HUD. O ângulo é geometria da
+câmera e é medido no `.gd`; o `D` **não** é: vem de `core/relativity/optics.hpp`
+pelo `SpaceflightSky.get_doppler_in_direction()`, porque é física.
+
+⚠️ O ângulo é medido a partir da **velocidade baricêntrica**, não do prógrado. Não
+é preciosismo: o prógrado do cockpit é relativo ao corpo de referência (7,7 km/s
+em torno da Terra) enquanto o céu é aberrado pela velocidade no referencial em
+que as estrelas estão paradas (30,7 km/s, dominada pela órbita da própria Terra).
+Em LEO os dois apontam a uns 30° de distância. A primeira versão desta linha
+media o ângulo de um e o `D` do outro — todos os números certos, e a leitura
+mentindo assim mesmo.
+
+Girar a câmera **não é manobra**: a atitude da nave continua onde o RCS a deixou,
+e nada no estado muda.
 
 ## A regra que esta pasta existe para respeitar
 
