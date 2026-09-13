@@ -1,0 +1,25 @@
+; Spaceflight -- Milestone 2.
+;
+; Nothing in this project computes physics.  It asks SpaceflightSimulation (the
+; GDExtension over spaceflight_core) for snapshots and draws them.  See
+; docs/architecture/rendering.md and ADR-0002.
+
+config_version=5
+
+[application]
+
+config/name="Spaceflight"
+config/description="Scientific Solar System flight simulator -- rendering front end"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.5", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1440
+window/size/viewport_height=900
+
+[rendering]
+
+; Distant bodies are drawn small and bright; keep the far plane generous but
+; finite, which is exactly why RenderTransform scales metres into scene units.
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2

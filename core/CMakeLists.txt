@@ -30,7 +30,9 @@ add_library(spaceflight_core STATIC
     propagation/propagator_report.cpp
     trajectory/lambert.cpp
     trajectory/orbital_elements.cpp
+    render/render_transform.cpp
     simulation/simulation_clock.cpp
+    simulation/snapshot.cpp
 )
 
 add_library(spaceflight::core ALIAS spaceflight_core)
@@ -39,8 +41,12 @@ add_library(spaceflight::core ALIAS spaceflight_core)
 # path in the #include line then matches the architecture diagram exactly.
 target_include_directories(spaceflight_core PUBLIC "${CMAKE_SOURCE_DIR}")
 
+# The warning set is PRIVATE: it governs how the core compiles ITSELF.  Making it
+# PUBLIC would push -Wold-style-cast and friends onto every consumer, including
+# the GDExtension, where godot-cpp's generated headers cannot survive it -- and a
+# third-party header drowning the log is how real warnings get ignored.
 target_link_libraries(spaceflight_core
-    PUBLIC  spaceflight::warnings
+    PRIVATE spaceflight::warnings
     PRIVATE spaceflight::cspice)
 
 target_compile_definitions(spaceflight_core PRIVATE

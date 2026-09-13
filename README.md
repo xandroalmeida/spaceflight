@@ -6,11 +6,12 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 1 concluído.** Núcleo científico, efemérides JPL, gravidade de
-N corpos com J₂, propagação com dense output, propulsão, planejamento e execução
-de manobras, Lambert e targeting diferencial. Sem gráficos, sem gameplay, sem
-relatividade. 18 suítes de teste, das quais 10 comparam resultados contra o JPL
-Horizons ou contra soluções analíticas fechadas.
+**Estado: Milestone 2 concluído.** Núcleo científico, efemérides JPL, gravidade de
+N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
+targeting diferencial, e a camada de renderização (snapshot, origem flutuante,
+GDExtension para o Godot 4.5). Sem gameplay, sem relatividade. 20 suítes de teste,
+das quais 10 comparam resultados contra o JPL Horizons ou contra soluções
+analíticas fechadas.
 
 ---
 
@@ -48,7 +49,8 @@ spaceflight/
 │   ├── architecture/
 │   │   ├── system-architecture.md     camadas, regra de dependência, fluxo de dados
 │   │   ├── coordinate-system.md       SSB/J2000, TDB, orçamento de erro do double
-│   │   └── navigation.md              planejar × executar, perda gravitacional, descontinuidades
+│   │   ├── navigation.md              planejar × executar, perda gravitacional, descontinuidades
+│   │   └── rendering.md               origem flutuante, double→float, o que a imagem ainda mente
 │   ├── physics/
 │   │   ├── gravity-model.md           N corpos pontuais, domínio de validade, o que falta
 │   │   ├── geopotential.md            J2: forma sem referencial girante, constantes, testes
@@ -77,7 +79,8 @@ spaceflight/
 │   ├── navigation/             manobras, executor, missão, planejador, targeting
 │   ├── config/                 leitor de JSON com comentários (ADR-0007)
 │   ├── spacecraft/             SpacecraftState
-│   ├── simulation/             SimulationClock (wall / coordinate / proper / render)
+│   ├── simulation/             SimulationClock, SimulationSnapshot
+│   ├── render/                 RenderTransform: absoluto → câmera → float
 │   ├── relativity/             Milestone 4  (vazio: precisa do documento antes)
 │   ├── attitude/               Milestone 3
 │   ├── autopilot/              Milestone 3
@@ -94,7 +97,9 @@ spaceflight/
 │   ├── regression/             valores fixados desta build
 │   └── scenarios/              cenários JSON para orbit-cli propagate
 │
-└── godot/                      Milestone 2 (vazio)
+└── godot/
+    ├── gdextension/            ponte C++ (godot-cpp); desligada por padrão
+    └── project/                projeto Godot 4.5: cena, câmera, HUD, starfield
 ```
 
 ## Decisões que não se rediscutem sem motivo técnico
@@ -124,7 +129,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 18
+100% tests passed, 0 tests failed out of 20
 ```
 
 Entre outras coisas:
@@ -153,7 +158,10 @@ Entre outras coisas:
 * uma transferência de Hohmann LEO→GEO executada com duas queimas chega em órbita
   circular com `e = 4,9·10⁻⁶`;
 * Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
-  diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**.
+  diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**;
+* sem origem flutuante, 1 km de movimento a 1 UA **desaparece** no `float` (a
+  resolução lá é 17,8 km); com a câmera a 100 m da nave, 1 mm sobrevive — e a
+  escala de cena não muda nada disso, porque o `float` tem precisão relativa.
 
 Toda tolerância acima tem origem declarada em `docs/validation/tolerances.md`.
 
@@ -168,8 +176,21 @@ Toda tolerância acima tem origem declarada em `docs/validation/tolerances.md`.
 | escapar da Terra | `orbit-cli propagate tests/scenarios/earth-escape.json` — energia cruza zero |
 | interceptar região da Lua | `orbit-cli intercept tests/scenarios/lunar-intercept.json --to Moon --tof 4.5` |
 
+## Godot (Milestone 2)
+
+```bash
+./scripts/fetch_godot_cpp.sh
+cmake -S . -B build-godot -DSPACEFLIGHT_BUILD_GODOT=ON
+cmake --build build-godot --target spaceflight_gdextension -j
+# abra godot/project/ com o Godot 4.5 estável
+```
+
+A extensão é **desligada por padrão**, e isso é o teste: o core e as 20 suítes
+compilam e passam sem nenhum engine instalado. Detalhes e controles em
+`godot/README.md`.
+
 ## Próximo
 
-Milestone 2: Godot como consumidor de snapshots — câmera externa, Terra, Lua,
-nave, starfield, floating origin, time warp. O core já entrega tudo de que ele
-precisa (`Trajectory::state_at` em qualquer instante, sem forçar o passo).
+Milestone 3: cockpit. Os instrumentos do §25 já saem prontos do
+`SimulationSnapshot` — o que falta é atitude (quaternions, RCS, momento de
+inércia), que é pré-requisito dos modos de piloto automático do §28.

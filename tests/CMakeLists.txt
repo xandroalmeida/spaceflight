@@ -30,9 +30,11 @@ spaceflight_add_test(unit simulation_clock)
 spaceflight_add_test(unit engine)
 spaceflight_add_test(unit maneuver_plan)
 spaceflight_add_test(unit targeting)
+spaceflight_add_test(unit render_transform)
 
 spaceflight_add_test(integration spice_kernels)
 spaceflight_add_test(integration time_conversion)
+spaceflight_add_test(integration snapshot)
 
 spaceflight_add_test(scientific spice_positions)
 spaceflight_add_test(scientific two_body)

@@ -177,7 +177,25 @@ O passo de diferença finita **é** uma tolerância, e foi medido em vez de
 escolhido: 0,5 m/s estagna em 36 km, 0,1 m/s em 155 km, 10⁻³ m/s converge em
 3,5 km (`docs/physics/lambert.md` §6).
 
-### 3.9 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.9 Renderização (`tests/unit/test_render_transform.cpp`, `tests/integration/test_snapshot.cpp`)
+
+Aqui as tolerâncias não medem erro: elas **demonstram a falha que o desenho evita**.
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| resolução a 1 UA, câmera no baricentro | 17 833 m | — | `distância · ε_float`; 1 km de movimento **desaparece** |
+| resolução a 100 m da câmera | 1,19·10⁻⁵ m | — | mesma fórmula; 1 mm sobrevive |
+| independência da escala | idêntica em 10⁻³, 10⁻⁷, 10⁻¹² | 10⁻¹⁵ rel | `float` tem precisão *relativa* |
+| ida e volta da projeção | ≤ 1 ulp | 2× resolução | a conversão perde exatamente o que o `float` não guarda |
+| vetor independe da origem | 0 | igualdade exata | velocidade não se translada |
+| `γ − 1` a 30 km/s | 1,3·10⁻⁸ rel | 10⁻⁷ rel | truncamento 7,5·10⁻⁹ **mais** cancelamento de `γ − 1` a 4,4·10⁻⁸ |
+
+O último é a mesma armadilha de `relativity-roadmap.md` §3.1 vista pelo outro
+lado: lá `γ` calculado a partir de `v` perde dígitos quando `β → 1`; aqui
+`γ − 1` os perde quando `β → 0`. Um mostrador que precise de `γ − 1` em baixa
+velocidade tem de calcular `β²/2` diretamente, não subtrair.
+
+### 3.10 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|
