@@ -87,16 +87,27 @@ const ZOOM_MIN := 0.15
 const ZOOM_MAX := 40.0
 
 ## Where the camera SITS before the free-look offsets are added, as an azimuth
-## about the velocity axis. "chase" is the Milestone 2 view; the other two are
-## the comparison this milestone exists for -- the forward cone against the sky
-## that went out.
+## and elevation on a sphere around the focus. Azimuth 0 puts the camera on the
+## frame's forward axis (so it looks BACK along it) and 180 puts it behind (so it
+## looks FORWARD along it).
+## Each mode carries its own FRAME, and that is the whole point of there being
+## modes at all:
 ##
-## Azimuth is measured from the velocity: 0 puts the camera AHEAD of the ship
-## looking back down the aft sky, 180 puts it behind looking into the forward
-## cone.
-const LOOK_MODES := ["chase", "prograde", "retrograde"]
+##   ship       the hull's own axes. Azimuth 180 is directly behind the tail and 0
+##              is nose-on, so orbiting goes round the ship the way a hand turns
+##              an object. This is what you want to look AT the ship.
+##   prograde   the velocity axis, outward radial as up. Azimuth 180 puts the
+##              camera behind, looking into the forward cone.
+##   retrograde the same frame, azimuth 0: ahead of the ship, looking down the sky
+##              that went dark.
+##
+## The first version used the velocity frame for all three, and it could not get
+## behind the ship at all: with the hull 70 degrees off prograde, sweeping azimuth
+## traced a circle that reached 138 degrees from the nose and stopped -- a rear
+## quarter, never the tail. Measured, not guessed.
+const LOOK_MODES := ["ship", "prograde", "retrograde"]
 const LOOK_MODE_AZIMUTH := [PI, PI, 0.0]
-const LOOK_MODE_ELEVATION := [0.4363, 0.0, 0.0]   ## 25 deg for chase, 0 for the two locks
+const LOOK_MODE_ELEVATION := [0.3491, 0.0, 0.0]   ## 20 deg above the hull, 0 for the locks
 
 var simulation: SpaceflightSimulation
 var camera: Camera3D
@@ -115,8 +126,11 @@ var exposure_index := 2
 var show_apparent := true
 var look_yaw := 0.0
 var look_pitch := 0.0
-var orbit_azimuth := PI
-var orbit_elevation := 0.4363
+## Initialised to the "ship" preset, not to numbers that merely look like it: a
+## HUD that opens reading `free` because the defaults drifted from the preset is
+## the same class of lie as the label that kept saying `prograde`.
+var orbit_azimuth: float = LOOK_MODE_AZIMUTH[0]
+var orbit_elevation: float = LOOK_MODE_ELEVATION[0]
 var orbit_zoom := 1.0
 var look_mode := 0
 var _mouse_drag := false
@@ -503,14 +517,9 @@ func _place_camera() -> void:
 		target = body_meshes[focus_index].position
 		natural = maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
 
-	# The orbit frame. `forward` is the axis the sky is aberrated about; `up` is
-	# outward from the reference body, so elevation is "climb away from the
-	# planet" and the horizon stays where the eye expects it.
-	var forward := Vector3(simulation.get_beta_vector()).normalized()
-	if forward.length() < 0.5:
-		forward = Vector3.FORWARD
-	var nadir := _reference_body_position() - target
-	var up := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
+	var frame := _orbit_frame(target)
+	var forward: Vector3 = frame[0]
+	var up: Vector3 = frame[1]
 	var right := forward.cross(up)
 	if right.length() < 1.0e-6:
 		# Looking along the radial: any perpendicular will do, and the choice only
@@ -527,6 +536,27 @@ func _place_camera() -> void:
 
 	camera.position = target + offset * (natural * orbit_zoom)
 	_aim_camera(target - camera.position, up)
+
+
+func _orbit_frame(target: Vector3) -> Array:
+	## Returns [forward, up]; the caller builds `right` from them, so the handedness
+	## lives in one place.
+	if LOOK_MODES[look_mode] == "ship" and focus_index < 0:
+		# The hull's own axes. get_spacecraft_basis() is orthonormal (it comes from
+		# the attitude quaternion, ADR-0008) and x is the nose, which is why the
+		# ship mesh is elongated along x in the first place.
+		var hull := simulation.get_spacecraft_basis()
+		return [hull.x.normalized(), hull.y.normalized()]
+
+	# The velocity frame: `forward` is the axis the sky is aberrated about and `up`
+	# is outward from the reference body, so elevation is "climb away from the
+	# planet" and the horizon stays where the eye expects it.
+	var forward := Vector3(simulation.get_beta_vector()).normalized()
+	if forward.length() < 0.5:
+		forward = Vector3.FORWARD
+	var nadir := _reference_body_position() - target
+	var up := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
+	return [forward, up]
 
 
 func _aim_camera(to_target: Vector3, up: Vector3) -> void:
@@ -829,7 +859,7 @@ func _update_readout() -> void:
 		"(M: engine mode IMPULSE <-> CRUISE)",
 		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
 		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
-		"(V: chase/prograde/retrograde   H: recentre)",
+		"(V: ship/prograde/retrograde frame   H: recentre)",
 	])
 	readout.text = "\n".join(lines)
 

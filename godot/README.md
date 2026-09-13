@@ -191,8 +191,31 @@ perguntas diferentes:
 * **girar no lugar** deixa o alvo para trás e aponta para o vazio. Fica sob
   `Shift`, porque é a exceção.
 
-A órbita é parametrizada num referencial construído a partir da **velocidade**, e
-não dos eixos do mundo — é isso que faz o azimute significar alguma coisa aqui:
+A órbita é parametrizada num referencial, e o `V` escolhe **qual** — porque há
+duas perguntas diferentes e elas querem eixos diferentes.
+
+**`ship`: os eixos do próprio casco.** Para olhar *a nave*. Azimute 180° é
+exatamente atrás da cauda, 0° é de frente no nariz, e orbitar gira o objeto na
+mão. Medido:
+
+| azimute, elevação | ângulo em relação ao nariz | vista |
+|---|---|---|
+| 0°, 0° | 0,0° | de frente, no nariz |
+| **180°, 0°** | **180,0°** | **atrás, na cauda** |
+| 90°, 0° | 90,0° | de través |
+| 0°, 89° | 89,0° | de cima |
+| 180°, 20° | 160,0° | atrás e acima — o padrão |
+
+⚠️ A primeira versão usava o referencial da **velocidade** para os três modos, e
+com isso *não dava para chegar atrás da nave*. Com o casco a ~70° do prógrado,
+varrer o azimute traçava um círculo que chegava a 138° do nariz e parava: um
+três-quartos traseiro, nunca a cauda. Isso foi **medido**, varrendo o azimute e
+registrando o ângulo câmera–nariz, não deduzido — e a varredura também mostrou
+que a posição era perfeitamente contínua, o que descartou a hipótese óbvia de
+que fosse um salto de gimbal.
+
+**`prograde` / `retrograde`: o eixo da velocidade**, com o radial para fora como
+"cima". Para olhar *o céu*:
 
 | azimute | onde a câmera fica | para onde se olha |
 |---|---|---|
