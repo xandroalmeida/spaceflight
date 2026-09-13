@@ -282,6 +282,22 @@ func _process(delta: float) -> void:
 const MANUAL_TORQUE := 400.0   ## N m, about what the modelled RCS can deliver
 
 
+func _format_duration(seconds: float) -> String:
+	## A cruise burn lasts years and an impulse burn lasts minutes; one unit
+	## cannot show both. Seconds are useless at 2.5e8 and years are useless at 40.
+	if seconds <= 0.0:
+		return "--"
+	if seconds < 120.0:
+		return "%.1f s" % seconds
+	if seconds < 7200.0:
+		return "%.1f min" % (seconds / 60.0)
+	if seconds < 172800.0:
+		return "%.2f h" % (seconds / 3600.0)
+	if seconds < 3.15576e7:
+		return "%.2f d" % (seconds / 86400.0)
+	return "%.3f yr" % (seconds / 3.15576e7)
+
+
 func _set_throttle(value: float) -> void:
 	## The throttle is changed BETWEEN frames, never inside a propagation step:
 	## opening it mid-step would be a discontinuity in the derivative, which is
@@ -393,6 +409,7 @@ func _update_readout() -> void:
 		"",
 		"mass           %.1f kg" % s["mass_kg"],
 		"propellant     %.3f kg" % s["propellant_kg"],
+		"flow           %s kg/s   endurance %s" % [String.num_scientific(s["mass_flow_kg_s"]), _format_duration(s["endurance_s"])],
 		"engine         %s   w = %.3f c" % [s["engine_mode"], s["exhaust_velocity_c"]],
 		"throttle       %.0f %%      thrust %.1f N" % [s["throttle"] * 100.0, s["thrust_n"]],
 		"delta-v left   %s m/s" % String.num_scientific(s["delta_v_budget_ms"]),

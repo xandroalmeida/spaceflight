@@ -88,8 +88,11 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     // mass_flow_rate is -q; thrust = q * v_eff in the Newtonian limit.
     craft.thrust = force.proper_thrust.norm();
 
+    craft.mass_flow = -force.mass_flow_rate;
+
     if (dry_mass_ > 0.0) {
         craft.propellant = std::max(0.0, state.mass - dry_mass_);
+        craft.endurance = craft.mass_flow > 0.0 ? craft.propellant / craft.mass_flow : 0.0;
         craft.delta_v_budget =
             craft.propellant > 0.0 && effective_exhaust_velocity_ > 0.0
                 ? effective_exhaust_velocity_ * std::log(state.mass / dry_mass_)

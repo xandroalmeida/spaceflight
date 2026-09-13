@@ -59,6 +59,13 @@ struct SpacecraftSnapshot {
     double thrust_along_track{0.0};
     double specific_energy_rate{0.0};
 
+    // Consumption, and how long it can go on. A high-Isp mode burns so slowly
+    // that a mass readout looks frozen -- 298x slower than the high-thrust mode
+    // means the third decimal of 19 tonnes moves once every 13 seconds. The rate
+    // and the endurance say in one glance what the mass takes minutes to reveal.
+    double mass_flow{0.0};       // [kg/s], positive = consuming
+    double endurance{0.0};       // [s] until the tank is dry at this setting
+
     // Relative to the body the display is centred on.
     celestial::BodyId reference{};
     math::Vec3 relative_position{};
