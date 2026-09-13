@@ -96,6 +96,19 @@ sofre cancelamento catastrófico quando `β → 1`: em `β = 0,999999`, `1 − �
 mantida em qualquer `β`. Esse é o mesmo motivo pelo qual códigos de plasma
 relativístico (PIC) guardam `u` e não `v`.
 
+**O espelho em baixa velocidade.** A mesma armadilha existe na outra ponta, e já
+nos mordeu no Milestone 2: `γ − 1` calculado subtraindo 1 de `γ` perde sete
+dígitos a 30 km/s e devolve **exatamente zero** a 1 m/s, porque `1 + 5,6·10⁻¹⁸`
+arredonda para 1. A forma sem cancelamento é
+
+```
+γ − 1 = β² / ( s (1 + s) ),        s = √(1 − β²)
+```
+
+válida em todo `0 ≤ β < 1`. `SimulationSnapshot` expõe
+`lorentz_factor_minus_one` calculado assim; ver `docs/validation/tolerances.md`
+§3.9.
+
 **Razão física.** `p = m₀u` é o que a força integra: `dp/dt = F`. Integrar `u` é
 integrar a lei de Newton na sua forma relativisticamente correta.
 

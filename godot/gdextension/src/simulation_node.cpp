@@ -293,6 +293,9 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
 
     out["beta"] = craft.beta;
     out["lorentz_factor"] = craft.lorentz_factor;
+    // The cockpit wants gamma - 1, and must NOT compute it by subtracting: at
+    // orbital speeds that throws away seven digits (core/simulation/snapshot.hpp).
+    out["lorentz_factor_minus_one"] = craft.lorentz_factor_minus_one;
 
     // Diagnostic the renderer should surface when something looks like it is
     // jittering: metres per float ulp at the ship's current render distance.

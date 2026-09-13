@@ -59,10 +59,22 @@ struct SpacecraftSnapshot {
     double target_distance{0.0};
     double target_relative_speed{0.0};
 
-    // Relativity readouts.  Exactly 0 and 1 in the Newtonian regime -- present
-    // from the start so that Milestone 4 changes the physics, not the contract.
+    // Relativity readouts.  Newtonian values today -- present from the start so
+    // that Milestone 4 changes the physics, not the contract.
     double beta{0.0};
     double lorentz_factor{1.0};
+
+    // gamma - 1, computed WITHOUT subtracting. At orbital speeds gamma is
+    // 1.000000005, and taking the difference from 1 leaves ~5e-9 carrying the
+    // absolute error of a number near 1 (2.2e-16), i.e. 4.4e-8 relative: seven
+    // digits gone. The identity
+    //
+    //     gamma - 1 = beta^2 / (s (1 + s)),      s = sqrt(1 - beta^2)
+    //
+    // has no cancellation anywhere in 0 <= beta < 1, and reduces to beta^2/2 as
+    // beta -> 0. This is the low-speed mirror of the trap that makes
+    // docs/physics/relativity-roadmap.md section 3.1 store u = gamma*v instead of v.
+    double lorentz_factor_minus_one{0.0};
     time::Duration proper_time{};
 };
 

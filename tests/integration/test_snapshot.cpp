@@ -9,6 +9,7 @@
 #include "tests/support/test_harness.hpp"
 
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <vector>
 
@@ -126,6 +127,16 @@ TEST(the_relativity_readouts_are_present_and_newtonian) {
     CHECK_NEAR_REL(snapshot.spacecraft.beta, 3.0e4 / units::c, 1.0e-15,
                    "beta = v/c with the speed the state carries");
     const double beta = 3.0e4 / units::c;
+
+    // The readout the cockpit must use: computed without ever forming gamma - 1.
+    CHECK_NEAR_REL(snapshot.spacecraft.lorentz_factor_minus_one, 0.5 * beta * beta, 1.0e-8,
+                   "gamma - 1 = beta^2/(s(1+s)) with s = sqrt(1-beta^2) has no cancellation, so "
+                   "the only residual against the series beta^2/2 is the series' own next term, "
+                   "3 beta^4/8, which is 7.5e-9 relative at beta = 1.00069e-4. The 1e-8 bound is "
+                   "that truncation and nothing else -- compare the naive form below, which is "
+                   "four times worse for a reason that has nothing to do with physics");
+
+    // And the naive form, kept as a measurement rather than a claim.
     CHECK_NEAR_REL(snapshot.spacecraft.lorentz_factor - 1.0, 0.5 * beta * beta, 1.0e-7,
                    "Two effects, and the smaller one is the physics. (1) Truncation: "
                    "gamma - 1 = beta^2/2 + 3 beta^4/8 + ..., and at beta = 1.00069e-4 the second "
@@ -135,8 +146,42 @@ TEST(the_relativity_readouts_are_present_and_newtonian) {
                    "answer. Measured: 1.3e-8. This is the same trap that "
                    "docs/physics/relativity-roadmap.md section 3.1 describes from the other end -- "
                    "there, gamma computed from v loses digits as beta -> 1; here, gamma - 1 loses "
-                   "them as beta -> 0. A cockpit that needs gamma - 1 at low speed must compute it "
-                   "as beta^2/2 directly, not by subtracting");
+                   "them as beta -> 0. A cockpit that needs gamma - 1 at low speed must read "
+                   "lorentz_factor_minus_one, which is why that field exists");
+
+    std::ostringstream cancellation;
+    cancellation << std::setprecision(17)
+                 << "at 30 km/s   by subtraction " << snapshot.spacecraft.lorentz_factor - 1.0
+                 << "\n          without subtracting " << snapshot.spacecraft.lorentz_factor_minus_one
+                 << "\n          series beta^2/2     " << 0.5 * beta * beta;
+    INFO(cancellation.str());
+
+    // The two agree only to the precision the subtraction left behind.
+    CHECK(std::abs(snapshot.spacecraft.lorentz_factor_minus_one - 0.5 * beta * beta) <
+          std::abs((snapshot.spacecraft.lorentz_factor - 1.0) - 0.5 * beta * beta));
+
+    // At walking pace the subtraction does not merely lose digits: it returns
+    // exactly zero, because gamma is 1 + 5.6e-18 and the nearest double to that
+    // IS 1. The cockpit of a docking approach would read a Lorentz factor of
+    // precisely nothing.
+    propagation::PropagationState slow = state;
+    slow.state.velocity = Vec3{1.0, 0.0, 0.0};  // 1 m/s
+    const auto crawl = builder.build(slow, t0);
+    const double slow_beta = 1.0 / units::c;
+
+    std::ostringstream os_slow;
+    os_slow << std::setprecision(17) << "at 1 m/s     by subtraction "
+            << crawl.spacecraft.lorentz_factor - 1.0 << "\n          without subtracting "
+            << crawl.spacecraft.lorentz_factor_minus_one << "\n          series beta^2/2     "
+            << 0.5 * slow_beta * slow_beta;
+    INFO(os_slow.str());
+
+    CHECK_EQ(crawl.spacecraft.lorentz_factor - 1.0, 0.0);
+    CHECK_NEAR_REL(crawl.spacecraft.lorentz_factor_minus_one, 0.5 * slow_beta * slow_beta, 1.0e-15,
+                   "beta = 3.3e-9, so gamma - 1 = 5.6e-18. The subtraction cannot represent it at "
+                   "all -- 1 + 5.6e-18 rounds to exactly 1 -- while beta^2/(s(1+s)) computes it to "
+                   "full double precision, because no step of that expression ever adds a tiny "
+                   "number to a number near 1");
     CHECK(snapshot.spacecraft.lorentz_factor > 1.0);
 }
 

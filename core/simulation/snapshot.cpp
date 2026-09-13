@@ -31,7 +31,8 @@ std::string SimulationSnapshot::describe() const {
        << "  periapsis  " << spacecraft.elements.periapsis_radius << " m\n"
        << "  ecc / inc  " << spacecraft.elements.eccentricity << " / "
        << spacecraft.elements.inclination * 180.0 / units::pi << " deg\n"
-       << "  beta       " << spacecraft.beta << "   gamma " << spacecraft.lorentz_factor << "\n"
+       << "  beta       " << spacecraft.beta << "   gamma - 1 "
+       << spacecraft.lorentz_factor_minus_one << "\n"
        << "  proper dt  " << clock_difference.seconds() << " s\n"
        << "bodies: " << bodies.size();
     return os.str();
@@ -125,8 +126,12 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     // the barycentric speed -- the only frame-independent statement available
     // until Milestone 4 defines the observer properly.
     craft.beta = craft.speed / units::c;
-    craft.lorentz_factor =
-        craft.beta < 1.0 ? 1.0 / std::sqrt(1.0 - craft.beta * craft.beta) : 1.0;
+    if (craft.beta < 1.0) {
+        const double s = std::sqrt(1.0 - craft.beta * craft.beta);
+        craft.lorentz_factor = 1.0 / s;
+        // gamma - 1 without ever forming the difference; see the header.
+        craft.lorentz_factor_minus_one = (craft.beta * craft.beta) / (s * (1.0 + s));
+    }
 
     return snapshot;
 }

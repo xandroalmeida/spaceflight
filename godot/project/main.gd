@@ -217,7 +217,7 @@ func _update_readout() -> void:
 		"mass           %.1f kg" % s["mass_kg"],
 		"target         %s at %.0f km, %.1f m/s" % [s["target"], s["target_distance_m"] / 1000.0, s["target_relative_speed_ms"]],
 		"",
-		"beta           %.3e      gamma %.12f" % [s["beta"], s["lorentz_factor"]],
+		"beta           %.3e      gamma-1 %.6e" % [s["beta"], s["lorentz_factor_minus_one"]],
 		"render res.    %.3e m per float ulp" % s["render_resolution_m"],
 		"",
 		"focus: %s   (, . warp   F focus   R restart)" % ("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)),
