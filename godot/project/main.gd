@@ -37,6 +37,7 @@ const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]
 var simulation: SpaceflightSimulation
 var camera: Camera3D
 var readout: Label
+var hud_margin: MarginContainer
 var body_meshes: Array[MeshInstance3D] = []
 var ship_mesh: MeshInstance3D
 var warp_index := 0
@@ -130,12 +131,59 @@ func _build_scene() -> void:
 	camera.current = true
 	add_child(camera)
 
+	_build_hud()
+
+
+func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+
+	hud_margin = MarginContainer.new()
+	hud_margin.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	layer.add_child(hud_margin)
+
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.0, 0.0, 0.0, 0.55)
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+	hud_margin.add_child(panel)
+
 	readout = Label.new()
-	readout.position = Vector2(16, 12)
-	readout.add_theme_font_size_override("font_size", 13)
-	layer.add_child(readout)
+	# Monospaced on purpose: the readout is a table of aligned columns, and a
+	# proportional font turns it into ragged prose. SystemFont picks the first
+	# name the platform actually has.
+	var font := SystemFont.new()
+	font.font_names = PackedStringArray([
+		"Menlo", "SF Mono", "Monaco", "Consolas", "DejaVu Sans Mono", "monospace"])
+	readout.add_theme_font_override("font", font)
+	readout.add_theme_color_override("font_color", Color(0.88, 0.92, 1.0))
+	panel.add_child(readout)
+
+	_scale_hud()
+	get_viewport().size_changed.connect(_scale_hud)
+
+
+func _scale_hud() -> void:
+	## The HUD is sized from the viewport, not fixed in pixels: the same scene has
+	## to be readable in a small embedded game window and on a 4K display.
+	var height := get_viewport().get_visible_rect().size.y
+	if height <= 0.0:
+		height = 720.0
+
+	var font_size := int(clampf(roundf(height / 30.0), 16.0, 34.0))
+	readout.add_theme_font_size_override("font_size", font_size)
+
+	var margin := int(maxf(roundf(height * 0.018), 8.0))
+	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
+		hud_margin.add_theme_constant_override(side, margin)
 
 
 func _build_starfield() -> void:
