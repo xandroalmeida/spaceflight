@@ -38,6 +38,9 @@ add_library(spaceflight_core STATIC
     trajectory/lambert.cpp
     trajectory/orbital_elements.cpp
     render/render_transform.cpp
+    render/blackbody.cpp
+    render/star_catalog.cpp
+    render/relativistic_sky.cpp
     simulation/simulation_clock.cpp
     simulation/snapshot.cpp
 )
@@ -57,7 +60,8 @@ target_link_libraries(spaceflight_core
     PRIVATE spaceflight::cspice)
 
 target_compile_definitions(spaceflight_core PRIVATE
-    SPACEFLIGHT_DEFAULT_KERNEL_DIR="${SPACEFLIGHT_DEFAULT_KERNEL_DIR}")
+    SPACEFLIGHT_DEFAULT_KERNEL_DIR="${SPACEFLIGHT_DEFAULT_KERNEL_DIR}"
+    SPACEFLIGHT_DEFAULT_CATALOG_DIR="${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
 
 set_target_properties(spaceflight_core PROPERTIES
     CXX_STANDARD 20

@@ -6,13 +6,18 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 4 concluído.** Núcleo científico, efemérides JPL, gravidade de
+**Estado: Milestone 5 concluído.** Núcleo científico, efemérides JPL, gravidade de
 N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
-targeting diferencial, e a camada de renderização (snapshot, origem flutuante,
-GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, e o
-cockpit, propulsão relativística em espaço plano, e a óptica do Milestone 5 no
-núcleo. Sem gameplay. 24 suítes de teste, das quais 14 comparam resultados contra
-o JPL Horizons/SPICE ou contra soluções analíticas fechadas.
+targeting diferencial, a camada de renderização (snapshot, origem flutuante,
+GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, o
+cockpit, propulsão relativística em espaço plano, gravidade como geometria, e a
+renderização relativística inteira — tempo de trânsito da luz, aberração, Doppler
+e *beaming* limitado à banda visível, rotação de Terrell por vértice, e um céu de
+8 786 estrelas reais do Yale BSC5. Sem gameplay. 30 suítes de teste, das quais 16 estão na
+categoria `scientific` — a que `tests/CMakeLists.txt` define como *"does the
+answer match nature / an external reference?"* — comparando contra o JPL
+Horizons/SPICE, o REBOUNDx, o lugar planckiano da CIE, o Yale BSC5 ou soluções
+analíticas fechadas.
 
 ---
 
@@ -20,6 +25,7 @@ o JPL Horizons/SPICE ou contra soluções analíticas fechadas.
 
 ```bash
 ./scripts/fetch_kernels.sh          # ~33 MB de kernels SPICE (DE440)
+./scripts/fetch_star_catalog.sh     # 560 kB: Yale BSC5, o céu a olho nu
 cmake -S . -B build                 # baixa e compila o CSPICE na primeira vez
 cmake --build build -j
 ctest --test-dir build --output-on-failure
@@ -110,7 +116,8 @@ spaceflight/
 │
 └── godot/
     ├── gdextension/            ponte C++ (godot-cpp); desligada por padrão
-    └── project/                projeto Godot 4.5: cena, câmera, HUD, starfield
+    └── project/                projeto Godot 4.5: cena, câmera, HUD
+        └── shaders/            cor e brilho a partir de D; Terrell por vértice
 ```
 
 ## Decisões que não se rediscutem sem motivo técnico
@@ -287,13 +294,14 @@ Leitura completa em [`tools/validation/README.md`](tools/validation/README.md).
 
 ## Próximo
 
-A metade visual do Milestone 5: shaders de cor e brilho a partir do fator Doppler,
-starfield vindo de um catálogo real em vez de ruído, e o deslocamento por vértice
-que produz a rotação de Terrell **sozinha** — não como efeito, mas como
-consequência do tempo de trânsito aplicado ponto a ponto.
-
-Depois dela, o arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica
-atual joga fora vale 3,6·10⁻⁴, quatro ordens **acima** dos termos 1PN estáticos
-que ela mantém. Enquanto isso não existir, o modo `GeneralRelativistic` é honesto
-para trajetórias lentas perto de corpos girando e para trajetórias rápidas longe
+O arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica atual joga
+fora vale 3,6·10⁻⁴, quatro ordens **acima** dos termos 1PN estáticos que ela
+mantém. Enquanto isso não existir, o modo `GeneralRelativistic` é honesto para
+trajetórias lentas perto de corpos girando e para trajetórias rápidas longe
 deles — não para as duas ao mesmo tempo.
+
+Na imagem, o que ficou de fora está listado em
+[`docs/architecture/rendering.md`](docs/architecture/rendering.md) §6: a
+aberração ainda é rígida por corpo (o disco de um planeta não se distorce ao
+atravessar o mapa), a luz anda em linha reta mesmo perto do Sol, e as estrelas
+são corpos negros sem linhas espectrais.

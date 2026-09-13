@@ -21,7 +21,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${ROOT}/godot/project"
-FRAMES="${1:-200}"
+FRAMES="${1:-1200}"
 
 GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
 if [[ ! -x "${GODOT}" ]]; then

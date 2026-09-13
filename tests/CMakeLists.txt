@@ -20,7 +20,7 @@ function(spaceflight_add_test CATEGORY NAME)
     set_tests_properties("${CATEGORY}.${NAME}" PROPERTIES
         SKIP_RETURN_CODE 77
         LABELS "${CATEGORY}"
-        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR}")
+        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
 endfunction()
 
 spaceflight_add_test(unit vec3)
@@ -32,6 +32,7 @@ spaceflight_add_test(unit maneuver_plan)
 spaceflight_add_test(unit targeting)
 spaceflight_add_test(unit render_transform)
 spaceflight_add_test(unit quaternion)
+spaceflight_add_test(unit star_catalog)
 
 spaceflight_add_test(integration spice_kernels)
 spaceflight_add_test(integration time_conversion)
@@ -50,5 +51,8 @@ spaceflight_add_test(scientific relativistic_propulsion)
 spaceflight_add_test(scientific relativistic_optics)
 spaceflight_add_test(scientific relativistic_gravity)
 spaceflight_add_test(scientific spin_transport)
+spaceflight_add_test(scientific blackbody_colour)
+spaceflight_add_test(scientific terrell_rotation)
+spaceflight_add_test(scientific relativistic_sky)
 
 spaceflight_add_test(regression reference_states)

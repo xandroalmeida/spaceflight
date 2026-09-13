@@ -19,6 +19,10 @@ external/*.log
 kernels/spice/
 kernels/*.log
 
+# Star catalogue: data, fetched by scripts/fetch_star_catalog.sh
+catalogs/bsc5.*
+catalogs/SHA256SUMS
+
 # Built GDExtension: produced by the build, not versioned
 godot/project/bin/
 godot/project/.godot/

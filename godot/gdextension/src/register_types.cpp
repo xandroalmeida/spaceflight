@@ -1,7 +1,15 @@
-// GDExtension entry point.  Registers exactly one class; everything else the
-// project needs is scene-side (ADR-0002).
+// GDExtension entry point.  Registers two classes and nothing else; everything
+// the project needs beyond them is scene-side (ADR-0002).
+//
+//   SpaceflightSimulation  owns the state and hands out snapshots
+//   SpaceflightSky         owns a star catalogue and a colour table
+//
+// They are separate because they are separate concerns: the only thing that
+// passes between them is a velocity, and GDScript carries it without touching it
+// (docs/architecture/relativistic-shaders.md section 6).
 
 #include "simulation_node.hpp"
+#include "sky_node.hpp"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -16,6 +24,7 @@ void initialize_spaceflight_module(ModuleInitializationLevel level) {
         return;
     }
     GDREGISTER_CLASS(spaceflight_godot::SpaceflightSimulation);
+    GDREGISTER_CLASS(spaceflight_godot::SpaceflightSky);
 }
 
 void uninitialize_spaceflight_module(ModuleInitializationLevel level) {

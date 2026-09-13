@@ -75,6 +75,36 @@ public:
     godot::Vector3 get_spacecraft_position() const;
     godot::Vector3 get_spacecraft_velocity_direction() const;
 
+    // --- relativistic optics (Milestone 5) ---------------------------------
+    // The observer's velocity over c, in the coordinate frame.  Everything the
+    // sky needs, and the only physics that passes through GDScript -- which
+    // carries it and does not touch it
+    // (docs/architecture/relativistic-shaders.md section 6).
+    godot::Vector3 get_beta_vector() const;
+
+    // Where the body APPEARS: retarded by the light time against the real
+    // ephemeris, then aberrated into the ship's frame.  Distinct from
+    // get_body_position(), which is geometric, because they are different
+    // questions (docs/physics/relativistic-rendering.md section 2).
+    godot::Vector3 get_body_apparent_position(int index) const;
+    double get_body_light_time(int index) const;
+
+    // D = gamma (1 - beta.n) for the body centre.  The shader turns this into
+    // colour and brightness and never learns what beta is.
+    double get_body_doppler(int index) const;
+
+    // For the per-vertex retarded time in the vertex shader: the body's velocity
+    // relative to the observer and the speed of light, BOTH in scene units per
+    // second, so that the ratio survives the conversion to float.
+    godot::Vector3 get_body_relative_velocity_scene(int index) const;
+    double get_light_speed_scene() const;
+
+    // Turns light-time and aberration off, so that the difference is visible
+    // rather than argued about.  The STATE is untouched either way -- this
+    // switches which question the renderer asks, not what is true.
+    void set_apparent_positions_enabled(bool enabled);
+    bool get_apparent_positions_enabled() const;
+
     // --- attitude ----------------------------------------------------------
     // Godot's Quaternion is scalar LAST; the core's is scalar first (ADR-0008).
     // The reordering happens here and nowhere else.
@@ -132,6 +162,7 @@ private:
     std::unique_ptr<sf::propulsion::MainEngineForce> main_engine_;
 
     sf::propagation::PropagationState state_{};
+    bool apparent_positions_{true};
     sf::simulation::SimulationSnapshot snapshot_{};
     sf::render::RenderTransform transform_{1.0e-6};
 

@@ -1,7 +1,8 @@
 # Renderização: do estado à tela
 
-Status: camada de núcleo implementada (Milestone 2, metade científica)
+Status: implementado (Milestone 2); ótica relativística no Milestone 5
 Decisão de engine: ADR-0002
+Ótica: `docs/architecture/relativistic-shaders.md`, `docs/physics/relativistic-rendering.md`
 Última revisão: 2026-09-13
 
 ## 1. O problema, em números
@@ -138,20 +139,37 @@ O integrador continua escolhendo os próprios passos. A 144 Hz o interpolante é
 avaliado mais vezes e **nada mais muda** — nem a trajetória, nem o número de
 avaliações de força. Foi exatamente para isso que a ADR-0006 existe.
 
-## 6. O que ainda é falso na imagem
+## 6. O que era falso na imagem, e o que ainda é
 
-Honestidade sobre o que a projeção **não** faz, para que não seja descoberto como
-bug no Milestone 5:
+Esta seção era, do Milestone 2 ao 5, a lista de dívidas da imagem. O Milestone 5
+pagou as três primeiras; o registro fica porque a forma como foram pagas é a
+parte que importa.
 
-* **Posições são geométricas, não aparentes.** Vemos os corpos onde eles estão no
-  instante `t`, não onde a luz que chega agora saiu. A Lua está 1,28 s-luz de
-  distância; Júpiter, entre 33 e 53 minutos. O tempo de trânsito da luz, a
-  aberração, o Doppler e o *beaming* são o Milestone 5 e terão documento próprio
-  (`docs/physics/relativistic-rendering.md`).
-* **Não há contração de Lorentz.** E quando houver, não será escalando meshes
-  (§38) — a aparência de um objeto em movimento relativístico é dominada pela
-  rotação de Terrell, não pela contração.
-* **Sem atmosfera, sem iluminação física, sem eclipses.** Nada disso afeta a
+**Pago** (`docs/physics/relativistic-rendering.md`,
+`docs/architecture/relativistic-shaders.md`):
+
+* ~~Posições são geométricas, não aparentes.~~ Agora são aparentes: tempo de
+  trânsito resolvido contra a efeméride real (§2) e aberração exata (§3). A Lua
+  aparece 1,195 s-luz atrás de onde está; Júpiter, entre 33 e 53 minutos.
+* ~~Não há Doppler nem beaming.~~ `D` sai de `optics.hpp` na CPU e o shader o
+  transforma em cor (`T' = D·T`) e brilho (`D⁴`, corrigido para a banda visível,
+  §10). O céu à frente a `β = 0,9048` fica 51× mais brilhante — não 400×, que é o
+  número bolométrico.
+* ~~Não há contração de Lorentz.~~ Há, como **passo** dentro da transformação por
+  vértice, e não como resposta (§11.5). O que se vê é a rotação de Terrell,
+  `arcsin β`, que ninguém programou.
+* ~~O starfield é aleatório.~~ 8 786 estrelas reais do Yale BSC5 (§12).
+
+**Ainda falso**, e registrado aqui pelo mesmo motivo que os anteriores estiveram:
+
+* **Aberração rígida por corpo.** O disco de um planeta não se distorce ao
+  atravessar o mapa de aberração; só o centro se move. Irrelevante exceto num
+  sobrevoo rasante a `β` alto.
+* **Sem lente gravitacional nem atraso de Shapiro.** A luz anda em linha reta,
+  inclusive ao passar perto do Sol.
+* **Estrelas são corpos negros.** Não têm linhas espectrais, e o deslocamento de
+  uma linha não é deslocamento de temperatura.
+* **Sem extinção interestelar, sem atmosfera, sem eclipses.** Nada disso afeta a
   dinâmica; tudo isso afeta a imagem.
 
 ## 7. Limites da camada

@@ -44,6 +44,11 @@ include(warnings)
 set(SPACEFLIGHT_DEFAULT_KERNEL_DIR "${CMAKE_SOURCE_DIR}/kernels/spice"
     CACHE PATH "Default SPICE kernel directory compiled into the binaries")
 
+# Same policy for the star catalogue: data, fetched, not committed
+# (catalogs/MANIFEST.md).  Overridable at runtime by SPACEFLIGHT_CATALOG_DIR.
+set(SPACEFLIGHT_DEFAULT_CATALOG_DIR "${CMAKE_SOURCE_DIR}/catalogs"
+    CACHE PATH "Default star catalogue directory compiled into the binaries")
+
 add_subdirectory(core)
 
 if(SPACEFLIGHT_BUILD_TOOLS)
@@ -67,4 +72,5 @@ message(STATUS "  tests        : ${SPACEFLIGHT_BUILD_TESTS}")
 message(STATUS "  tools        : ${SPACEFLIGHT_BUILD_TOOLS}")
 message(STATUS "  godot        : ${SPACEFLIGHT_BUILD_GODOT}")
 message(STATUS "  kernels      : ${SPACEFLIGHT_DEFAULT_KERNEL_DIR}")
+message(STATUS "  catalogs     : ${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
 message(STATUS "")

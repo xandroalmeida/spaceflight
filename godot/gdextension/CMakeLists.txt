@@ -44,6 +44,7 @@ endif()
 add_library(spaceflight_gdextension SHARED
     src/register_types.cpp
     src/simulation_node.cpp
+    src/sky_node.cpp
 )
 
 target_include_directories(spaceflight_gdextension PRIVATE

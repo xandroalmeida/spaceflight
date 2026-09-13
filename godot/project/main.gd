@@ -6,6 +6,12 @@ extends Node3D
 ## labels -- and nothing else.  Every number on screen came out of a
 ## SimulationSnapshot; none of it was computed here.
 ##
+## Milestone 5 added the relativistic optics.  Note what this script does NOT do:
+## there is no gamma, no sqrt(1 - b*b), no pow(D, 4) anywhere below.  It carries
+## a velocity from the simulation to the sky and arrays from the sky to a mesh,
+## and every number it passes was computed in core/ (ADR-0002,
+## docs/architecture/relativistic-shaders.md section 6).
+##
 ## Controls:  , and .  change time warp     F  cycle focus     R  restart
 
 const ALTITUDE_M := 400_000.0
@@ -38,17 +44,45 @@ const SHIP_SIZE := 0.02
 ## frame and never the integration step (rule 21).
 const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1.0e6, 1.0e7, 1.0e8]
 
+## The star sphere sits inside the camera's far plane (2e5) and beyond the Sun at
+## 1.47e5, so the Sun still occludes it.
+const SKY_RADIUS := 1.9e5
+
+## BSC5 reaches V = 7.96, two magnitudes past the naked eye. Keeping all of it
+## costs nothing and the faint stars are what make the aberration legible: they
+## are the ones that sweep.
+const MAGNITUDE_LIMIT := 7.96
+
+## Exposure, in the sense of core/render/tone_response.hpp: the flux that reads
+## half scale. The default puts a magnitude 2 star at mid scale; E and Q step it
+## so that the aft sky can be hunted for after it goes out.
+const EXPOSURE_LEVELS := [0.0158, 0.0501, 0.1585, 0.5012, 1.5849]
+
 var simulation: SpaceflightSimulation
 var camera: Camera3D
 var readout: Label
 var hud_margin: MarginContainer
 var body_meshes: Array[MeshInstance3D] = []
 var ship_mesh: MeshInstance3D
+var sky: SpaceflightSky
+var star_mesh: MeshInstance3D
+var star_array_mesh: ArrayMesh
+var planck_texture: ImageTexture
+var body_materials: Array[ShaderMaterial] = []
 var warp_index := 0
 var exaggeration_index := 0
-var _headless_seconds := 0.0
+var exposure_index := 2
+var show_apparent := true
+## Headless printing is counted in FRAMES, not wall seconds. `--quit-after N` is
+## a frame count, so gating the print on elapsed real time made the verification
+## depend on how fast the machine happened to be: at 143 fps the old 1-second
+## threshold needed 143 frames, and `run_godot_headless.sh 200` printed once --
+## or, on a faster machine, not at all.
+const HEADLESS_PRINT_EVERY_FRAMES := 150
+var _headless_frames := 0
 var _headless_slew_commanded := false
 var _headless_burn_commanded := false
+var _headless_cruise_commanded := false
 var throttle := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
@@ -74,6 +108,18 @@ func _ready() -> void:
 	simulation.set_render_scale(RENDER_SCALE)
 	simulation.set_body_scale_exaggeration(BODY_EXAGGERATION)
 	simulation.set_time_warp(WARP_LEVELS[warp_index])
+
+	# The catalogue lives next to the kernels, outside the Godot project, for the
+	# same reason: it is fetched data (catalogs/MANIFEST.md).
+	sky = SpaceflightSky.new()
+	add_child(sky)
+	sky.set_magnitude_limit(MAGNITUDE_LIMIT)
+	sky.set_half_saturation(EXPOSURE_LEVELS[exposure_index])
+	var catalogue := ProjectSettings.globalize_path("res://").path_join("../../catalogs/bsc5.dat")
+	if not sky.load_catalogue(catalogue.simplify_path()):
+		# Not fatal: the sky goes dark and says why. The dynamics does not care.
+		push_warning("No star catalogue -- run scripts/fetch_star_catalog.sh. %s"
+			% sky.get_last_error())
 
 	_build_scene()
 
@@ -110,12 +156,24 @@ func _build_scene() -> void:
 		sphere.height = 2.0
 		mesh_instance.mesh = sphere
 
-		var material := StandardMaterial3D.new()
-		material.albedo_color = _colour_for(simulation.get_body_name(i))
+		# The relativistic shader, not a StandardMaterial3D: this is where the
+		# per-vertex light time lives, because it is per-vertex by definition.
+		var material := ShaderMaterial.new()
+		material.shader = load("res://shaders/relativistic_body.gdshader")
+		material.set_shader_parameter("reflectance", _colour_for(simulation.get_body_name(i)))
+		# The Sun emits its own black body; everything else reflects the Sun's.
+		material.set_shader_parameter("is_self_luminous",
+			simulation.get_body_name(i) == "Sun")
+		if planck_texture != null:
+			material.set_shader_parameter("planck_table", planck_texture)
+			material.set_shader_parameter("table_reference_temperature",
+				sky.get_planck_table_reference_temperature())
+		material.set_shader_parameter("light_speed_scene", simulation.get_light_speed_scene())
 		mesh_instance.material_override = material
 
 		add_child(mesh_instance)
 		body_meshes.append(mesh_instance)
+		body_materials.append(material)
 
 	ship_mesh = MeshInstance3D.new()
 	# Elongated along +x, the body's nose axis, so that the attitude is legible at
@@ -203,36 +261,55 @@ func _scale_hud() -> void:
 
 
 func _build_starfield() -> void:
-	## A crude fixed starfield: enough to tell that the camera is turning. Real
-	## star positions are a Milestone 5 concern, together with everything else
-	## that makes the sky physically honest.
-	var stars := MeshInstance3D.new()
-	var immediate := ImmediateMesh.new()
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.vertex_color_use_as_albedo = true
-	material.albedo_color = Color.WHITE
-	# PRIMITIVE_POINTS renders nothing at all without this.
-	material.use_point_size = true
-	material.point_size = 2.0
-	material.disable_receive_shadows = true
+	## 8786 real stars, drawn as points, coloured and dimmed by a shader that is
+	## handed the Doppler factor and never told what beta is.
+	##
+	## The mesh is rebuilt each frame because the CPU is what aberrates the sky
+	## (core/render/relativistic_sky.cpp). The alternative -- pass beta as a
+	## uniform and aberrate in the vertex shader -- would save the upload and move
+	## the physics into GLSL; the trade and its measured cost are
+	## docs/architecture/relativistic-shaders.md section 7.
+	star_mesh = MeshInstance3D.new()
+	star_array_mesh = ArrayMesh.new()
+	star_mesh.mesh = star_array_mesh
 
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 20260101
-	immediate.surface_begin(Mesh.PRIMITIVE_POINTS, material)
-	for i in range(2000):
-		var direction := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
-		var brightness := rng.randf_range(0.25, 1.0)
-		immediate.surface_set_color(Color(brightness, brightness, brightness))
-		# Inside the camera's far plane (2e5), and beyond the Sun at 1.47e5, so the
-		# Sun still occludes them. The first version put the stars at 5e5 -- past
-		# `far` -- and they were simply clipped away.
-		immediate.surface_add_vertex(direction * 1.9e5)
-	immediate.surface_end()
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/star_field.gdshader")
+	if sky != null and sky.is_ready():
+		# The colour table comes out of core/render/blackbody.hpp as an RGBAF
+		# image. Nearest-neighbour would band the Planck locus visibly; linear is
+		# what the C++ PlanckTable::sample_rgb reproduces, so the two agree.
+		planck_texture = ImageTexture.create_from_image(sky.get_planck_table_image())
+		material.set_shader_parameter("planck_table", planck_texture)
+		material.set_shader_parameter("table_reference_temperature",
+			sky.get_planck_table_reference_temperature())
+		material.set_shader_parameter("half_saturation", sky.get_half_saturation())
+	star_mesh.material_override = material
 
-	stars.mesh = immediate
-	stars.extra_cull_margin = 4.0e5
-	add_child(stars)
+	# The sky is rebuilt every frame and Godot cannot know its extent from an
+	# empty mesh, so say it: without this the whole field is frustum-culled the
+	# moment the camera turns.
+	star_mesh.custom_aabb = AABB(Vector3.ONE * -SKY_RADIUS * 1.1, Vector3.ONE * SKY_RADIUS * 2.2)
+	add_child(star_mesh)
+
+
+func _update_starfield() -> void:
+	if sky == null or not sky.is_ready():
+		return
+
+	# The only physics that passes through this script: a vector, carried.
+	sky.update_sky(simulation.get_beta_vector(), SKY_RADIUS)
+
+	var surface := sky.get_surface_arrays()
+	if surface.is_empty():
+		return
+
+	star_array_mesh.clear_surfaces()
+	# The format flag is what makes CUSTOM0 four FLOATS. Without it Godot packs it
+	# into four bytes, a temperature of 25944 K quantises to 1.0, every star comes
+	# out the same colour -- and nothing anywhere reports an error.
+	star_array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_POINTS, surface["arrays"],
+		[], {}, surface["format"])
 
 
 func _colour_for(name: String) -> Color:
@@ -264,11 +341,23 @@ func _process(delta: float) -> void:
 
 	for i in range(body_meshes.size()):
 		var mesh_instance := body_meshes[i]
-		mesh_instance.position = simulation.get_body_position(i)
+		# Where it APPEARS, not where it is: light time against the real ephemeris,
+		# then aberration. Both done in core/ (relativistic-rendering.md section 2).
+		mesh_instance.position = simulation.get_body_apparent_position(i)
 		var radius: float = simulation.get_body_radius(i)
 		mesh_instance.visible = radius > 0.0
 		if radius > 0.0:
 			mesh_instance.scale = Vector3.ONE * radius
+
+		var material := body_materials[i]
+		material.set_shader_parameter("doppler", simulation.get_body_doppler(i))
+		material.set_shader_parameter("relative_velocity_scene",
+			simulation.get_body_relative_velocity_scene(i))
+		material.set_shader_parameter("light_speed_scene", simulation.get_light_speed_scene())
+		material.set_shader_parameter("apply_light_time", show_apparent)
+		material.set_shader_parameter("half_saturation", EXPOSURE_LEVELS[exposure_index])
+
+	_update_starfield()
 
 	ship_mesh.position = simulation.get_spacecraft_position()
 	# The hull points where the attitude says it points -- not along the velocity,
@@ -276,6 +365,13 @@ func _process(delta: float) -> void:
 	ship_mesh.basis = simulation.get_spacecraft_basis()
 
 	_place_camera()
+	# After _place_camera, because the shader measures the retarded time from
+	# where the observer actually is, and the camera moved this frame.
+	for material in body_materials:
+		material.set_shader_parameter("observer_position_scene", camera.position)
+	if star_mesh != null and star_mesh.material_override is ShaderMaterial:
+		(star_mesh.material_override as ShaderMaterial).set_shader_parameter(
+			"half_saturation", EXPOSURE_LEVELS[exposure_index])
 	_update_readout()
 
 
@@ -374,6 +470,92 @@ func _place_camera() -> void:
 	camera.look_at(target, outward)
 
 
+func _headless_warp_schedule(snapshot: Dictionary) -> void:
+	var elapsed: float = snapshot["elapsed_s"]
+	var wanted := warp_index
+	if not _headless_burn_commanded:
+		# The slew takes a couple of minutes of simulation time, which at warp 1 is
+		# more frames than any verification run has. Warping through it changes
+		# nothing physical -- the warp decides how much coordinate time a frame
+		# asks for, never how the propagator gets there (rule 21).
+		#
+		# 10x and not 100x: while the RCS is firing the propagator's own error
+		# control keeps the steps short, so a 100x frame costs ten times the work
+		# and buys nothing. Measured: 1200 frames in 8.7 s at 10x against over two
+		# minutes at 100x. The burn itself needs a longer run -- `6000` -- and the
+		# default budget is spent on the optics, which is what this milestone added.
+		wanted = 1
+	else:
+		if elapsed > 2.0e6:
+			wanted = WARP_LEVELS.size() - 1      # 1e8
+		elif elapsed > 1.0e4:
+			wanted = 7                           # 1e7
+		elif elapsed > 6.0e2:
+			wanted = 5                           # 1e5
+		else:
+			wanted = 2                           # 100
+	if wanted != warp_index:
+		warp_index = wanted
+		simulation.set_time_warp(WARP_LEVELS[warp_index])
+
+	# CRUISE trades thrust for exhaust velocity: 0.0899 c of budget becomes
+	# 0.9048 c. Switched once the impulse burn has done its part.
+	if not _headless_cruise_commanded and elapsed > 1.0e4:
+		_headless_cruise_commanded = true
+		simulation.set_engine_mode("CRUISE")
+		print("\n[headless] CRUISE -- exhaust 0.5 c, budget 0.9048 c")
+
+
+func _sky_lines() -> Array:
+	## What the optics are doing, in numbers, so that "it looks fast" is never the
+	## evidence. Every value came out of core/render/relativistic_sky.cpp.
+	if sky == null or not sky.is_ready():
+		return ["sky            no catalogue (scripts/fetch_star_catalog.sh)", ""]
+
+	var d := sky.get_diagnostics()
+	var moon_light := 0.0
+	for i in range(simulation.get_body_count()):
+		if simulation.get_body_name(i) == "Moon":
+			moon_light = simulation.get_body_light_time(i)
+
+	return [
+		"stars          %d  (%s)" % [d["star_count"], "apparent" if show_apparent else "GEOMETRIC"],
+		"forward cone   %.3f deg holds %d stars (%.2f %%)"
+			% [d["forward_cone_deg"], d["stars_in_forward_cone"],
+			   100.0 * float(d["fraction_in_forward_cone"])],
+		"doppler        %.6f astern .. %.6f ahead" % [d["min_doppler"], d["max_doppler"]],
+		"5800 K star    %s x ahead, %s x astern  (visible band)"
+			% [String.num_scientific(d["reference_forward_visible"]),
+			   String.num_scientific(d["reference_aft_visible"])],
+		"exposure       %.4f half-saturation flux" % sky.get_half_saturation(),
+		"light time     Moon %.4f s" % moon_light,
+		"",
+	]
+
+
+func _sky_projection_lines(beta: float) -> Array:
+	## What the SAME code does at a speed the ship is not travelling at. Labelled,
+	## every time, because an unlabelled number here would be exactly the kind of
+	## quiet lie this project exists to avoid: the state is untouched, and this is
+	## a question asked of the optics, not a claim about the flight.
+	if sky == null or not sky.is_ready():
+		return []
+	var heading := simulation.get_spacecraft_velocity_direction()
+	var d := sky.get_diagnostics_at(heading * beta)
+	return [
+		"PROJECTION at beta = %.4f (the ship is NOT at this speed; the state is untouched)"
+			% beta,
+		"  forward cone %.3f deg holds %d stars (%.2f %%)"
+			% [d["forward_cone_deg"], d["stars_in_forward_cone"],
+			   100.0 * float(d["fraction_in_forward_cone"])],
+		"  doppler      %.4f astern .. %.4f ahead" % [d["min_doppler"], d["max_doppler"]],
+		"  5800 K star  %s x ahead, %s x astern  (visible band, not bolometric)"
+			% [String.num_scientific(d["reference_forward_visible"]),
+			   String.num_scientific(d["reference_aft_visible"])],
+		"",
+	]
+
+
 func _reference_body_position() -> Vector3:
 	var reference: String = simulation.get_snapshot().get("reference", "")
 	for i in range(simulation.get_body_count()):
@@ -425,12 +607,16 @@ func _update_readout() -> void:
 		"gamma - 1      %s" % String.num_scientific(s["lorentz_factor_minus_one"]),
 		"render res.    %s m per float ulp at %s" % [String.num_scientific(s["render_resolution_m"]), s["reference"]],
 		"",
+	]
+	lines.append_array(_sky_lines())
+	lines.append_array([
 		"focus: %s   body scale %.0fx" % [("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)), EXAGGERATION_LEVELS[exaggeration_index]],
 		"(, . warp   F focus   B body scale   R restart)",
 		"(1 prograde  2 retrograde  3 normal  4 anti-normal  5 radial-out  0 hold)",
 		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
 		"(M: engine mode IMPULSE <-> CRUISE)",
-	]
+		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
+	])
 	readout.text = "\n".join(lines)
 
 	# Headless runs have no window: mirror the readout to stdout once a second so
@@ -461,10 +647,30 @@ func _update_readout() -> void:
 			_set_throttle(1.0)
 			print("\n[headless] throttle 100%% at %.3f deg of pointing error"
 				% s["pointing_error_deg"])
-		_headless_seconds += get_process_delta_time()
-		if _headless_seconds >= 1.0:
-			_headless_seconds = 0.0
+		# Once the impulse burn has been demonstrated, switch to CRUISE and the top
+		# of the warp ladder. The optics of section 3 and section 10 are invisible
+		# below beta ~ 0.1, and the only honest way to reach them is to actually
+		# burn for eight years -- which at warp 1e8 is a few thousand frames.
+		# Then fly, because the optics of section 3 and section 10 are invisible
+		# below beta ~ 0.1 and the only honest way to reach them is to burn for
+		# eight years. The ladder is keyed on SIMULATION time, not wall time, so
+		# the same frame budget gets to the same place on any machine.
+		#
+		# Each rung waits for the one before to have done its job: no warp until
+		# the attitude has settled, because a 1e8x step would ask the propagator to
+		# cross the whole slew in one go.
+		_headless_warp_schedule(s)
+
+		_headless_frames += 1
+		if _headless_frames % HEADLESS_PRINT_EVERY_FRAMES == 0:
 			print("\n" + readout.text)
+		# Once, early: the headline numbers of the milestone, produced by the
+		# shipped code rather than quoted from the document. Section 3's cone,
+		# section 4's reciprocal Doppler and section 10.2's band-limited beaming,
+		# all against the 8786 real stars.
+		if _headless_frames == HEADLESS_PRINT_EVERY_FRAMES:
+			for beta in [0.0896, 0.9048, 0.99]:
+				print("\n".join(_sky_projection_lines(beta)))
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -495,6 +701,27 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_5: simulation.set_pointing_mode("radial_out")
 		KEY_6: simulation.set_pointing_mode("radial_in")
 		KEY_0: simulation.set_pointing_mode("")
+		KEY_E:
+			exposure_index = mini(exposure_index + 1, EXPOSURE_LEVELS.size() - 1)
+			sky.set_half_saturation(EXPOSURE_LEVELS[exposure_index])
+		KEY_Q:
+			exposure_index = maxi(exposure_index - 1, 0)
+			sky.set_half_saturation(EXPOSURE_LEVELS[exposure_index])
+		KEY_L:
+			# Turns the OPTICS off, not the physics. The state is bit-for-bit the
+			# same either way; what changes is which question the renderer asks.
+			show_apparent = not show_apparent
+			simulation.set_apparent_positions_enabled(show_apparent)
+		KEY_C:
+			# Everything needed to actually go fast, in one key: the effects of
+			# section 3 and section 10 are invisible below beta ~ 0.1, and the only
+			# honest way to see them is to fly there. Eight years of burning at
+			# warp 1e8 is a few minutes of watching.
+			simulation.set_engine_mode("CRUISE")
+			simulation.set_pointing_mode("prograde")
+			_set_throttle(1.0)
+			warp_index = WARP_LEVELS.size() - 1
+			simulation.set_time_warp(WARP_LEVELS[warp_index])
 		KEY_M: simulation.cycle_engine_mode()
 		KEY_Z: _set_throttle(1.0)
 		KEY_X: _set_throttle(0.0)

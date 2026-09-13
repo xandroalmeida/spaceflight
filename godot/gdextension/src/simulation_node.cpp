@@ -2,6 +2,8 @@
 
 #include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
+#include "core/relativity/light_time.hpp"
+#include "core/relativity/optics.hpp"
 #include "core/trajectory/orbital_elements.hpp"
 #include "core/units/conversions.hpp"
 
@@ -76,6 +78,22 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_spacecraft_position);
     godot::ClassDB::bind_method(D_METHOD("get_spacecraft_velocity_direction"),
                                 &SpaceflightSimulation::get_spacecraft_velocity_direction);
+    godot::ClassDB::bind_method(D_METHOD("get_beta_vector"),
+                                &SpaceflightSimulation::get_beta_vector);
+    godot::ClassDB::bind_method(D_METHOD("get_body_apparent_position", "index"),
+                                &SpaceflightSimulation::get_body_apparent_position);
+    godot::ClassDB::bind_method(D_METHOD("get_body_light_time", "index"),
+                                &SpaceflightSimulation::get_body_light_time);
+    godot::ClassDB::bind_method(D_METHOD("get_body_doppler", "index"),
+                                &SpaceflightSimulation::get_body_doppler);
+    godot::ClassDB::bind_method(D_METHOD("get_body_relative_velocity_scene", "index"),
+                                &SpaceflightSimulation::get_body_relative_velocity_scene);
+    godot::ClassDB::bind_method(D_METHOD("get_light_speed_scene"),
+                                &SpaceflightSimulation::get_light_speed_scene);
+    godot::ClassDB::bind_method(D_METHOD("set_apparent_positions_enabled", "enabled"),
+                                &SpaceflightSimulation::set_apparent_positions_enabled);
+    godot::ClassDB::bind_method(D_METHOD("get_apparent_positions_enabled"),
+                                &SpaceflightSimulation::get_apparent_positions_enabled);
     godot::ClassDB::bind_method(D_METHOD("get_spacecraft_orientation"),
                                 &SpaceflightSimulation::get_spacecraft_orientation);
     godot::ClassDB::bind_method(D_METHOD("get_spacecraft_basis"),
@@ -313,6 +331,95 @@ Vector3 SpaceflightSimulation::get_spacecraft_velocity_direction() const {
     const auto direction = snapshot_.spacecraft.relative_velocity.normalized();
     return Vector3{static_cast<float>(direction.x), static_cast<float>(direction.y),
                    static_cast<float>(direction.z)};
+}
+
+Vector3 SpaceflightSimulation::get_beta_vector() const {
+    const auto beta = snapshot_.spacecraft.velocity / sf::units::c;
+    return Vector3{static_cast<float>(beta.x), static_cast<float>(beta.y),
+                   static_cast<float>(beta.z)};
+}
+
+godot::Vector3 SpaceflightSimulation::get_body_apparent_position(int index) const {
+    if (index < 0 || index >= get_body_count() || builder_ == nullptr) {
+        return Vector3{};
+    }
+    if (!apparent_positions_) {
+        return get_body_position(index);
+    }
+
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    const auto& observer = snapshot_.spacecraft;
+
+    const auto apparent = sf::relativity::apparent_position(
+        *provider_, body.id, observer.position, snapshot_.time,
+        sf::coordinates::ReferenceFrame::ssb_j2000());
+
+    // Aberration turns the DIRECTION; the distance is the retarded one.  Rebuilt
+    // as direction x distance rather than transformed as a position, because
+    // aberration is a map of the celestial sphere and nothing else.
+    const sf::math::Vec3 beta = observer.velocity / sf::units::c;
+    const double distance = apparent.relative_position.norm();
+    const sf::math::Vec3 direction =
+        sf::relativity::aberrate_source_direction(apparent.relative_position, beta);
+
+    // Back to an absolute position so that the SAME RenderTransform -- the same
+    // floating origin, the same scale -- handles it (rendering.md section 2).
+    return to_godot(transform_.to_render(observer.position + direction * distance));
+}
+
+double SpaceflightSimulation::get_body_light_time(int index) const {
+    if (index < 0 || index >= get_body_count() || builder_ == nullptr) {
+        return 0.0;
+    }
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    return sf::relativity::apparent_position(*provider_, body.id, snapshot_.spacecraft.position,
+                                             snapshot_.time,
+                                             sf::coordinates::ReferenceFrame::ssb_j2000())
+        .light_time;
+}
+
+double SpaceflightSimulation::get_body_doppler(int index) const {
+    if (index < 0 || index >= get_body_count() || builder_ == nullptr) {
+        return 1.0;
+    }
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    const auto& observer = snapshot_.spacecraft;
+
+    // The body moves too, so the Doppler factor is the one of the RELATIVE
+    // motion: the observer's velocity minus the source's, over c.  Using the
+    // observer's velocity alone would make a co-moving planet blue.
+    const sf::math::Vec3 beta = (observer.velocity - body.velocity) / sf::units::c;
+    const sf::math::Vec3 to_source = body.position - observer.position;
+    if (to_source.norm_squared() <= 0.0) {
+        return 1.0;
+    }
+    return sf::relativity::doppler_factor_to_source(to_source, beta);
+}
+
+godot::Vector3 SpaceflightSimulation::get_body_relative_velocity_scene(int index) const {
+    if (index < 0 || index >= get_body_count()) {
+        return Vector3{};
+    }
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    const auto relative = body.velocity - snapshot_.spacecraft.velocity;
+    // Scene units per second: vector_to_render scales without translating, which
+    // is exactly right for a velocity and wrong for a position.
+    return to_godot(transform_.vector_to_render(relative));
+}
+
+double SpaceflightSimulation::get_light_speed_scene() const {
+    // The SAME scale as the velocity above, so that |v|/c is preserved exactly
+    // and the structural |v| < c survives the conversion to float
+    // (docs/architecture/relativistic-shaders.md section 4).
+    return sf::units::c * transform_.scale();
+}
+
+void SpaceflightSimulation::set_apparent_positions_enabled(bool enabled) {
+    apparent_positions_ = enabled;
+}
+
+bool SpaceflightSimulation::get_apparent_positions_enabled() const {
+    return apparent_positions_;
 }
 
 godot::Quaternion SpaceflightSimulation::get_spacecraft_orientation() const {

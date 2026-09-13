@@ -299,7 +299,7 @@ Duas expectativas minhas também estavam erradas, as duas por citar médias:
 * tempo de luz do Sol — 8,32 min é a **1 UA exata**; em 1º de janeiro a Terra está
   a 0,983 UA (periélio em 3 de janeiro) e o valor é 8,178 min.
 
-### 3.14 Transporte de spin (`tests/scientific/test_spin_transport.cpp`)
+### 3.13 Transporte de spin (`tests/scientific/test_spin_transport.cpp`)
 
 | Quantidade | Medido | Referência | Limite | Origem |
 |---|---|---|---|---|
@@ -321,7 +321,7 @@ relativos. O projeto já tem `lorentz_factor_minus_one` para exatamente isso, e
 foi ela que passou a ser usada. É o mesmo tipo de erro registrado na §3.13: a
 forma cancelativa está do lado de quem escreve o teste.
 
-### 3.13 Gravidade relativística (`tests/scientific/test_relativistic_gravity.cpp`)
+### 3.14 Gravidade relativística (`tests/scientific/test_relativistic_gravity.cpp`)
 
 | Quantidade | Medido | Referência | Limite | Origem |
 |---|---|---|---|---|
@@ -352,13 +352,79 @@ Acima de `γ ≈ 6,7·10⁷` a desigualdade `|v| < c√(A/B)` deixa de ser
 representável em `double` e o teste exige `≤` — mesma fronteira já registrada
 para `β` na §3.11.
 
-### 3.13 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.15 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|
 | posições fixadas | 10⁻³ m | determinismo; ulp de 1,5·10¹¹ m é 3,3·10⁻⁵ m |
 | propagação LEO fixada | 10⁻³ m | idem, mais o cancelamento SSB→geocêntrico |
 | contagem de passos | exata | o controle de passo é determinístico |
+
+### 3.16 Óptica relativística: cor (`tests/scientific/test_blackbody_colour.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| lugar planckiano `x`,`y`, `T ≥ 3000 K` | 1,1·10⁻³ | 1,5·10⁻³ | Wyman/Sloan/Shirley (2013) declaram ~1 % do pico para o ajuste das CMF; propagado pela razão de cromaticidade |
+| idem, `T = 1000 K` | 1,07·10⁻² | 1,2·10⁻² | ali quem carrega a integral são as **caudas** gaussianas, que é onde o ajuste é pior — mecanismo diferente, limite diferente |
+| limite de Rayleigh–Jeans (`10⁸ K`) | — | 10⁻³ | `hc/λkT` residual a 10⁸ K é 2,6·10⁻⁴ |
+| pico de `η(T)` | ~6 500 K | 15 % rel. | Wien põe o pico de Planck em 555 nm a 5 220 K; `η` pesa isso pelo lóbulo `ȳ` inteiro e divide por `σT⁴`. O limite é a largura do lóbulo expressa como temperatura |
+| tabela de 1024 × integral exata, RGB | — | 2·10⁻³ | interpolação linear entre centros de texel, erro `f''·du²/8` |
+| idem, `ln η` | — | 0,05 | mesma interpolação na função mais íngreme; 0,05 **num logaritmo** é 5 % de um fluxo que já vale `e⁻⁶⁰` |
+| expoente efetivo a `β = 0,0896` | 4,16 | ±0,15 | `D⁴` ainda quase bolométrico, e acima de 4 porque `η` ainda **sobe** rumo a 6 500 K |
+| expoente a `β = 0,99999` | 1,005 | ±0,02 | limite exato: `η ∝ T⁻³` e `D⁴·D⁻³ = D` |
+| brilho visível à frente, `β = 0,9048` | 51,5× | 3 % rel. | tabela de 4096 contra a integral direta, medido 0,2 % |
+| brilho visível à ré, `β = 0,9048` | 3,3·10⁻⁷× | 5 % rel. | idem, mais frouxo porque `ln η` é mais íngreme a 1 297 K |
+
+**Onde a tabela é grossa, e por quê isso está certo.** O índice `u = T/(T+6000)`
+é uma bijeção sem recorte (regra 13), e perde resolução quando `u → 1`. Para a
+**cromaticidade** isso é de graça: ela converge para o limite de Rayleigh–Jeans e
+não há o que resolver. Para `ln η` **não** é: ela continua caindo como `−3 ln T`.
+Acima de ~10⁵ K a tabela erra `ln η` de forma visível, e por isso o teste do
+expoente usa a **integral exata**, não a tabela. Nada que a nave possa produzir
+chega lá: a `β = 0,9048` a temperatura deslocada é 25 944 K, bem dentro da faixa
+em que a tabela foi medida.
+
+**A saturação do `double` não é um clamp.** `R = L/(L+L½)` é bijeção em `[0,1)`
+na álgebra; em ponto flutuante `1/(1+x)` arredonda para 1 exatamente quando
+`x < ε/2`, o que acontece em `L = 1,43·10¹⁵`, isto é, magnitude **−37,89**. O Sol
+visto da Terra (−26,7) está onze magnitudes aquém, e uma estrela de magnitude 2
+amplificada por `D⁴ = 400` chega a −4,5. O teste afirma a monotonicidade e o
+ponto de saturação, não `r < 1`.
+
+### 3.17 Óptica relativística: forma (`tests/scientific/test_terrell_rotation.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| rotação aparente vs `arcsin β` | 2,0·10⁻⁶ ° (pior, `β = 0,99`) | 10⁻⁵ ° | a partida do teorema é **quadrática** no raio angular `h`: 2,58 / 16,5 / 60,9 / 201 °·rad⁻² a `β` = 0,0896 / 0,5 / 0,9048 / 0,99, constante em três dígitos de `h = 10⁻³` a `10⁻⁵`. Abaixo de `h = 10⁻⁶` o cancelamento em `b.x − a.x` toma conta, a ~3·10⁻¹⁰ ° |
+| silhueta de esfera fora-de-circularidade | 9,0·10⁻⁵ | 3·10⁻⁴ | Penrose (1959), limite de objeto pequeno; **linear** em `h` (9,0·10⁻³ a `h = 10⁻²`) e invariante ao refinar a amostragem de 8·10⁴ para 5·10⁶ pontos, que é o que identifica o resíduo como o teorema e não como ruído |
+| idem, **sem** a contração | 1,60 | — | não é um erro pequeno: é 160 % |
+| raio angular aparente vs `arcsin(R/γd)` | +3,6·10⁻⁵ rel. | 10⁻³ rel. | linear em `h`: +4,6·10⁻³ a `10⁻²`, +4,5·10⁻⁴ a `10⁻³` |
+| distância aparente vs `γd` | — | 10⁻⁹ rel. | exato: `d√(1+β²γ²) = γd` |
+| equação do cone de luz re-substituída | 1,14·10⁻¹³ | 10⁻¹² | exata em álgebra; o `1/(c²−v²)` amplifica o arredondamento por 500 a `β = 0,999` |
+| invariância de escala de `Δτ` | 1,6·10⁻¹⁶ rel. | 10⁻¹³ rel. | a escala cancela algebricamente |
+
+### 3.18 Óptica relativística: o céu real (`tests/scientific/test_relativistic_sky.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| estrelas no cone `arccos β` vs hemisfério em repouso | **0 divergências** | **0** | origem #1: a aberração leva o hemisfério sobre o cone estrela por estrela, **exatamente**. Testado a `β` = 0,01 / 0,0896 / 0,5 / 0,9048 / 0,99 / 0,9999 e o conjunto é o mesmo nos seis |
+| fração dentro do cone | 49,5 % | 0,5 ± 0,05 | um céu **uniforme** daria 0,5 exatamente. O BSC5 não é uniforme: sobre 400 eixos aleatórios a fração num cone de 25,2° tem média 4,80 % contra 4,76 % uniforme, desvio 1,36 % — 28 % da média. O limite é ~2× esse espalhamento |
+| `D` extremo vs `γ(1±β)` | — | 2·10⁻³ rel. | a estrela do catálogo mais próxima do eixo; com 8 786 delas a mais próxima fica tipicamente abaixo de 1°, e `D` varia como `1 − O(βθ²/2)` |
+| `D_frente · D_ré` | — | 5·10⁻³ rel. | `γ²(1−β²) = 1` exato; o resíduo é o desvio das duas estrelas dos polos |
+| aberração a `β = 0` | — | 10⁻¹⁵ | identidade; ulp de um vetor unitário |
+| resposta de Sirius a `β = 0,99` recuando | < 10⁻¹² | — | `D = 0,0709` põe 9 940 K em 705 K, e `e⁻⁵²` do fluxo fica na banda. O *underflow* é a física |
+
+### 3.19 Catálogo estelar (`tests/unit/test_star_catalog.cpp`)
+
+| Quantidade | Limite | Origem |
+|---|---|---|
+| `V` e `B−V` de seis estrelas nomeadas | 0,005 mag | o BSC5 publica ambos em `F5.2`; metade do último dígito. Ou está exato, ou as colunas estão erradas |
+| posição vs valores publicados | 30″ | o arquivo dá δ em segundos de arco inteiros e α em 0,1 s de tempo (1,5″ no equador); as referências vêm com três casas decimais de grau (3,6″). 30″ é dez vezes isso e mil vezes menos que um erro de coluna, que moveria a estrela em **graus** |
+| contagem 9110 = 8786 + 14 + 310 | exata | nada pode sumir em silêncio |
+| Ballesteros no Sol | 1 K | calibração publicada: `B−V = 0,65 → 5778 K`. Contra o nominal IAU 2015 (5772 K) a fórmula erra 6 K, 0,1 %, duas ordens abaixo da própria exatidão dela |
+| Ballesteros em Vega e Aldebarã | 8 % rel. | medido +5,5 % e −4,3 %; é uma aproximação de duas bandas |
+| razão de Pogson | 10⁻¹⁴ rel. | cinco magnitudes são 100 **por definição** |
+
 
 ## 4. Quando uma tolerância pode mudar
 
