@@ -61,6 +61,7 @@ spaceflight/
 │   │   ├── relativistic-propulsion.md redução em componentes, foguete, limites
 │   │   ├── relativistic-rendering.md   tempo de luz, aberração, Doppler, Terrell
 │   │   ├── relativistic-gravity.md    métrica de campo fraco, geodésica, Mercúrio/GPS/Shapiro
+│   │   ├── spin-transport.md          Fermi-Walker, Thomas, geodética, Gravity Probe B
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
 │   ├── adr/                           0001 linguagem .. 0007 formato de configuração
@@ -209,7 +210,7 @@ cmake --build build-godot --target spaceflight_gdextension -j
 ./scripts/run_godot_headless.sh     # roda a cena sem tela e imprime o HUD
 ```
 
-A extensão é **desligada por padrão**, e isso é o teste: o core e as 25 suítes
+A extensão é **desligada por padrão**, e isso é o teste: o core e as 26 suítes
 compilam e passam sem nenhum engine instalado.
 
 A cena foi verificada **headless**: extensão carregada, kernels lidos, propagação
@@ -240,13 +241,22 @@ Contra números medidos antes de haver teoria para eles:
 | GPS menos relógio de solo | **38,505 µs/dia** | 38,51 µs |
 | atraso de Shapiro, Terra–Vênus rasante | **116,282 µs** | 116,280 µs |
 | deflexão ultrarrelativística / newtoniana | **1,9999999** | 2 |
+| precessão geodética do Gravity Probe B | **6 603,88 mas/ano** | 6 601,8 ± 18,3 |
+| precessão geodética da Lua (LLR) | **19,188 mas/ano** | 19,2 |
 
 O fator 2 de Eddington não está programado em lugar nenhum: sai das formas de
 `A` e `B`. A mesma fórmula dá 1,0000000 para uma partícula lenta.
 
+E a orientação muda **sem que nada gire a nave**: uma volta completa a `β = 0,8`
+sob empuxo transversal, com os giroscópios travados e torque zero, deixa o
+quaternion girado em `4,188790 rad` — contra `2π(γ−1) = 4,188790`, a rotação de
+Wigner acumulada. Derivação em
+[`docs/physics/spin-transport.md`](docs/physics/spin-transport.md).
+
 Derivação, orçamento de erro e o que foi desprezado (arrasto de referencial, a
-maior dívida): [`docs/physics/relativistic-gravity.md`](docs/physics/relativistic-gravity.md).
-Toda tolerância: [`docs/validation/tolerances.md`](docs/validation/tolerances.md) §3.13.
+maior dívida): [`docs/physics/relativistic-gravity.md`](docs/physics/relativistic-gravity.md)
+e [`docs/physics/spin-transport.md`](docs/physics/spin-transport.md).
+Toda tolerância: [`docs/validation/tolerances.md`](docs/validation/tolerances.md) §3.13 e §3.14.
 
 ## Próximo
 

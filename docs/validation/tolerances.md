@@ -299,6 +299,28 @@ Duas expectativas minhas também estavam erradas, as duas por citar médias:
 * tempo de luz do Sol — 8,32 min é a **1 UA exata**; em 1º de janeiro a Terra está
   a 0,983 UA (periélio em 3 de janeiro) e o valor é 8,178 min.
 
+### 3.14 Transporte de spin (`tests/scientific/test_spin_transport.cpp`)
+
+| Quantidade | Medido | Referência | Limite | Origem |
+|---|---|---|---|---|
+| `ω_T` reescrita vs. livro-texto | última casa | idênticos | 10⁻¹² rel. | é a rota do livro-texto que perde dígitos: ela forma `dv/dt` como diferença de vetores quase iguais |
+| `ω_T` colinear, axial | 0,0 | 0 | **exato** | produto vetorial de zeros |
+| `ω_T` colinear, direção arbitrária | 10⁻¹⁶ do transversal | 0 | 10⁻¹⁵ | `u.normalized()` não é exatamente paralelo a `u` em binário |
+| `ω_T/ω_orbital` circular | −(γ−1) | −(γ−1) | 10⁻¹² rel. | forma fechada exata; comparada com `lorentz_factor_minus_one`, **não** com `γ−1,0` |
+| limite lento | −5,0378·10⁻³ a β=0,1 | `−β²/2` | 3β² rel. | o próximo termo é `3β⁴/8`, ou `0,75β²` relativos |
+| rotação de Wigner, 1 volta a β=0,8 | 4,188790 rad | `2π(γ−1)` | 10⁻⁹ rel. | integrador a rtol 10⁻¹³ em 200 passos |
+| fechamento da trajetória | 4,3·10⁻¹³ do raio | 0 | 10⁻⁸ rel. | idem |
+| precessão no modo `Newtonian` | 0,0 | 0 | **exato** | os termos não são avaliados nesse modo |
+| GP-B | 6 603,88 mas/ano | 6 604,1 (1PN) | 10⁻⁴ rel. | forma fechada; a previsão RG completa é 6 606,1 e a medida 6 601,8 ± 18,3 |
+| Lua (LLR) | 19,188 mas/ano | 19,2 | 5·10⁻³ rel. | órbita circular assumida, e a referência é citada com 3 algarismos |
+
+Uma expectativa minha estava errada, de novo no teste e não no código: eu
+comparei `|ω_T|/ω` com `gamma - 1.0` escrito como subtração. A `β = 10⁻⁴` isso
+são 5·10⁻⁹ tirados de um double perto de 1 — 2,2·10⁻¹⁶ de ruído, 4·10⁻⁸
+relativos. O projeto já tem `lorentz_factor_minus_one` para exatamente isso, e
+foi ela que passou a ser usada. É o mesmo tipo de erro registrado na §3.13: a
+forma cancelativa está do lado de quem escreve o teste.
+
 ### 3.13 Gravidade relativística (`tests/scientific/test_relativistic_gravity.cpp`)
 
 | Quantidade | Medido | Referência | Limite | Origem |

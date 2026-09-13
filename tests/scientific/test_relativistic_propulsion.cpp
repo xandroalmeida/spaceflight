@@ -397,6 +397,43 @@ TEST(relativistic_kinematics_refuses_to_carry_a_gravity_field) {
 }
 
 
+TEST(a_superluminal_initial_condition_is_refused_and_not_silently_zeroed) {
+    // The public API states a ship by its coordinate velocity, and v -> u = gamma v
+    // is the one conversion in this project that cancels. At |v| >= c it has
+    // nowhere to go: relativity::proper_velocity documents that it returns zero
+    // there, and a propagator that swallowed that would run a ship at rest and
+    // report success. It refuses instead.
+    const ConstantThrust nothing{Vec3{}};
+    propagation::DormandPrince54Propagator propagator{nothing, relativistic_config()};
+
+    propagation::PropagationState initial{};
+    initial.mass = 1000.0;
+    initial.state.position = Vec3{1.0e9, 0.0, 0.0};
+    initial.state.velocity = Vec3::unit_y() * units::c;
+
+    const auto t0 = time::CoordinateTime::j2000();
+    const auto refused = propagator.propagate(initial, t0, t0 + time::Duration::seconds(10.0));
+
+    CHECK(!refused.ok());
+    CHECK(refused.status == propagation::PropagationStatus::UnsupportedRegime);
+    INFO("reported: " + refused.message);
+
+    // Just below c it is accepted, and the round trip through u and back is
+    // faithful.
+    initial.state.velocity = Vec3::unit_y() * (units::c * (1.0 - 1.0e-12));
+    const auto accepted = propagator.propagate(initial, t0, t0 + time::Duration::seconds(10.0));
+    CHECK(accepted.ok());
+    CHECK_NEAR_REL(accepted.state.state.velocity.norm() / units::c, 1.0 - 1.0e-12, 1.0e-9,
+                   "beta = 1 - 1e-12 survives v -> u -> v, but only just: gamma is 7.07e5 there "
+                   "and the forward conversion has already spent six digits. This is the "
+                   "boundary section 7 describes, which is why scenarios at these speeds are "
+                   "written in rapidity");
+
+    // This is a refusal, not a clamp. Nothing was altered to make the input
+    // acceptable -- the caller is told.
+    CHECK(refused.message.find("rapidity") != std::string::npos);
+}
+
 TEST(burning_the_whole_tank_in_cruise_mode_reaches_the_predicted_beta) {
     // The payoff. A 1-tonne hull with 19 tonnes of propellant and an exhaust
     // velocity of 0.5c: the relativistic rocket equation says this reaches

@@ -1,6 +1,7 @@
 #include "core/propagation/dormand_prince_54.hpp"
 
 #include "core/relativity/kinematics.hpp"
+#include "core/relativity/spin_transport.hpp"
 #include "core/units/constants.hpp"
 
 #include <algorithm>
@@ -82,6 +83,10 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     // Thrust is reported in the rest frame; what it does to the trajectory is
     // decided here, by the kinematics.
     math::Vec3 velocity_derivative{};
+    // The rotation of the local rest frame with respect to the inertial one:
+    // Thomas plus geodetic. Identically zero in Newtonian mode, where by
+    // definition neither term exists.
+    math::Vec3 frame_precession{};
     double inverse_gamma = 1.0;
 
     if (carries_proper_velocity(config_.kinematics)) {
@@ -93,8 +98,11 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
         // once, in terms of u0.
         double gamma = 1.0;
         math::Vec3 geodesic{};
+        math::Vec3 potential_gradient{};
+        math::Vec3 thrust_velocity_derivative{};
         if (config_.kinematics == Kinematics::GeneralRelativistic) {
             const auto sample = metric_->sample(math::Vec3{y[0], y[1], y[2]}, t);
+            potential_gradient = sample.potential_gradient;
             // u0/c plays the role gamma plays in flat space, and reduces to it
             // when U -> 0 (docs/physics/relativistic-gravity.md section 4).
             gamma = sample.time_component(u) / units::c;
@@ -136,8 +144,17 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
             // sqrt(A) and sqrt(B) -- corrections of order U/c^2 ~ 1e-9, four
             // orders below the frame-dragging term that section 7 of the document
             // already declares as dropped.
-            velocity_derivative += e_spatial * (thrust * inverse_gamma / s.mass);
+            thrust_velocity_derivative = e_spatial * (thrust * inverse_gamma / s.mass);
+            velocity_derivative += thrust_velocity_derivative;
         }
+        // A frame carried without torque along a curved worldline still turns
+        // (docs/physics/spin-transport.md). Thomas is driven by the
+        // NON-gravitational acceleration only: the gravitational half of it is
+        // already inside the 3/2 of the geodetic term, and adding both would
+        // count it twice.
+        frame_precession = relativity::thomas_precession(u, thrust_velocity_derivative) +
+                           relativity::geodetic_precession(v, potential_gradient);
+
         // Any non-thrust coordinate acceleration is a fiction in both relativistic
         // modes -- a flat-spacetime one under SpecialRelativistic, and a
         // double-count of gravity under GeneralRelativistic. The propagate() loop
@@ -164,17 +181,26 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     dy[7] = out_force.mass_flow_rate * inverse_gamma;
 
     if (inertia_ != nullptr) {
+        // Body dynamics runs on the ship's own clock, so omega_body -- a rate
+        // measured by the crew -- carries 1/gamma to become a coordinate-time
+        // rate. The frame precession is a different animal: it is the rest frame
+        // ITSELF turning with respect to the inertial one, already defined per
+        // unit coordinate time, so it enters with no 1/gamma. Expressed in the
+        // body to reuse the same kinematic relation.
+        //
+        // Euler's equations below are untouched: they are already written in the
+        // local rest frame, and it is exactly that frame's rotation we are adding
+        // here. Feeding the precession back as a torque would double-count it.
+        const math::Vec3 total_body_rate =
+            s.attitude.angular_velocity * inverse_gamma +
+            s.attitude.orientation.rotate_inverse(frame_precession);
         // qdot = 1/2 q (x) (0, omega_body)
         const math::Quaternion q_dot =
-            math::attitude_derivative(s.attitude.orientation, s.attitude.angular_velocity);
-        // Body dynamics runs on the ship's own clock, so the coordinate-time
-        // derivatives carry a factor 1/gamma. Thomas precession -- the rotation a
-        // non-collinearly accelerated frame picks up -- is NOT included; it needs
-        // its own derivation and belongs with the geodesic work.
-        dy[8] = q_dot.w() * inverse_gamma;
-        dy[9] = q_dot.x() * inverse_gamma;
-        dy[10] = q_dot.y() * inverse_gamma;
-        dy[11] = q_dot.z() * inverse_gamma;
+            math::attitude_derivative(s.attitude.orientation, total_body_rate);
+        dy[8] = q_dot.w();
+        dy[9] = q_dot.x();
+        dy[10] = q_dot.y();
+        dy[11] = q_dot.z();
 
         // Euler: omega_dot = I^-1 (tau - omega x (I omega)). The gyroscopic term
         // does no work but is responsible for precession, nutation and the
@@ -268,6 +294,22 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
                                      std::abs(total)});
     if (std::abs(h) < config_.min_step.seconds()) {
         h = direction * config_.min_step.seconds();
+    }
+
+    // The public API states a spacecraft by its COORDINATE velocity, and the
+    // conversion v -> u = gamma v is the one direction that cancels: at |v| = c
+    // it has nowhere to go. Refuse rather than let proper_velocity() return the
+    // zero it documents (relativistic-propulsion.md section 7 -- scenarios at
+    // these speeds should be written in rapidity).
+    if (carries_proper_velocity(config_.kinematics) &&
+        initial.state.velocity.norm() >= units::c) {
+        result.status = PropagationStatus::UnsupportedRegime;
+        result.message =
+            "initial coordinate velocity is " + std::to_string(initial.state.velocity.norm()) +
+            " m/s, at or above c. State a relativistic initial condition through its rapidity or "
+            "proper velocity and convert with relativity::coordinate_velocity, which cannot "
+            "produce this";
+        return result;
     }
 
     gravity::ForceResult force{};
