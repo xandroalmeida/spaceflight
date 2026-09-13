@@ -41,7 +41,7 @@ Usage:
   orbit-cli body <name> [--date <epoch>] [--origin <body>] [--frame j2000|eclipj2000]
   orbit-cli elements <name> [--center <body>] [--date <epoch>]
   orbit-cli gravity [--center <body>] [--position x,y,z] [--date <epoch>]
-  orbit-cli propagate <scenario.json> [--csv <file>]
+  orbit-cli propagate <scenario.json> [--csv <file>] [--samples <n>]
 
 Options:
   --date <epoch>    Any format SPICE accepts: "2026-01-01", "2026-01-01T12:00:00",
@@ -340,6 +340,9 @@ int command_propagate(const Args& args) {
     if (const auto csv = args.option("csv"); csv.has_value()) {
         scenario.csv_path = *csv;
     }
+    if (const auto samples = args.option("samples"); samples.has_value()) {
+        scenario.samples = std::max(1, std::stoi(*samples));
+    }
 
     const auto t0 = ctx.time->parse(scenario.epoch_text);
     const auto t1 = t0 + time::Duration::seconds(scenario.duration_seconds);
@@ -375,6 +378,7 @@ int command_propagate(const Args& args) {
         }
         csv << std::setprecision(17)
             << "t_tdb_s,x_m,y_m,z_m,vx_ms,vy_ms,vz_ms,rel_x_m,rel_y_m,rel_z_m,"
+               "rel_vx_ms,rel_vy_ms,rel_vz_ms,"
                "radius_m,speed_ms,sma_m,ecc,energy_j_kg,angular_momentum_m2_s\n";
     }
 
@@ -434,7 +438,9 @@ int command_propagate(const Args& args) {
                 << state.state.position.y << "," << state.state.position.z << ","
                 << state.state.velocity.x << "," << state.state.velocity.y << ","
                 << state.state.velocity.z << "," << relative.position.x << "," << relative.position.y
-                << "," << relative.position.z << "," << relative.radius() << "," << relative.speed()
+                << "," << relative.position.z << "," << relative.velocity.x << ","
+                << relative.velocity.y << "," << relative.velocity.z << ","
+                << relative.radius() << "," << relative.speed()
                 << "," << el.semi_major_axis << "," << el.eccentricity << "," << el.specific_energy
                 << "," << el.specific_angular_momentum << "\n";
         }
