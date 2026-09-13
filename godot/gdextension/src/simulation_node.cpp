@@ -297,9 +297,17 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     // orbital speeds that throws away seven digits (core/simulation/snapshot.hpp).
     out["lorentz_factor_minus_one"] = craft.lorentz_factor_minus_one;
 
-    // Diagnostic the renderer should surface when something looks like it is
-    // jittering: metres per float ulp at the ship's current render distance.
-    out["render_resolution_m"] = transform_.resolution_at(craft.position);
+    // Diagnostic to surface when something looks like it is jittering: metres per
+    // float ulp.  Measured at the REFERENCE BODY, not at the ship: with the
+    // floating origin focused on the ship, the ship sits at the origin and its
+    // resolution is identically zero -- true, and useless. The planet a few
+    // thousand kilometres away is what visibly jitters when the projection is
+    // losing digits.
+    const auto* reference_body = snapshot_.find(craft.reference);
+    out["render_resolution_m"] =
+        transform_.resolution_at(reference_body != nullptr ? reference_body->position
+                                                           : craft.position);
+    out["render_resolution_ship_m"] = transform_.resolution_at(craft.position);
     return out;
 }
 

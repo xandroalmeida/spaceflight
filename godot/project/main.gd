@@ -27,6 +27,7 @@ var readout: Label
 var body_meshes: Array[MeshInstance3D] = []
 var ship_mesh: MeshInstance3D
 var warp_index := 0
+var _headless_seconds := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
 
@@ -198,10 +199,14 @@ func _update_readout() -> void:
 	if s.is_empty():
 		return
 
+	# GDScript's % operator supports %s %c %d %o %x %X %f %v %% -- and NOT %e or
+	# %g. Scientific notation goes through String.num_scientific instead; the
+	# first version of this script used %g and every frame threw a format error.
 	var lines := [
 		"t (TDB)        %+.3f s since J2000" % s["time_tdb_s"],
-		"elapsed        %.1f s      warp %gx" % [s["elapsed_s"], s["time_warp"]],
-		"proper time    %.6f s   (difference %.3e s)" % [s["proper_time_s"], s["clock_difference_s"]],
+		"elapsed        %.6f s   warp %.0fx" % [s["elapsed_s"], s["time_warp"]],
+		"proper time    %.6f s" % s["proper_time_s"],
+		"clock diff     %s s" % String.num_scientific(s["clock_difference_s"]),
 		"",
 		"reference      %s" % s["reference"],
 		"altitude       %.3f km" % (s["altitude_m"] / 1000.0),
@@ -210,19 +215,29 @@ func _update_readout() -> void:
 		"",
 		"apoapsis       %.3f km" % (s["apoapsis_m"] / 1000.0),
 		"periapsis      %.3f km" % (s["periapsis_m"] / 1000.0),
-		"eccentricity   %.6f" % s["eccentricity"],
+		"eccentricity   %.8f" % s["eccentricity"],
 		"inclination    %.4f deg" % s["inclination_deg"],
 		"period         %.2f s" % s["period_s"],
 		"",
 		"mass           %.1f kg" % s["mass_kg"],
 		"target         %s at %.0f km, %.1f m/s" % [s["target"], s["target_distance_m"] / 1000.0, s["target_relative_speed_ms"]],
 		"",
-		"beta           %.3e      gamma-1 %.6e" % [s["beta"], s["lorentz_factor_minus_one"]],
-		"render res.    %.3e m per float ulp" % s["render_resolution_m"],
+		"beta           %s" % String.num_scientific(s["beta"]),
+		"gamma - 1      %s" % String.num_scientific(s["lorentz_factor_minus_one"]),
+		"render res.    %s m per float ulp at %s" % [String.num_scientific(s["render_resolution_m"]), s["reference"]],
 		"",
 		"focus: %s   (, . warp   F focus   R restart)" % ("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)),
 	]
 	readout.text = "\n".join(lines)
+
+	# Headless runs have no window: mirror the readout to stdout once a second so
+	# that `--headless --quit-after N` is a real verification and not a silent
+	# no-op. This is how Milestone 2 is checked on a machine with no display.
+	if DisplayServer.get_name() == "headless":
+		_headless_seconds += get_process_delta_time()
+		if _headless_seconds >= 1.0:
+			_headless_seconds = 0.0
+			print("\n" + readout.text)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

@@ -179,15 +179,21 @@ Toda tolerância acima tem origem declarada em `docs/validation/tolerances.md`.
 ## Godot (Milestone 2)
 
 ```bash
-./scripts/fetch_godot_cpp.sh
+./scripts/fetch_godot_cpp.sh        # bindings C++ (godot-4.5-stable)
+./scripts/fetch_godot.sh            # o editor 4.5-stable, em external/
 cmake -S . -B build-godot -DSPACEFLIGHT_BUILD_GODOT=ON
 cmake --build build-godot --target spaceflight_gdextension -j
-# abra godot/project/ com o Godot 4.5 estável
+./scripts/run_godot_headless.sh     # roda a cena sem tela e imprime o HUD
 ```
 
 A extensão é **desligada por padrão**, e isso é o teste: o core e as 20 suítes
-compilam e passam sem nenhum engine instalado. Detalhes e controles em
-`godot/README.md`.
+compilam e passam sem nenhum engine instalado.
+
+A cena foi verificada **headless**: extensão carregada, kernels lidos, propagação
+avançando, HUD com `altitude 400,000 km`, `i = 51,6000°`, `T = 5544,87 s`,
+Lua a 358 366 km e resolução de renderização de 0,807 m — que é exatamente
+`6771 km · ε_float`. Detalhes, controles e as duas armadilhas do Godot que isso
+revelou estão em `godot/README.md`.
 
 ## Próximo
 

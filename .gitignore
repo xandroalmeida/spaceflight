@@ -8,6 +8,8 @@ compile_commands.json
 external/cspice/
 # godot-cpp, fetched by scripts/fetch_godot_cpp.sh; version pinned there
 external/godot-cpp/
+# The Godot editor itself, fetched by scripts/fetch_godot.sh (152 MB)
+external/godot/
 external/*.tar.Z
 external/*.tar
 external/*.tar.gz
