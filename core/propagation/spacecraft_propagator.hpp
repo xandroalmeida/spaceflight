@@ -22,9 +22,18 @@ namespace sf::propagation {
 // is what every Solar System scenario wants, and the relativistic one is only
 // valid in flat spacetime (docs/physics/relativistic-propulsion.md section 8).
 enum class Kinematics {
-    Newtonian,           // integrates v; dtau/dt = 1
-    SpecialRelativistic  // integrates u = gamma*v; dtau/dt = 1/gamma
+    Newtonian,            // integrates v; dtau/dt = 1
+    SpecialRelativistic,  // integrates u = gamma*v; dtau/dt = 1/gamma; flat spacetime
+    // Integrates u = dx/dtau along a geodesic of the weak-field metric. Gravity
+    // is carried by the metric, not by a force, so the force model must contain
+    // only thrust. See docs/physics/relativistic-gravity.md.
+    GeneralRelativistic
 };
+
+// True for the modes whose velocity slot holds u rather than v.
+[[nodiscard]] constexpr bool carries_proper_velocity(Kinematics kinematics) {
+    return kinematics != Kinematics::Newtonian;
+}
 
 struct IntegratorConfig {
     // Error per step is measured against  atol + rtol*|y|  componentwise, with
@@ -54,11 +63,15 @@ struct IntegratorConfig {
 
     Kinematics kinematics{Kinematics::Newtonian};
 
-    // Relativistic kinematics is flat-spacetime physics. Adding a Newtonian
+    // SpecialRelativistic is flat-spacetime physics. Adding a Newtonian
     // gravitational acceleration to it mixes a valid approximation with an
     // invalid one, and the error is silent. The propagator refuses unless this
     // is set deliberately -- at which point the caller owns the claim that the
     // field is weak and the speeds moderate.
+    //
+    // GeneralRelativistic refuses too, and there the refusal is not negotiable in
+    // the same way: gravity is already in the metric, so a gravitational
+    // ForceModel would count it twice.
     bool allow_gravity_with_relativistic_kinematics{false};
 
     // PI step controller (Gustafsson).  beta = 0 reduces it to the classical

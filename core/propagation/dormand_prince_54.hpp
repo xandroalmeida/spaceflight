@@ -5,6 +5,7 @@
 
 #include "core/attitude/inertia.hpp"
 #include "core/gravity/force_model.hpp"
+#include "core/gravity/weak_field_metric.hpp"
 #include "core/propagation/dense_output.hpp"
 #include "core/propagation/spacecraft_propagator.hpp"
 
@@ -38,6 +39,11 @@ public:
     // scenario with no attitude should not pay for seven unused state
     // components. `inertia` must outlive the propagator; nullptr disables.
     void set_inertia(const attitude::InertiaTensor* inertia) { inertia_ = inertia; }
+
+    // Required by Kinematics::GeneralRelativistic and ignored otherwise. The
+    // metric carries gravity, so the force model must carry only thrust.
+    void set_metric(const gravity::WeakFieldMetric* metric) { metric_ = metric; }
+    [[nodiscard]] const gravity::WeakFieldMetric* metric() const noexcept { return metric_; }
     [[nodiscard]] const attitude::InertiaTensor* inertia() const noexcept { return inertia_; }
     [[nodiscard]] Trajectory* trajectory_recorder() const noexcept { return recorder_; }
 
@@ -61,6 +67,7 @@ private:
     StepObserver observer_;
     Trajectory* recorder_{nullptr};
     const attitude::InertiaTensor* inertia_{nullptr};
+    const gravity::WeakFieldMetric* metric_{nullptr};
     bool observe_rejected_{false};
 };
 

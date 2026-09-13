@@ -1,6 +1,7 @@
 #include "core/propagation/dormand_prince_54.hpp"
 
 #include "core/relativity/kinematics.hpp"
+#include "core/units/constants.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -83,15 +84,38 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     math::Vec3 velocity_derivative{};
     double inverse_gamma = 1.0;
 
-    if (config_.kinematics == Kinematics::SpecialRelativistic) {
+    if (carries_proper_velocity(config_.kinematics)) {
         const math::Vec3 u{y[3], y[4], y[5]};
-        const double gamma = relativity::lorentz_factor(u);
+
+        // Flat space and curved space differ in exactly two places: how u0 is
+        // obtained, and whether there is a geodesic term. Everything else --
+        // the thrust boost, the proper time rate, the mass flow -- is written
+        // once, in terms of u0.
+        double gamma = 1.0;
+        math::Vec3 geodesic{};
+        if (config_.kinematics == Kinematics::GeneralRelativistic) {
+            const auto sample = metric_->sample(math::Vec3{y[0], y[1], y[2]}, t);
+            // u0/c plays the role gamma plays in flat space, and reduces to it
+            // when U -> 0 (docs/physics/relativistic-gravity.md section 4).
+            gamma = sample.time_component(u) / units::c;
+            geodesic = sample.geodesic_acceleration(u);
+            if (sample.inside_body) {
+                out_force.inside_body = true;
+                out_force.inside_of = sample.inside_of;
+            }
+        } else {
+            gamma = relativity::lorentz_factor(u);
+        }
+
         inverse_gamma = 1.0 / gamma;
         const math::Vec3 v = u * inverse_gamma;
 
         dy[0] = v.x;
         dy[1] = v.y;
         dy[2] = v.z;
+
+        // du/dt = (dtau/dt) du/dtau, and the geodesic term is already du/dtau.
+        velocity_derivative += geodesic * inverse_gamma;
 
         // du/dt = F * e_spatial / (m0 gamma), with e_spatial the boost of the
         // rest-frame unit vector:  e = n + (gamma - 1)(n.beta_hat) beta_hat.
@@ -107,10 +131,17 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
                 const math::Vec3 beta_hat = v / speed;
                 e_spatial += beta_hat * ((gamma - 1.0) * dot(n, beta_hat));
             }
-            velocity_derivative = e_spatial * (thrust * inverse_gamma / s.mass);
+            // In curved space the boost should strictly use the local orthonormal
+            // frame, which differs from the coordinate basis by factors of
+            // sqrt(A) and sqrt(B) -- corrections of order U/c^2 ~ 1e-9, four
+            // orders below the frame-dragging term that section 7 of the document
+            // already declares as dropped.
+            velocity_derivative += e_spatial * (thrust * inverse_gamma / s.mass);
         }
-        // Any non-thrust coordinate acceleration is a flat-spacetime fiction
-        // here; the propagate() loop refuses it unless the caller opted in.
+        // Any non-thrust coordinate acceleration is a fiction in both relativistic
+        // modes -- a flat-spacetime one under SpecialRelativistic, and a
+        // double-count of gravity under GeneralRelativistic. The propagate() loop
+        // refuses it unless the caller opted in.
         velocity_derivative += out_force.acceleration;
     } else {
         dy[0] = y[3];
@@ -214,6 +245,15 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         return result;
     }
 
+    if (config_.kinematics == Kinematics::GeneralRelativistic && metric_ == nullptr) {
+        result.status = PropagationStatus::UnsupportedRegime;
+        result.message =
+            "GeneralRelativistic kinematics needs a WeakFieldMetric: gravity is the shape of "
+            "spacetime in this mode, and without the metric there is no gravity at all. Call "
+            "set_metric() (docs/physics/relativistic-gravity.md)";
+        return result;
+    }
+
     const double total = (to - from).seconds();
     if (total == 0.0) {
         return result;
@@ -235,12 +275,12 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
 
     // The refusal promised by relativistic-propulsion.md section 8, checked once
     // on the first force evaluation rather than in the inner loop.
-    if (config_.kinematics == Kinematics::SpecialRelativistic &&
+    if (carries_proper_velocity(config_.kinematics) &&
         !config_.allow_gravity_with_relativistic_kinematics &&
         force.acceleration.norm_squared() > 0.0) {
         result.status = PropagationStatus::UnsupportedRegime;
         result.message =
-            "special-relativistic kinematics was given a non-thrust acceleration of " +
+            "relativistic kinematics was given a non-thrust acceleration of " +
             std::to_string(force.acceleration.norm()) +
             " m/s^2. That mixes flat-spacetime dynamics with a Newtonian field, and the error is "
             "silent. Set allow_gravity_with_relativistic_kinematics if the field really is weak "

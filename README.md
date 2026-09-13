@@ -60,6 +60,7 @@ spaceflight/
 │   │   ├── attitude.md                Euler, quaternions, RCS, eixo intermediário
 │   │   ├── relativistic-propulsion.md redução em componentes, foguete, limites
 │   │   ├── relativistic-rendering.md   tempo de luz, aberração, Doppler, Terrell
+│   │   ├── relativistic-gravity.md    métrica de campo fraco, geodésica, Mercúrio/GPS/Shapiro
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
 │   ├── adr/                           0001 linguagem .. 0007 formato de configuração
@@ -76,7 +77,7 @@ spaceflight/
 │   ├── coordinates/            ReferenceFrame (origem + eixos), StateVector
 │   ├── celestial/              BodyId (NAIF), CelestialBody, BodyCatalog
 │   ├── ephemeris/              EphemerisProvider, SpiceEphemerisProvider, kernels, erros
-│   ├── gravity/                ForceModel, PointMassGravity, OblatenessGravity (J2), Composite
+│   ├── gravity/                ForceModel, PointMassGravity, OblatenessGravity (J2), Composite, WeakFieldMetric
 │   ├── propagation/            SpacecraftPropagator, Dormand-Prince 5(4), dense output, estatísticas
 │   ├── trajectory/             elementos osculadores (diagnóstico), Lambert
 │   ├── propulsion/             motor: F = eta*q*w, contabilidade de energia
@@ -208,7 +209,7 @@ cmake --build build-godot --target spaceflight_gdextension -j
 ./scripts/run_godot_headless.sh     # roda a cena sem tela e imprime o HUD
 ```
 
-A extensão é **desligada por padrão**, e isso é o teste: o core e as 20 suítes
+A extensão é **desligada por padrão**, e isso é o teste: o core e as 25 suítes
 compilam e passam sem nenhum engine instalado.
 
 A cena foi verificada **headless**: extensão carregada, kernels lidos, propagação
@@ -217,6 +218,36 @@ Lua a 358 366 km e resolução de renderização de 0,807 m — que é exatament
 `6771 km · ε_float`. Detalhes, controles e as duas armadilhas do Godot que isso
 revelou estão em `godot/README.md`.
 
+## Milestone 5: a física relativística
+
+Três modos de cinemática, escolhidos em `IntegratorConfig::kinematics`:
+
+| Modo | Variável de estado | Gravidade |
+|---|---|---|
+| `Newtonian` | `v` | soma de acelerações (`ForceModel`) |
+| `SpecialRelativistic` | `u = γv` | nenhuma — o propagador recusa |
+| `GeneralRelativistic` | `u = dx/dτ` | a geometria (`WeakFieldMetric`) |
+
+O teto de velocidade em nenhum dos dois últimos é uma comparação: é a forma de
+`γ = √(1 + |u|²/c²)` e de `u⁰`. Não há linha no código onde `if (v > c) v = c`
+pudesse ser escrita, porque `v` nunca é a variável integrada.
+
+Contra números medidos antes de haver teoria para eles:
+
+| | modelo | observado |
+|---|---|---|
+| precessão do periélio de Mercúrio | **42,985″/século** | 42,98″ |
+| GPS menos relógio de solo | **38,505 µs/dia** | 38,51 µs |
+| atraso de Shapiro, Terra–Vênus rasante | **116,282 µs** | 116,280 µs |
+| deflexão ultrarrelativística / newtoniana | **1,9999999** | 2 |
+
+O fator 2 de Eddington não está programado em lugar nenhum: sai das formas de
+`A` e `B`. A mesma fórmula dá 1,0000000 para uma partícula lenta.
+
+Derivação, orçamento de erro e o que foi desprezado (arrasto de referencial, a
+maior dívida): [`docs/physics/relativistic-gravity.md`](docs/physics/relativistic-gravity.md).
+Toda tolerância: [`docs/validation/tolerances.md`](docs/validation/tolerances.md) §3.13.
+
 ## Próximo
 
 A metade visual do Milestone 5: shaders de cor e brilho a partir do fator Doppler,
@@ -224,7 +255,8 @@ starfield vindo de um catálogo real em vez de ruído, e o deslocamento por vér
 que produz a rotação de Terrell **sozinha** — não como efeito, mas como
 consequência do tempo de trânsito aplicado ponto a ponto.
 
-Aberta desde o Milestone 4, e maior que ela: gravidade em regime relativístico
-(`relativity-roadmap.md` §5). Hoje o propagador **recusa** misturar cinemática
-relativística com campo gravitacional newtoniano, porque é uma aproximação válida
-colada numa inválida.
+Depois dela, o arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica
+atual joga fora vale 3,6·10⁻⁴, quatro ordens **acima** dos termos 1PN estáticos
+que ela mantém. Enquanto isso não existir, o modo `GeneralRelativistic` é honesto
+para trajetórias lentas perto de corpos girando e para trajetórias rápidas longe
+deles — não para as duas ao mesmo tempo.

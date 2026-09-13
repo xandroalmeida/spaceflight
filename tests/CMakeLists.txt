@@ -48,5 +48,6 @@ spaceflight_add_test(scientific lambert)
 spaceflight_add_test(scientific attitude)
 spaceflight_add_test(scientific relativistic_propulsion)
 spaceflight_add_test(scientific relativistic_optics)
+spaceflight_add_test(scientific relativistic_gravity)
 
 spaceflight_add_test(regression reference_states)

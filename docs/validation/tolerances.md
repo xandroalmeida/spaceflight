@@ -299,6 +299,37 @@ Duas expectativas minhas também estavam erradas, as duas por citar médias:
 * tempo de luz do Sol — 8,32 min é a **1 UA exata**; em 1º de janeiro a Terra está
   a 0,983 UA (periélio em 3 de janeiro) e o valor é 8,178 min.
 
+### 3.13 Gravidade relativística (`tests/scientific/test_relativistic_gravity.cpp`)
+
+| Quantidade | Medido | Referência | Limite | Origem |
+|---|---|---|---|---|
+| precessão de Mercúrio | 42,9848″/século | 42,98″/século | 0,2″ | resíduo do ajuste linear sobre 60 órbitas (a parte periódica do ω osculador não se cancela por completo) |
+| Δω por órbita | 5,019143·10⁻⁷ rad | 5,018663·10⁻⁷ | 2·10⁻³ rel. | idem, mais o integrador |
+| GPS − solo | 38,5054 µs/dia | 38,51 µs/dia | 5·10⁻³ rel. | precisão dos valores de referência; o 38,6 da literatura inclui a rotação da Terra |
+| Shapiro Terra–Vênus | 116,282 µs | 116,280 µs | 5·10⁻³ rel. | trajetória reta assumida, mais a quadratura em 2·10⁵ passos |
+| separação GR−Newton em LEO | 8,3598 cm/órbita | `6πGMr/(c²a)` | 10⁻⁴ rel. | integrador, mais corda≈arco |
+| `1 − dτ/dt` em LEO | 9,81490·10⁻¹⁰ | `U/c² + v²/2c²` | 10⁻³ rel. | forma fechada só a primeira ordem |
+| `c√(A/B)` a 1 UA | `c(1 − 1,97413·10⁻⁸)` | `c(1 − 2U/c²)` | 10⁻³ rel. | idem |
+| deflexão ultrarrelativística | 1,9999999 | 2 | 10⁻⁵ rel. | o `1/γ²` residual de uma partícula massiva |
+| deflexão lenta | 1 − 3,8·10⁻⁸ | 1 | 10⁻⁷ rel. | o limite lento é `1 + O(U/c²)`, e `U/c² = 9,87·10⁻⁹` a 1 UA |
+| vínculo `g_μν u^μ u^ν = −c²` | ~10⁻¹⁶ | 0 | 10⁻¹⁵ **dos termos** | ulp; contra `c²` o resíduo chega a 10² a `u/c = 10⁹`, e isso é cancelamento do teste, não do modelo |
+
+Duas expectativas minhas estavam erradas aqui, as duas por subestimar o que uma
+órbita inteira acumula ou o que a aritmética perde:
+
+* eu previa que GR e Newton divergissem em LEO "na ordem de `U/c² + v²/c² ≈
+  1,3·10⁻⁹`". Divergem em 1,23·10⁻⁸, **nove vezes mais** — porque depois de uma
+  revolução o que separa os dois é a precessão, com seu `6π`. O teste passou a
+  afirmar a forma fechada;
+* eu media o vínculo da camada de massa contra `c²`. A `u/c = 10⁹` os dois
+  termos valem 10¹⁸ c² e o resíduo *tem* de ser 10²; normalizado pelo tamanho
+  dos termos ele é plano em 10⁻¹⁶ por nove ordens de grandeza. O código estava
+  certo nos dois casos.
+
+Acima de `γ ≈ 6,7·10⁷` a desigualdade `|v| < c√(A/B)` deixa de ser
+representável em `double` e o teste exige `≤` — mesma fronteira já registrada
+para `β` na §3.11.
+
 ### 3.13 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |

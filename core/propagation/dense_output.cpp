@@ -13,7 +13,13 @@ PropagationState state_from_array(const StateArray& y, Kinematics kinematics) {
     PropagationState state{};
     state.state.position = math::Vec3{y[0], y[1], y[2]};
     const math::Vec3 velocity_slot{y[3], y[4], y[5]};
-    state.state.velocity = kinematics == Kinematics::SpecialRelativistic
+    // Both relativistic modes store u. The flat-space relation v = u/gamma is
+    // used for the REPORTED velocity even under GeneralRelativistic, where the
+    // exact relation v = c u / u0 needs the metric: the difference is O(U/c^2),
+    // about 1e-9 in low Earth orbit, far below everything else that mode already
+    // approximates. The INTEGRATION uses the exact u0
+    // (docs/physics/relativistic-gravity.md section 4).
+    state.state.velocity = carries_proper_velocity(kinematics)
                                ? relativity::coordinate_velocity(velocity_slot)
                                : velocity_slot;
     state.proper_time = time::Duration{y[6]};
@@ -28,7 +34,7 @@ PropagationState state_from_array(const StateArray& y, Kinematics kinematics) {
 StateArray array_from_state(const PropagationState& state, Kinematics kinematics) {
     const auto& q = state.attitude.orientation;
     const auto& w = state.attitude.angular_velocity;
-    const math::Vec3 velocity_slot = kinematics == Kinematics::SpecialRelativistic
+    const math::Vec3 velocity_slot = carries_proper_velocity(kinematics)
                                          ? relativity::proper_velocity(state.state.velocity)
                                          : state.state.velocity;
     return StateArray{state.state.position.x, state.state.position.y, state.state.position.z,

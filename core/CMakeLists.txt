@@ -20,6 +20,7 @@ add_library(spaceflight_core STATIC
     ephemeris/spice_ephemeris_provider.cpp
     ephemeris/spice_time_converter.cpp
     gravity/point_mass_gravity.cpp
+    gravity/weak_field_metric.cpp
     gravity/composite_force_model.cpp
     gravity/oblateness_gravity.cpp
     relativity/light_time.cpp
