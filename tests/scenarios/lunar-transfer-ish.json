@@ -1,0 +1,27 @@
+{
+  // A 400 km parking orbit raised until apogee reaches the Moon's distance.
+  // NOT a designed transfer: the Moon is somewhere else at arrival.  Milestone 1's
+  // Lambert solver is what turns this into an intercept.  What it does exercise is
+  // the adaptive step across a 60:1 range in radius, and the growth of the lunar
+  // and solar perturbations as the spacecraft leaves the Earth's neighbourhood.
+  "name": "Highly elliptical transfer, apogee near lunar distance",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 460000.0,          // 5.3 days, just past apogee
+
+  "spacecraft": {
+    "relative_to": "Earth",
+    "position_m":  [6778000.0, 0.0, 0.0],
+    "velocity_ms": [0.0, 10755.0, 0.0],   // vis-viva for apogee at 400 000 km; escape is 10 853 m/s
+    "mass_kg": 1000.0
+  },
+
+  "integrator": {
+    "rtol": 1e-11,
+    "atol_position_m": 1e-3,
+    "atol_velocity_ms": 1e-6,
+    "initial_step_s": 10.0,
+    "max_step_s": 3600.0
+  },
+
+  "output": { "samples": 10 }
+}

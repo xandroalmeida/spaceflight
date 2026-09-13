@@ -1,0 +1,25 @@
+# Build
+build*/
+cmake-build-*/
+compile_commands.json
+.cache/
+
+# Third-party toolkit: 42 MB download, fetched by scripts/fetch_cspice.sh
+external/cspice/
+external/*.tar.Z
+external/*.tar
+external/*.log
+
+# SPICE kernels: data, versioned by NAIF, fetched by scripts/fetch_kernels.sh
+kernels/spice/
+kernels/*.log
+
+# Outputs
+*.csv
+!tests/**/*.csv
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,28 @@
+{
+  // A 400 km circular orbit at 51.6 degrees inclination, the ISS-like case.
+  // Milestone 1 will add burns; this one just flies.
+  "name": "LEO circular, 400 km",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 5553.4559408,     // one orbital period at r = 6778 km
+
+  "bodies": ["Sun", "Mercury Barycenter", "Venus Barycenter", "Earth", "Moon",
+             "Mars Barycenter", "Jupiter Barycenter", "Saturn Barycenter",
+             "Uranus Barycenter", "Neptune Barycenter"],
+
+  "spacecraft": {
+    "relative_to": "Earth",
+    "position_m":  [6778000.0, 0.0, 0.0],
+    "velocity_ms": [0.0, 4763.3559898, 6009.8595578],  // |v| = 7668.6356 m/s (circular), i = 51.6 deg
+    "mass_kg": 1000.0
+  },
+
+  "integrator": {
+    "rtol": 1e-12,
+    "atol_position_m": 1e-6,
+    "atol_velocity_ms": 1e-9,
+    "initial_step_s": 10.0,
+    "max_step_s": 300.0
+  },
+
+  "output": { "samples": 8 }
+}

@@ -1,0 +1,70 @@
+#pragma once
+
+// A small, strict JSON reader for scenario files.
+//
+// Written rather than vendored: the scenario format is a handful of numbers and
+// strings, and a parser we control gives error messages that point at the line
+// the user got wrong.  It is deliberately read-only and rejects anything it does
+// not understand instead of guessing.
+
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace orbitcli::json {
+
+class ParseError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+class Value;
+using Object = std::map<std::string, Value>;
+using Array = std::vector<Value>;
+
+class Value {
+public:
+    enum class Type { Null, Bool, Number, String, Array, Object };
+
+    Value() = default;
+    explicit Value(bool b) : type_(Type::Bool), bool_(b) {}
+    explicit Value(double n) : type_(Type::Number), number_(n) {}
+    explicit Value(std::string s) : type_(Type::String), string_(std::move(s)) {}
+    explicit Value(Array a) : type_(Type::Array), array_(std::move(a)) {}
+    explicit Value(Object o) : type_(Type::Object), object_(std::move(o)) {}
+
+    [[nodiscard]] Type type() const noexcept { return type_; }
+    [[nodiscard]] bool is_null() const noexcept { return type_ == Type::Null; }
+    [[nodiscard]] bool is_object() const noexcept { return type_ == Type::Object; }
+    [[nodiscard]] bool is_array() const noexcept { return type_ == Type::Array; }
+
+    // Typed accessors; each throws ParseError naming `context` on mismatch.
+    [[nodiscard]] double as_number(const std::string& context) const;
+    [[nodiscard]] const std::string& as_string(const std::string& context) const;
+    [[nodiscard]] bool as_bool(const std::string& context) const;
+    [[nodiscard]] const Array& as_array(const std::string& context) const;
+    [[nodiscard]] const Object& as_object(const std::string& context) const;
+
+    // Object field lookup.  `get` returns nullptr when absent; `require` throws.
+    [[nodiscard]] const Value* get(const std::string& key) const;
+    [[nodiscard]] const Value& require(const std::string& key, const std::string& context) const;
+
+    [[nodiscard]] double number_or(const std::string& key, double fallback) const;
+    [[nodiscard]] std::string string_or(const std::string& key, const std::string& fallback) const;
+    [[nodiscard]] bool bool_or(const std::string& key, bool fallback) const;
+
+private:
+    Type type_{Type::Null};
+    bool bool_{false};
+    double number_{0.0};
+    std::string string_;
+    Array array_;
+    Object object_;
+};
+
+Value parse(const std::string& text);
+Value parse_file(const std::string& path);
+
+}  // namespace orbitcli::json

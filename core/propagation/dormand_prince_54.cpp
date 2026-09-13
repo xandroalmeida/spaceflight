@@ -1,0 +1,318 @@
+#include "core/propagation/dormand_prince_54.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
+namespace sf::propagation {
+namespace {
+
+// Dormand & Prince (1980), RK5(4)7M.  Node c7 == 1 and row a7 == b, which is
+// what makes the method FSAL: the last stage of an accepted step is the first
+// stage of the next one.
+constexpr double c2 = 1.0 / 5.0;
+constexpr double c3 = 3.0 / 10.0;
+constexpr double c4 = 4.0 / 5.0;
+constexpr double c5 = 8.0 / 9.0;
+
+constexpr double a21 = 1.0 / 5.0;
+constexpr double a31 = 3.0 / 40.0,        a32 = 9.0 / 40.0;
+constexpr double a41 = 44.0 / 45.0,       a42 = -56.0 / 15.0,      a43 = 32.0 / 9.0;
+constexpr double a51 = 19372.0 / 6561.0,  a52 = -25360.0 / 2187.0, a53 = 64448.0 / 6561.0,  a54 = -212.0 / 729.0;
+constexpr double a61 = 9017.0 / 3168.0,   a62 = -355.0 / 33.0,     a63 = 46732.0 / 5247.0,  a64 = 49.0 / 176.0,      a65 = -5103.0 / 18656.0;
+
+// 5th order solution (also row 7 of A).
+constexpr double b1 = 35.0 / 384.0, b3 = 500.0 / 1113.0, b4 = 125.0 / 192.0, b5 = -2187.0 / 6784.0, b6 = 11.0 / 84.0;
+
+// Difference between the 5th and the embedded 4th order solution.
+constexpr double e1 = b1 - 5179.0 / 57600.0;
+constexpr double e3 = b3 - 7571.0 / 16695.0;
+constexpr double e4 = b4 - 393.0 / 640.0;
+constexpr double e5 = b5 - (-92097.0 / 339200.0);
+constexpr double e6 = b6 - 187.0 / 2100.0;
+constexpr double e7 = -1.0 / 40.0;
+
+}  // namespace
+
+DormandPrince54Propagator::DormandPrince54Propagator(const gravity::ForceModel& forces,
+                                                     IntegratorConfig config)
+    : forces_(forces), config_(config) {
+    set_config(config);
+}
+
+void DormandPrince54Propagator::set_config(IntegratorConfig config) {
+    if (config.relative_tolerance <= 0.0) {
+        throw std::invalid_argument("IntegratorConfig: relative_tolerance must be > 0");
+    }
+    if (config.absolute_tolerance_position <= 0.0 || config.absolute_tolerance_velocity <= 0.0) {
+        throw std::invalid_argument("IntegratorConfig: absolute tolerances must be > 0");
+    }
+    if (config.min_step.seconds() <= 0.0 || config.max_step.seconds() <= 0.0) {
+        throw std::invalid_argument("IntegratorConfig: step limits must be > 0");
+    }
+    if (config.min_step > config.max_step) {
+        throw std::invalid_argument("IntegratorConfig: min_step > max_step");
+    }
+    config_ = config;
+}
+
+DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
+    const Vector& y, time::CoordinateTime t, double mass, gravity::ForceResult& out_force) const {
+    PropagationState s{};
+    s.state.position = math::Vec3{y[0], y[1], y[2]};
+    s.state.velocity = math::Vec3{y[3], y[4], y[5]};
+    s.mass = mass;
+    s.proper_time = time::Duration{y[6]};
+
+    out_force = forces_.evaluate(s, t);
+
+    Vector dy{};
+    dy[0] = y[3];
+    dy[1] = y[4];
+    dy[2] = y[5];
+    dy[3] = out_force.acceleration.x;
+    dy[4] = out_force.acceleration.y;
+    dy[5] = out_force.acceleration.z;
+    // dtau/dt.  Exactly 1 in the Newtonian regime; Milestone 4 replaces this
+    // with 1/gamma (special relativity) and later with the weak-field form.
+    // See docs/physics/relativity-roadmap.md section 3.2.
+    dy[6] = 1.0;
+    return dy;
+}
+
+double DormandPrince54Propagator::error_norm(const Vector& y, const Vector& y_new,
+                                             const Vector& err) const {
+    // RMS of the componentwise error scaled by  atol + rtol*max(|y|,|y_new|).
+    // Proper time (component 6) is excluded: its derivative is exact, so
+    // including it would let it dominate or dilute the norm for no reason.
+    double sum = 0.0;
+    for (std::size_t i = 0; i < 6; ++i) {
+        const double atol = (i < 3) ? config_.absolute_tolerance_position
+                                    : config_.absolute_tolerance_velocity;
+        const double scale = atol + config_.relative_tolerance *
+                                        std::max(std::abs(y[i]), std::abs(y_new[i]));
+        const double ratio = err[i] / scale;
+        sum += ratio * ratio;
+    }
+    return std::sqrt(sum / 6.0);
+}
+
+PropagationResult DormandPrince54Propagator::propagate(const PropagationState& initial,
+                                                       time::CoordinateTime from,
+                                                       time::CoordinateTime to) {
+    using clock = std::chrono::steady_clock;
+    const auto wall_start = clock::now();
+
+    PropagationResult result{};
+    result.state = initial;
+    result.time = from;
+    result.status = PropagationStatus::Success;
+
+    if (!initial.is_finite()) {
+        result.status = PropagationStatus::NonFiniteState;
+        result.message = "initial state is not finite";
+        return result;
+    }
+
+    const double total = (to - from).seconds();
+    if (total == 0.0) {
+        return result;
+    }
+    const double direction = total > 0.0 ? 1.0 : -1.0;
+
+    Vector y{initial.state.position.x, initial.state.position.y, initial.state.position.z,
+             initial.state.velocity.x, initial.state.velocity.y, initial.state.velocity.z,
+             initial.proper_time.seconds()};
+
+    const double mass = initial.mass;  // constant until propulsion exists (Milestone 1)
+    time::CoordinateTime t = from;
+
+    double h = direction * std::min({std::abs(config_.initial_step.seconds()),
+                                     config_.max_step.seconds(),
+                                     std::abs(total)});
+    if (std::abs(h) < config_.min_step.seconds()) {
+        h = direction * config_.min_step.seconds();
+    }
+
+    gravity::ForceResult force{};
+    Vector k1 = derivative(y, t, mass, force);
+    result.stats.force_evaluations = 1;
+
+    double error_previous = 1.0e-4;  // seeds the PI controller
+    double step_sum = 0.0;
+    double min_h = std::numeric_limits<double>::infinity();
+    double max_h = 0.0;
+    bool last_step_was_rejected = false;
+
+    while (true) {
+        const double remaining = (to - t).seconds();
+        if (remaining == 0.0 || direction * remaining <= 0.0) {
+            break;
+        }
+        // Land exactly on `to` without letting the clipped step contaminate the
+        // step size controller: `h` stays the size the error control asked for,
+        // `h_step` is what this particular step actually spans.
+        const bool clipped = std::abs(h) > std::abs(remaining);
+        const double h_step = clipped ? remaining : h;
+
+        if (result.stats.accepted_steps + result.stats.rejected_steps >= config_.max_steps) {
+            result.status = PropagationStatus::MaxStepsExceeded;
+            result.message = "exceeded max_steps (" + std::to_string(config_.max_steps) + ")";
+            break;
+        }
+
+        Vector y2{}, y3{}, y4{}, y5{}, y6{}, y_new{}, err{};
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y2[i] = y[i] + h_step * a21 * k1[i];
+        }
+        Vector k2 = derivative(y2, t + time::Duration{c2 * h_step}, mass, force);
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y3[i] = y[i] + h_step * (a31 * k1[i] + a32 * k2[i]);
+        }
+        Vector k3 = derivative(y3, t + time::Duration{c3 * h_step}, mass, force);
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y4[i] = y[i] + h_step * (a41 * k1[i] + a42 * k2[i] + a43 * k3[i]);
+        }
+        Vector k4 = derivative(y4, t + time::Duration{c4 * h_step}, mass, force);
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y5[i] = y[i] + h_step * (a51 * k1[i] + a52 * k2[i] + a53 * k3[i] + a54 * k4[i]);
+        }
+        Vector k5 = derivative(y5, t + time::Duration{c5 * h_step}, mass, force);
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y6[i] = y[i] + h_step * (a61 * k1[i] + a62 * k2[i] + a63 * k3[i] + a64 * k4[i] + a65 * k5[i]);
+        }
+        Vector k6 = derivative(y6, t + time::Duration{h_step}, mass, force);
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            y_new[i] = y[i] + h_step * (b1 * k1[i] + b3 * k3[i] + b4 * k4[i] + b5 * k5[i] + b6 * k6[i]);
+        }
+        gravity::ForceResult force_new{};
+        Vector k7 = derivative(y_new, t + time::Duration{h_step}, mass, force_new);
+        result.stats.force_evaluations += 6;
+
+        for (std::size_t i = 0; i < kDim; ++i) {
+            err[i] = h_step * (e1 * k1[i] + e3 * k3[i] + e4 * k4[i] + e5 * k5[i] + e6 * k6[i] + e7 * k7[i]);
+        }
+
+        bool finite = true;
+        for (std::size_t i = 0; i < kDim; ++i) {
+            finite = finite && std::isfinite(y_new[i]) && std::isfinite(err[i]);
+        }
+
+        const double error = finite ? error_norm(y, y_new, err)
+                                    : std::numeric_limits<double>::infinity();
+        result.stats.max_error_estimate = std::max(result.stats.max_error_estimate,
+                                                   std::isfinite(error) ? error : 0.0);
+
+        const bool accept = finite && error <= 1.0;
+
+        if (accept) {
+            // A clipped step was defined as "cover exactly what is left", so the
+            // arrival time IS `to`.  Snapping avoids a residual of a fraction of
+            // an ulp that would otherwise cost one extra, absurdly small step.
+            t = clipped ? to : t + time::Duration{h_step};
+            y = y_new;
+            k1 = k7;  // FSAL
+            force = force_new;
+
+            ++result.stats.accepted_steps;
+            step_sum += std::abs(h_step);
+            min_h = std::min(min_h, std::abs(h_step));
+            max_h = std::max(max_h, std::abs(h_step));
+
+            if (observer_) {
+                PropagationState s{};
+                s.state.position = math::Vec3{y[0], y[1], y[2]};
+                s.state.velocity = math::Vec3{y[3], y[4], y[5]};
+                s.mass = mass;
+                s.proper_time = time::Duration{y[6]};
+                observer_(StepInfo{t, s, h_step, error, true});
+            }
+
+            if (force_new.inside_body) {
+                result.status = PropagationStatus::InsideBody;
+                result.message = "trajectory entered " + force_new.inside_of.name();
+                break;
+            }
+        } else {
+            ++result.stats.rejected_steps;
+            if (observer_ && observe_rejected_) {
+                PropagationState s{};
+                s.state.position = math::Vec3{y_new[0], y_new[1], y_new[2]};
+                s.state.velocity = math::Vec3{y_new[3], y_new[4], y_new[5]};
+                s.mass = mass;
+                s.proper_time = time::Duration{y_new[6]};
+                observer_(StepInfo{t + time::Duration{h_step}, s, h_step, error, false});
+            }
+            if (!finite) {
+                result.status = PropagationStatus::NonFiniteState;
+                result.message = "force model or state became non-finite";
+                break;
+            }
+        }
+
+        // PI controller (Hairer, Norsett & Wanner II.4).  On a rejected step the
+        // integral term is dropped, which is what keeps the controller from
+        // oscillating after a sudden tightening.
+        const double alpha = 0.2 - 0.75 * config_.pi_beta;
+        double factor = config_.safety_factor * std::pow(error, -alpha);
+        if (accept && !last_step_was_rejected) {
+            factor *= std::pow(error_previous, config_.pi_beta);
+        }
+        factor = std::clamp(factor, config_.min_shrink_factor, config_.max_growth_factor);
+        if (!accept) {
+            factor = std::min(factor, 1.0);  // never grow after a rejection
+        }
+
+        // When the step was clipped to land on `to`, the controller must grow
+        // from the step it actually wanted, not from the stub.  Otherwise a
+        // short final step would look like a collapsing step size and trip the
+        // min_step check on a propagation that in fact succeeded.
+        double h_next = (clipped ? h : h_step) * factor;
+        if (std::abs(h_next) > config_.max_step.seconds()) {
+            h_next = direction * config_.max_step.seconds();
+        }
+
+        if (std::abs(h_next) < config_.min_step.seconds()) {
+            // The error control is asking for a step we refuse to take.  That is
+            // a reported failure, not something to force through: taking the step
+            // anyway would silently produce a result outside the requested
+            // tolerance.  See ADR-0005.
+            result.status = PropagationStatus::MinimumStepReached;
+            result.message = "step control requested " + std::to_string(std::abs(h_next)) +
+                             " s, below min_step " + std::to_string(config_.min_step.seconds()) + " s";
+            break;
+        }
+
+        if (accept) {
+            error_previous = std::max(error, 1.0e-4);
+        }
+        last_step_was_rejected = !accept;
+        h = h_next;
+    }
+
+    result.state.state.position = math::Vec3{y[0], y[1], y[2]};
+    result.state.state.velocity = math::Vec3{y[3], y[4], y[5]};
+    result.state.mass = mass;
+    result.state.proper_time = time::Duration{y[6]};
+    result.time = t;
+
+    result.stats.min_step_seconds = std::isfinite(min_h) ? min_h : 0.0;
+    result.stats.max_step_seconds = max_h;
+    result.stats.mean_step_seconds =
+        result.stats.accepted_steps > 0
+            ? step_sum / static_cast<double>(result.stats.accepted_steps)
+            : 0.0;
+    result.stats.wall_time_seconds =
+        std::chrono::duration<double>(clock::now() - wall_start).count();
+
+    return result;
+}
+
+}  // namespace sf::propagation
