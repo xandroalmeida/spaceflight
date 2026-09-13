@@ -31,6 +31,8 @@ std::string SimulationSnapshot::describe() const {
        << "  periapsis  " << spacecraft.elements.periapsis_radius << " m\n"
        << "  ecc / inc  " << spacecraft.elements.eccentricity << " / "
        << spacecraft.elements.inclination * 180.0 / units::pi << " deg\n"
+       << "  nose->prograde " << spacecraft.angle_to_prograde * 180.0 / units::pi << " deg"
+       << "   spin " << spacecraft.rotation_rate << " rad/s\n"
        << "  beta       " << spacecraft.beta << "   gamma - 1 "
        << spacecraft.lorentz_factor_minus_one << "\n"
        << "  proper dt  " << clock_difference.seconds() << " s\n"
@@ -112,6 +114,17 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     if (craft.distance_to_reference > 0.0 && gm > 0.0) {
         craft.elements = trajectory::elements_from_state(
             coordinates::StateVector{craft.relative_position, craft.relative_velocity}, gm);
+    }
+
+    craft.orientation = state.attitude.orientation;
+    craft.angular_velocity = state.attitude.angular_velocity;
+    craft.rotation_rate = state.attitude.angular_velocity.norm();
+    craft.nose = state.attitude.orientation.rotate(math::Vec3::unit_x());
+    if (craft.relative_velocity.norm() > 0.0) {
+        craft.angle_to_prograde = angle_between(craft.nose, craft.relative_velocity);
+    }
+    if (craft.distance_to_reference > 0.0) {
+        craft.angle_to_nadir = angle_between(craft.nose, -craft.relative_position);
     }
 
     if (target_.has_value()) {

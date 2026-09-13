@@ -6,12 +6,12 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 2 concluído.** Núcleo científico, efemérides JPL, gravidade de
+**Estado: Milestone 3 concluído.** Núcleo científico, efemérides JPL, gravidade de
 N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
 targeting diferencial, e a camada de renderização (snapshot, origem flutuante,
-GDExtension para o Godot 4.5). Sem gameplay, sem relatividade. 20 suítes de teste,
-das quais 10 comparam resultados contra o JPL Horizons ou contra soluções
-analíticas fechadas.
+GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, e o
+cockpit. Sem gameplay, sem relatividade. 22 suítes de teste, das quais 12 comparam
+resultados contra o JPL Horizons ou contra soluções analíticas fechadas.
 
 ---
 
@@ -56,6 +56,7 @@ spaceflight/
 │   │   ├── geopotential.md            J2: forma sem referencial girante, constantes, testes
 │   │   ├── propulsion-model.md        F = eta*q*w derivado de conservação; o que eta custa
 │   │   ├── lambert.md                 variáveis universais, casos degenerados, targeting
+│   │   ├── attitude.md                Euler, quaternions, RCS, eixo intermediário
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
 │   ├── adr/                           0001 linguagem .. 0007 formato de configuração
@@ -82,7 +83,7 @@ spaceflight/
 │   ├── simulation/             SimulationClock, SimulationSnapshot
 │   ├── render/                 RenderTransform: absoluto → câmera → float
 │   ├── relativity/             Milestone 4  (vazio: precisa do documento antes)
-│   ├── attitude/               Milestone 3
+│   ├── attitude/               inércia, RCS, controle de apontamento PD
 │   ├── autopilot/              Milestone 3
 │
 ├── tools/
@@ -115,6 +116,7 @@ Registradas em `docs/adr/`:
 | 0005 | Dormand–Prince 5(4) adaptativo, desacoplado de frame e de time warp |
 | 0006 | Dense output de 4ª ordem: estado em qualquer instante, sem forçar o passo |
 | 0007 | Configuração em JSON com comentários, parser no core |
+| 0008 | Quaternions: escalar primeiro, Hamilton, corpo→inercial |
 
 E três regras que valem para tudo o que vier:
 
@@ -129,7 +131,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 20
+100% tests passed, 0 tests failed out of 22
 ```
 
 Entre outras coisas:
@@ -159,6 +161,10 @@ Entre outras coisas:
   circular com `e = 4,9·10⁻⁶`;
 * Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
   diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**;
+* a rotação livre de torque conserva o **vetor** momento angular a 9·10⁻¹², um
+  pião simétrico precessa na taxa analítica, e a instabilidade do eixo
+  intermediário (efeito Dzhanibekov) bate com `cosh`/`sinh` da solução
+  linearizada em **6 dígitos**, sinal incluído;
 * sem origem flutuante, 1 km de movimento a 1 UA **desaparece** no `float` (a
   resolução lá é 17,8 km); com a câmera a 100 m da nave, 1 mm sobrevive — e a
   escala de cena não muda nada disso, porque o `float` tem precisão relativa.
@@ -197,6 +203,10 @@ revelou estão em `godot/README.md`.
 
 ## Próximo
 
-Milestone 3: cockpit. Os instrumentos do §25 já saem prontos do
-`SimulationSnapshot` — o que falta é atitude (quaternions, RCS, momento de
-inércia), que é pré-requisito dos modos de piloto automático do §28.
+Milestone 4: propulsão relativística. A regra §37 vale: antes de qualquer código,
+`docs/physics/relativistic-propulsion.md` — estado matemático, conservação de
+momento, aceleração própria × coordenada, equação do foguete, limites
+newtonianos. A formulação alvo já está fixada em
+`docs/physics/relativity-roadmap.md` §3: a variável de estado passa a ser
+`u = γv`, e o limite `|v| < c` deixa de precisar de vigilância porque vira a
+forma da equação.

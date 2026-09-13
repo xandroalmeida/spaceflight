@@ -215,7 +215,35 @@ em nenhum ponto de `0 ≤ β < 1` e tende a `β²/2` quando `β → 0`. O snapsh
 `lorentz_factor_minus_one` por isso, e o teste mantém a forma ingênua ao lado
 como **medida**, não como afirmação.
 
-### 3.10 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.10 Atitude (`tests/unit/test_quaternion.cpp`, `tests/scientific/test_attitude.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| `ij = k`, `i² = −1` | exato | **0** | álgebra de Hamilton com termos 0 e ±1 |
+| matriz ↔ quaternion, ida e volta | — | 10⁻¹² rad | método de Shepperd; sem cancelamento nem a 180° |
+| cinemática `q̇ = ½q⊗ω` vs rotação finita | 0 rad | 10⁻⁹ rad | passo de Euler: erro `O((ωΔt)²)`. Ordem trocada daria `3·10⁻⁵` |
+| `L` (vetor) sem torque, 1 h | 8,9·10⁻¹² rel | 10⁻¹⁰ rel | invariante exato; resíduo = erro do integrador |
+| energia rotacional, 1 h | 1,8·10⁻¹¹ rel | 10⁻¹⁰ rel | idem |
+| deriva de `‖q‖` por passo | 8,0·10⁻¹⁵ | 10⁻¹⁰ | **medida** antes de renormalizar (§5 de `attitude.md`) |
+| precessão do pião simétrico | — | 10⁻⁹ rel | `Ω = ω₃(I₃−I₁)/I₁`, forma fechada |
+| eixo intermediário, `ω₁` | 2,730823·10⁻⁵ | 2·10⁻³ rel | `seed·cosh(λt)` — solução exata do sistema linearizado |
+| eixo intermediário, `ω₃` | −1,929689·10⁻⁵ | 2·10⁻³ rel | `−seed·√(b/a)·sinh(λt)`, **com sinal** |
+| acoplamento de binários: força líquida | 0 | 10⁻¹² N | os dois empuxos são exatamente opostos |
+| atraso de rastreio do apontamento | 2,5932° | 2 % | `2ζn/ω_n = 2,5930°` |
+
+**Duas expectativas minhas estavam erradas, e o código estava certo nas duas.**
+
+O teste do eixo intermediário ajustava `log(‖perturbação‖)/t` e esperava `λ`;
+media 0,0155 contra 0,0177 previsto. A solução linearizada com `ω₃(0) = 0` **não
+é exponencial pura** — é `cosh`/`sinh`, e `cosh(x) → e^x/2`, de modo que aquele
+ajuste só converge para `λ` conforme `ln2/t → 0`. Comparado contra a forma
+fechada correta, bate em 6 dígitos.
+
+O teste de apontamento exigia erro final `< 1°` e obtinha 2,59°. Um PD é
+controlador **tipo 0**: seguir uma rampa deixa erro permanente
+`θ = 2ζn/ω_n`, e prograde gira à taxa orbital. Previsto 2,5930°, medido 2,5932°.
+
+### 3.11 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|

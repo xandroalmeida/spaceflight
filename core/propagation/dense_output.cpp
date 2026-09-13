@@ -13,13 +13,20 @@ PropagationState state_from_array(const StateArray& y) {
     state.state.velocity = math::Vec3{y[3], y[4], y[5]};
     state.proper_time = time::Duration{y[6]};
     state.mass = y[7];
+    // Normalised on read: integration takes q off the unit sphere by ~1e-13 per
+    // step, and an interpolated q is off by more. See attitude.md section 5.
+    state.attitude.orientation = math::Quaternion{y[8], y[9], y[10], y[11]}.normalized();
+    state.attitude.angular_velocity = math::Vec3{y[12], y[13], y[14]};
     return state;
 }
 
 StateArray array_from_state(const PropagationState& state) {
+    const auto& q = state.attitude.orientation;
+    const auto& w = state.attitude.angular_velocity;
     return StateArray{state.state.position.x, state.state.position.y, state.state.position.z,
                       state.state.velocity.x, state.state.velocity.y, state.state.velocity.z,
-                      state.proper_time.seconds(), state.mass};
+                      state.proper_time.seconds(), state.mass,
+                      q.w(), q.x(), q.y(), q.z(), w.x, w.y, w.z};
 }
 
 PropagationState DenseSegment::at_theta(double theta) const {

@@ -87,6 +87,26 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     dy[6] = 1.0;
     // dm/dt: negative while an engine burns, zero otherwise.
     dy[7] = out_force.mass_flow_rate;
+
+    if (inertia_ != nullptr) {
+        // qdot = 1/2 q (x) (0, omega_body)
+        const math::Quaternion q_dot =
+            math::attitude_derivative(s.attitude.orientation, s.attitude.angular_velocity);
+        dy[8] = q_dot.w();
+        dy[9] = q_dot.x();
+        dy[10] = q_dot.y();
+        dy[11] = q_dot.z();
+
+        // Euler: omega_dot = I^-1 (tau - omega x (I omega)). The gyroscopic term
+        // does no work but is responsible for precession, nutation and the
+        // intermediate axis instability.
+        const math::Vec3 momentum = inertia_->angular_momentum(s.attitude.angular_velocity);
+        const math::Vec3 gyroscopic = cross(s.attitude.angular_velocity, momentum);
+        const math::Vec3 alpha = inertia_->angular_acceleration(out_force.torque - gyroscopic);
+        dy[12] = alpha.x;
+        dy[13] = alpha.y;
+        dy[14] = alpha.z;
+    }
     return dy;
 }
 
@@ -99,21 +119,30 @@ double DormandPrince54Propagator::error_norm(const Vector& y, const Vector& y_ne
     // regime, so including it would dilute the norm for no reason.  Mass
     // (component 7) IS included, because while an engine burns the acceleration
     // is F/m and an error in m propagates straight into the trajectory.
-    constexpr std::size_t kControlled[] = {0, 1, 2, 3, 4, 5, 7};
+    constexpr std::size_t kControlled[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14};
     double sum = 0.0;
+    std::size_t counted = 0;
     for (const std::size_t i : kControlled) {
+        if (i >= 8 && inertia_ == nullptr) {
+            continue;  // attitude is not being integrated
+        }
+        ++counted;
         double atol = config_.absolute_tolerance_velocity;
         if (i < 3) {
             atol = config_.absolute_tolerance_position;
         } else if (i == 7) {
             atol = config_.absolute_tolerance_mass;
+        } else if (i >= 8 && i < 12) {
+            atol = config_.absolute_tolerance_orientation;
+        } else if (i >= 12) {
+            atol = config_.absolute_tolerance_angular_velocity;
         }
         const double scale = atol + config_.relative_tolerance *
                                         std::max(std::abs(y[i]), std::abs(y_new[i]));
         const double ratio = err[i] / scale;
         sum += ratio * ratio;
     }
-    return std::sqrt(sum / static_cast<double>(std::size(kControlled)));
+    return std::sqrt(sum / static_cast<double>(counted));
 }
 
 PropagationResult DormandPrince54Propagator::propagate(const PropagationState& initial,
@@ -253,6 +282,18 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             // an ulp that would otherwise cost one extra, absurdly small step.
             t = clipped ? to : t + time::Duration{h_step};
             y = y_new;
+
+            if (inertia_ != nullptr) {
+                const math::Quaternion q{y[8], y[9], y[10], y[11]};
+                const double drift = std::abs(q.norm() - 1.0);
+                result.stats.max_quaternion_drift =
+                    std::max(result.stats.max_quaternion_drift, drift);
+                const math::Quaternion unit = q.normalized();
+                y[8] = unit.w();
+                y[9] = unit.x();
+                y[10] = unit.y();
+                y[11] = unit.z();
+            }
             k1 = k7;  // FSAL
             force = force_new;
 

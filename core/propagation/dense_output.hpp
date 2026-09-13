@@ -20,12 +20,18 @@
 
 namespace sf::propagation {
 
-// [x y z vx vy vz tau m] -- the vector the propagator integrates.
+// [x y z vx vy vz tau m qw qx qy qz wx wy wz] -- what the propagator integrates.
 //
 // Mass is a state component, not a value updated after the step: the acceleration
 // depends on the instantaneous mass and the integrator evaluates the derivative
 // seven times inside one step.  See docs/physics/propulsion-model.md section 6.1.
-inline constexpr std::size_t kStateDimension = 8;
+//
+// Orientation and angular velocity join it in Milestone 3. The quaternion is
+// renormalised when a state is read back out of the array -- a projection onto
+// the constraint manifold, which is legitimate here for reasons spelled out in
+// docs/physics/attitude.md section 5, and emphatically not the same thing as
+// clamping a velocity at c.
+inline constexpr std::size_t kStateDimension = 15;
 using StateArray = std::array<double, kStateDimension>;
 
 PropagationState state_from_array(const StateArray& y);

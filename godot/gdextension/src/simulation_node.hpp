@@ -10,6 +10,9 @@
 // Vector3 that has already been through RenderTransform: float, camera-relative,
 // scene units.  See docs/architecture/rendering.md.
 
+#include "core/attitude/inertia.hpp"
+#include "core/attitude/pointing_controller.hpp"
+#include "core/attitude/rcs.hpp"
 #include "core/celestial/body_catalog.hpp"
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
 #include "core/ephemeris/spice_time_converter.hpp"
@@ -22,6 +25,8 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <memory>
@@ -68,6 +73,22 @@ public:
     godot::Vector3 get_spacecraft_position() const;
     godot::Vector3 get_spacecraft_velocity_direction() const;
 
+    // --- attitude ----------------------------------------------------------
+    // Godot's Quaternion is scalar LAST; the core's is scalar first (ADR-0008).
+    // The reordering happens here and nowhere else.
+    godot::Quaternion get_spacecraft_orientation() const;
+    godot::Basis get_spacecraft_basis() const;
+
+    // "prograde", "retrograde", "normal", "anti_normal", "radial_in",
+    // "radial_out", or "" to hold the current attitude.
+    bool set_pointing_mode(const godot::String& mode);
+    godot::String get_pointing_mode() const;
+    double get_pointing_error_deg() const;
+
+    // Direct torque command in the BODY frame, in newton metres. Non-zero
+    // overrides the pointing controller; Vector3.ZERO hands it back.
+    void set_manual_torque(const godot::Vector3& torque_body);
+
     // Everything else, as a Dictionary: the cockpit reads this once per frame
     // instead of making twenty calls.
     godot::Dictionary get_snapshot() const;
@@ -89,6 +110,10 @@ private:
     std::unique_ptr<sf::propagation::DormandPrince54Propagator> propagator_;
     std::unique_ptr<sf::simulation::SnapshotBuilder> builder_;
     std::unique_ptr<sf::simulation::SimulationClock> clock_;
+    std::unique_ptr<sf::attitude::InertiaTensor> inertia_;
+    std::unique_ptr<sf::attitude::RcsSystem> rcs_;
+    std::unique_ptr<sf::attitude::PointingController> pointing_;
+    std::unique_ptr<sf::attitude::RcsForce> rcs_force_;
 
     sf::propagation::PropagationState state_{};
     sf::simulation::SimulationSnapshot snapshot_{};

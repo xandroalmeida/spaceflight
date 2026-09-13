@@ -3,6 +3,7 @@
 // Dormand-Prince 5(4), seven stages, FSAL, with a PI step size controller.
 // See ADR-0005 for why this integrator and not a symplectic one.
 
+#include "core/attitude/inertia.hpp"
 #include "core/gravity/force_model.hpp"
 #include "core/propagation/dense_output.hpp"
 #include "core/propagation/spacecraft_propagator.hpp"
@@ -31,6 +32,13 @@ public:
     // the trajectory by a single bit -- tests/scientific/test_dense_output.cpp
     // asserts exactly that.  See ADR-0006.
     void set_trajectory_recorder(Trajectory* sink) { recorder_ = sink; }
+
+    // Attitude is integrated only when an inertia tensor is available: without
+    // one there is no way to turn torque into angular acceleration, and a
+    // scenario with no attitude should not pay for seven unused state
+    // components. `inertia` must outlive the propagator; nullptr disables.
+    void set_inertia(const attitude::InertiaTensor* inertia) { inertia_ = inertia; }
+    [[nodiscard]] const attitude::InertiaTensor* inertia() const noexcept { return inertia_; }
     [[nodiscard]] Trajectory* trajectory_recorder() const noexcept { return recorder_; }
 
     [[nodiscard]] const IntegratorConfig& config() const noexcept { return config_; }
@@ -52,6 +60,7 @@ private:
     IntegratorConfig config_;
     StepObserver observer_;
     Trajectory* recorder_{nullptr};
+    const attitude::InertiaTensor* inertia_{nullptr};
     bool observe_rejected_{false};
 };
 

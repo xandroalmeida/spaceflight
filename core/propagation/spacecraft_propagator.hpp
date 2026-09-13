@@ -26,6 +26,11 @@ struct IntegratorConfig {
     // Mass is error-controlled too: its error feeds straight back into the
     // acceleration through a = F/m while an engine is burning.
     double absolute_tolerance_mass{1.0e-6};       // [kg]
+    // Attitude tolerances. The quaternion is dimensionless and of order 1; the
+    // angular velocity is in rad/s and orbital rates are ~1e-3, so the floors
+    // differ by orders of magnitude and cannot share one number.
+    double absolute_tolerance_orientation{1.0e-10};
+    double absolute_tolerance_angular_velocity{1.0e-10};   // [rad/s]
 
     time::Duration min_step{time::Duration::seconds(1.0e-6)};
     time::Duration max_step{time::Duration::days(1.0)};
@@ -59,6 +64,11 @@ struct IntegratorStats {
     double mean_step_seconds{0.0};
     double max_error_estimate{0.0};  // scaled, 1.0 == exactly at tolerance
     double wall_time_seconds{0.0};
+
+    // Largest |‖q‖ - 1| seen just before renormalising. Measured rather than
+    // assumed: if it grows, the step is too long, and that is information a
+    // silent projection would destroy (docs/physics/attitude.md section 5).
+    double max_quaternion_drift{0.0};
 
     [[nodiscard]] std::string to_string() const;
 };

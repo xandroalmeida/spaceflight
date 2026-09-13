@@ -11,6 +11,7 @@
 // per frame, rather than by each instrument on its own.
 // See docs/architecture/rendering.md section 4.
 
+#include "core/attitude/attitude_state.hpp"
 #include "core/celestial/body_catalog.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/gravity/force_model.hpp"
@@ -58,6 +59,16 @@ struct SpacecraftSnapshot {
     std::optional<celestial::BodyId> target;
     double target_distance{0.0};
     double target_relative_speed{0.0};
+
+    // Attitude (Milestone 3). The Euler angles are NOT here: they are a display
+    // projection of the quaternion and are computed where they are displayed
+    // (rule 19, ADR-0008).
+    math::Quaternion orientation{math::Quaternion::identity()};
+    math::Vec3 angular_velocity{};     // body frame [rad/s]
+    double rotation_rate{0.0};         // |omega| [rad/s]
+    math::Vec3 nose{1.0, 0.0, 0.0};    // body +x, in the integration frame
+    double angle_to_prograde{0.0};     // [rad]
+    double angle_to_nadir{0.0};        // [rad]
 
     // Relativity readouts.  Newtonian values today -- present from the start so
     // that Milestone 4 changes the physics, not the contract.

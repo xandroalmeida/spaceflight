@@ -43,6 +43,7 @@ var ship_mesh: MeshInstance3D
 var warp_index := 0
 var exaggeration_index := 0
 var _headless_seconds := 0.0
+var _headless_slew_commanded := false
 var focus_index := -1  ## -1 = the spacecraft
 
 
@@ -111,8 +112,10 @@ func _build_scene() -> void:
 		body_meshes.append(mesh_instance)
 
 	ship_mesh = MeshInstance3D.new()
+	# Elongated along +x, the body's nose axis, so that the attitude is legible at
+	# a glance: a cube would rotate invisibly.
 	var ship_shape := BoxMesh.new()
-	ship_shape.size = Vector3.ONE * SHIP_SIZE
+	ship_shape.size = Vector3(SHIP_SIZE * 2.5, SHIP_SIZE, SHIP_SIZE)
 	ship_mesh.mesh = ship_shape
 	var ship_material := StandardMaterial3D.new()
 	ship_material.albedo_color = Color(1.0, 0.85, 0.3)
@@ -241,6 +244,8 @@ func _process(delta: float) -> void:
 	if simulation == null or not simulation.is_ready():
 		return
 
+	_apply_manual_rcs()
+
 	# The frame rate decides how much coordinate time to ask for. It never
 	# reaches the integrator, which picks its own steps (rule 21).
 	simulation.advance(delta)
@@ -260,9 +265,35 @@ func _process(delta: float) -> void:
 			mesh_instance.scale = Vector3.ONE * radius
 
 	ship_mesh.position = simulation.get_spacecraft_position()
+	# The hull points where the attitude says it points -- not along the velocity,
+	# which is what a simulator without attitude has to pretend.
+	ship_mesh.basis = simulation.get_spacecraft_basis()
 
 	_place_camera()
 	_update_readout()
+
+
+const MANUAL_TORQUE := 400.0   ## N m, about what the modelled RCS can deliver
+
+
+func _apply_manual_rcs() -> void:
+	## Held keys become a torque REQUEST in the body frame. The request goes to
+	## the RCS, which fires thrusters, which burn propellant -- there is no path
+	## from a key to the orientation (rule 28).
+	var torque := Vector3.ZERO
+	if Input.is_key_pressed(KEY_UP):
+		torque.y += MANUAL_TORQUE
+	if Input.is_key_pressed(KEY_DOWN):
+		torque.y -= MANUAL_TORQUE
+	if Input.is_key_pressed(KEY_LEFT):
+		torque.z += MANUAL_TORQUE
+	if Input.is_key_pressed(KEY_RIGHT):
+		torque.z -= MANUAL_TORQUE
+	if Input.is_key_pressed(KEY_PAGEUP):
+		torque.x += MANUAL_TORQUE
+	if Input.is_key_pressed(KEY_PAGEDOWN):
+		torque.x -= MANUAL_TORQUE
+	simulation.set_manual_torque(torque)
 
 
 func _warn_if_camera_is_inside_a_body() -> void:
@@ -346,6 +377,13 @@ func _update_readout() -> void:
 		"period         %.2f s" % s["period_s"],
 		"",
 		"mass           %.1f kg" % s["mass_kg"],
+		"propellant     %.3f kg" % s["propellant_kg"],
+		"throttle       %.0f %%      thrust %.1f N" % [s["throttle"] * 100.0, s["thrust_n"]],
+		"",
+		"pointing       %s   error %.3f deg" % [s["pointing_mode"], s["pointing_error_deg"]],
+		"nose->prograde %.3f deg" % s["angle_to_prograde_deg"],
+		"nose->nadir    %.3f deg" % s["angle_to_nadir_deg"],
+		"spin rate      %.4f deg/s" % s["rotation_rate_deg_s"],
 		"target         %s at %.0f km, %.1f m/s" % [s["target"], s["target_distance_m"] / 1000.0, s["target_relative_speed_ms"]],
 		"",
 		"beta           %s" % String.num_scientific(s["beta"]),
@@ -354,6 +392,8 @@ func _update_readout() -> void:
 		"",
 		"focus: %s   body scale %.0fx" % [("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)), EXAGGERATION_LEVELS[exaggeration_index]],
 		"(, . warp   F focus   B body scale   R restart)",
+		"(1 prograde  2 retrograde  3 normal  4 anti-normal  5 radial-out  0 hold)",
+		"(arrows/PgUp/PgDn: manual RCS torque)",
 	]
 	readout.text = "\n".join(lines)
 
@@ -361,6 +401,13 @@ func _update_readout() -> void:
 	# that `--headless --quit-after N` is a real verification and not a silent
 	# no-op. This is how Milestone 2 is checked on a machine with no display.
 	if DisplayServer.get_name() == "headless":
+		# Nobody can press a key without a display, so command a slew on the way
+		# past: the printed pointing error then exercises the whole attitude
+		# chain -- controller, RCS, torque, Euler's equations -- end to end.
+		if not _headless_slew_commanded and s["elapsed_s"] > 2.0:
+			_headless_slew_commanded = true
+			simulation.set_pointing_mode("prograde")
+			print("\n[headless] commanded PROGRADE")
 		_headless_seconds += get_process_delta_time()
 		if _headless_seconds >= 1.0:
 			_headless_seconds = 0.0
@@ -388,3 +435,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_warn_if_camera_is_inside_a_body()
 		KEY_R:
 			simulation.start_circular_orbit(ALTITUDE_M, INCLINATION_DEG)
+		KEY_1: simulation.set_pointing_mode("prograde")
+		KEY_2: simulation.set_pointing_mode("retrograde")
+		KEY_3: simulation.set_pointing_mode("normal")
+		KEY_4: simulation.set_pointing_mode("anti_normal")
+		KEY_5: simulation.set_pointing_mode("radial_out")
+		KEY_6: simulation.set_pointing_mode("radial_in")
+		KEY_0: simulation.set_pointing_mode("")

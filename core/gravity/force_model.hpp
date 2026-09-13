@@ -29,7 +29,10 @@ struct ForceResult {
     // the failure mode rule section 17 forbids.
     double mass_flow_rate{0.0};
 
-    // Milestone 3 adds torque here, once attitude exists.
+    // Torque about the centre of mass, in the BODY frame [N m]. Body frame
+    // because that is where the inertia tensor is constant, so that is where
+    // Euler's equations are written (docs/physics/attitude.md section 2).
+    math::Vec3 torque{};
 
     // Set when the evaluation happened inside a body's radius.  Point-mass
     // gravity remains mathematically defined there but stops being physical, so

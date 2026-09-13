@@ -9,6 +9,7 @@
 // Milestone 4 replaces `state.velocity` (coordinate velocity v) with u = gamma*v.
 // That is a change of this struct plus one derivative function -- not a rewrite.
 
+#include "core/attitude/attitude_state.hpp"
 #include "core/coordinates/state_vector.hpp"
 #include "core/time/duration.hpp"
 
@@ -19,8 +20,14 @@ struct PropagationState {
     double mass{1.0};                       // rest mass [kg]
     time::Duration proper_time{};           // elapsed proper time since t0 [s]
 
+    // Orientation and angular velocity (Milestone 3). Integrated alongside the
+    // translation because the RCS couples them: a thruster that produces torque
+    // also produces thrust (docs/physics/attitude.md section 6).
+    attitude::AttitudeState attitude{};
+
     [[nodiscard]] bool is_finite() const {
-        return state.is_finite() && std::isfinite(mass) && proper_time.is_finite();
+        return state.is_finite() && std::isfinite(mass) && proper_time.is_finite() &&
+               attitude.is_finite();
     }
 };
 

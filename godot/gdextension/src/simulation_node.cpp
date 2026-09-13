@@ -76,6 +76,18 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_spacecraft_position);
     godot::ClassDB::bind_method(D_METHOD("get_spacecraft_velocity_direction"),
                                 &SpaceflightSimulation::get_spacecraft_velocity_direction);
+    godot::ClassDB::bind_method(D_METHOD("get_spacecraft_orientation"),
+                                &SpaceflightSimulation::get_spacecraft_orientation);
+    godot::ClassDB::bind_method(D_METHOD("get_spacecraft_basis"),
+                                &SpaceflightSimulation::get_spacecraft_basis);
+    godot::ClassDB::bind_method(D_METHOD("set_pointing_mode", "mode"),
+                                &SpaceflightSimulation::set_pointing_mode);
+    godot::ClassDB::bind_method(D_METHOD("get_pointing_mode"),
+                                &SpaceflightSimulation::get_pointing_mode);
+    godot::ClassDB::bind_method(D_METHOD("get_pointing_error_deg"),
+                                &SpaceflightSimulation::get_pointing_error_deg);
+    godot::ClassDB::bind_method(D_METHOD("set_manual_torque", "torque_body"),
+                                &SpaceflightSimulation::set_manual_torque);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -102,6 +114,17 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         forces_->add(sf::gravity::OblatenessGravity::for_body(
             *provider_, *provider_, sf::celestial::bodies::earth, frame));
 
+        // Attitude: a 1000 kg box 8 x 3 x 3 m, with twelve RCS thrusters in six
+        // couples on a 2 m arm. Numbers chosen to be plausible, not fitted.
+        inertia_ = std::make_unique<sf::attitude::InertiaTensor>(
+            sf::attitude::InertiaTensor::solid_box(1000.0, sf::math::Vec3{8.0, 3.0, 3.0}));
+        const sf::propulsion::EngineSpec rcs_thruster{"RCS", 0.02, 3.0e-5, 1.0};
+        rcs_ = std::make_unique<sf::attitude::RcsSystem>(
+            sf::attitude::RcsSystem::couples(2.0, rcs_thruster));
+        pointing_ = std::make_unique<sf::attitude::PointingController>(*provider_, *inertia_, frame);
+        rcs_force_ = std::make_unique<sf::attitude::RcsForce>(*rcs_, *pointing_);
+        forces_->add_reference(*rcs_force_);
+
         const auto epoch_time = time_converter_->parse(epoch);
 
         sf::propagation::IntegratorConfig config{};
@@ -110,12 +133,18 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         config.absolute_tolerance_velocity = 1.0e-6;
         config.max_step = sf::time::Duration::seconds(3600.0);
         propagator_ = std::make_unique<sf::propagation::DormandPrince54Propagator>(*forces_, config);
+        propagator_->set_inertia(inertia_.get());
 
         clock_ = std::make_unique<sf::simulation::SimulationClock>(epoch_time);
 
         builder_ = std::make_unique<sf::simulation::SnapshotBuilder>(
             *provider_, *catalog_, *forces_, sf::celestial::bodies::earth, epoch_time, frame);
         builder_->set_target(sf::celestial::bodies::moon);
+        // 900 kg dry + 100 kg of RCS propellant, burnt through the thruster's own
+        // v_eff. Without this the propellant readout would sit at zero while the
+        // thrusters fired, which is the sort of quiet lie this project exists to
+        // avoid.
+        builder_->set_propulsion(900.0, rcs_thruster.effective_exhaust_velocity());
 
         state_ = sf::propagation::PropagationState{};
         state_.mass = 1000.0;
@@ -253,6 +282,61 @@ Vector3 SpaceflightSimulation::get_spacecraft_velocity_direction() const {
                    static_cast<float>(direction.z)};
 }
 
+godot::Quaternion SpaceflightSimulation::get_spacecraft_orientation() const {
+    const auto& q = snapshot_.spacecraft.orientation;
+    // Scalar first (core, ADR-0008) -> scalar last (Godot). This one line is the
+    // entire convention boundary.
+    return godot::Quaternion{static_cast<float>(q.x()), static_cast<float>(q.y()),
+                             static_cast<float>(q.z()), static_cast<float>(q.w())};
+}
+
+godot::Basis SpaceflightSimulation::get_spacecraft_basis() const {
+    return godot::Basis{get_spacecraft_orientation()};
+}
+
+bool SpaceflightSimulation::set_pointing_mode(const godot::String& mode) {
+    if (pointing_ == nullptr) {
+        return false;
+    }
+    const std::string name{mode.utf8().get_data()};
+
+    sf::attitude::PointingCommand command{};
+    command.reference = sf::celestial::bodies::earth;
+    if (!name.empty()) {
+        const auto parsed = sf::navigation::guidance_from_string(name);
+        if (!parsed.has_value()) {
+            last_error_ = "unknown pointing mode \"" + name + "\"";
+            godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+            return false;
+        }
+        command.mode = *parsed;
+    }
+    pointing_->set_command(command);
+    return true;
+}
+
+godot::String SpaceflightSimulation::get_pointing_mode() const {
+    if (pointing_ == nullptr || !pointing_->command().mode.has_value()) {
+        return godot::String{"HOLD"};
+    }
+    return godot::String{std::string{sf::navigation::to_string(*pointing_->command().mode)}.c_str()};
+}
+
+double SpaceflightSimulation::get_pointing_error_deg() const {
+    if (pointing_ == nullptr || builder_ == nullptr) {
+        return 0.0;
+    }
+    return sf::units::rad_to_deg(pointing_->pointing_error(state_, clock_->coordinate_time()));
+}
+
+void SpaceflightSimulation::set_manual_torque(const godot::Vector3& torque_body) {
+    if (rcs_force_ == nullptr) {
+        return;
+    }
+    rcs_force_->set_manual_torque(
+        sf::math::Vec3{torque_body.x, torque_body.y, torque_body.z});
+}
+
 godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     godot::Dictionary out;
     if (builder_ == nullptr) {
@@ -290,6 +374,12 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
                                              : godot::String{};
     out["target_distance_m"] = craft.target_distance;
     out["target_relative_speed_ms"] = craft.target_relative_speed;
+
+    out["rotation_rate_deg_s"] = sf::units::rad_to_deg(craft.rotation_rate);
+    out["angle_to_prograde_deg"] = sf::units::rad_to_deg(craft.angle_to_prograde);
+    out["angle_to_nadir_deg"] = sf::units::rad_to_deg(craft.angle_to_nadir);
+    out["pointing_mode"] = get_pointing_mode();
+    out["pointing_error_deg"] = get_pointing_error_deg();
 
     out["beta"] = craft.beta;
     out["lorentz_factor"] = craft.lorentz_factor;

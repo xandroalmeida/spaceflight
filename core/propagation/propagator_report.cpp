@@ -26,6 +26,7 @@ std::string IntegratorStats::to_string() const {
        << ", mean " << mean_step_seconds
        << ", max " << max_step_seconds
        << " | max scaled error: " << max_error_estimate
+       << " | max |q|-1: " << max_quaternion_drift
        << " | wall: " << wall_time_seconds << " s";
     return os.str();
 }

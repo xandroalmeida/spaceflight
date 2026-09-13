@@ -6,9 +6,13 @@
 
 add_library(spaceflight_core STATIC
     config/json.cpp
+    math/quaternion.cpp
     math/vec3.cpp
     time/coordinate_time.cpp
     celestial/body_id.cpp
+    attitude/inertia.cpp
+    attitude/pointing_controller.cpp
+    attitude/rcs.cpp
     celestial/body_catalog.cpp
     celestial/oblateness.cpp
     ephemeris/spice_internal.cpp
