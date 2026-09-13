@@ -71,6 +71,11 @@ spaceflight/
 ├── external/                   CSPICE (fora do Git)
 ├── kernels/spice/              LSK, PCK, SPK (fora do Git; MANIFEST.md + SHA256SUMS)
 │
+├── tools/
+│   ├── orbit-cli/              propagar, interceptar, CSV
+│   ├── gr-reference/           emissor de trajetórias para validação cruzada (§29)
+│   └── validation/             comparação contra REBOUNDx, gráficos
+│
 ├── core/                       libspaceflight_core.a  -- sem Godot, sem main()
 │   ├── math/                   Vec3, Mat3
 │   ├── units/                  constantes SI com proveniência, conversões
@@ -257,6 +262,28 @@ Derivação, orçamento de erro e o que foi desprezado (arrasto de referencial, 
 maior dívida): [`docs/physics/relativistic-gravity.md`](docs/physics/relativistic-gravity.md)
 e [`docs/physics/spin-transport.md`](docs/physics/spin-transport.md).
 Toda tolerância: [`docs/validation/tolerances.md`](docs/validation/tolerances.md) §3.13 e §3.14.
+
+### Validação cruzada contra outro código (§29)
+
+A geodésica foi comparada com o operador `gr` do REBOUNDx — a força 1PN de
+Anderson *et al.* usada em efemérides — no mesmo problema, sem nenhuma linha de
+código em comum:
+
+```bash
+cmake --build build --target gr-reference
+./tools/validation/reboundx_cross_check.py
+```
+
+Depois de 40 órbitas de Mercúrio as duas trajetórias estão a **2 600 km** uma da
+outra, e isso não é um problema: o avanço do periélio por órbita — a quantidade
+invariante — concorda em **2,7 partes por milhão** (−0,0001″/século contra 43).
+Toda a separação é *quando* a partícula está onde. Uma única constante
+(1,46·10⁻⁷ de movimento médio) absorve 99,6 % dela, e o que sobra é **limitado**
+em 1,17·10⁴ m = 7,96 × `GM/c²` — a escala em que dois sistemas de coordenadas
+1PN podem legitimamente diferir. O controle newtoniano, com relatividade
+desligada nos dois códigos, fica em **98 m**.
+
+Leitura completa em [`tools/validation/README.md`](tools/validation/README.md).
 
 ## Próximo
 
