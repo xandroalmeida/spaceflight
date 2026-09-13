@@ -23,6 +23,7 @@ add_library(spaceflight_core STATIC
     gravity/composite_force_model.cpp
     gravity/oblateness_gravity.cpp
     propulsion/engine.cpp
+    propulsion/main_engine_force.cpp
     spacecraft/spacecraft.cpp
     navigation/maneuver.cpp
     navigation/maneuver_executor.cpp

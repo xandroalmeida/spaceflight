@@ -9,7 +9,9 @@
 #include "core/celestial/body_catalog.hpp"
 #include "core/gravity/composite_force_model.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
+#include "core/attitude/inertia.hpp"
 #include "core/navigation/mission.hpp"
+#include "core/propulsion/main_engine_force.hpp"
 #include "core/navigation/trajectory_planner.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/trajectory/orbital_elements.hpp"
@@ -436,4 +438,75 @@ TEST(a_two_burn_hohmann_transfer_arrives_in_a_circular_orbit) {
     CHECK_NEAR_REL(total_delta_v, transfer.total_delta_v, 1.0e-9,
                    "the engine delivers exactly what the plan asked for; whether that was the "
                    "right amount is what the orbit above answers");
+}
+
+
+TEST(the_throttle_burns_along_the_nose_and_nowhere_else) {
+    // The interactive path: no plan, no guidance mode, just an attitude and a
+    // throttle. Where the burn goes is decided by where the ship points, which
+    // is the coupling a cockpit needs (and a planned burn deliberately avoids).
+    sft::FixedPointMassProvider provider{kEarth, kGm, 0.0};
+    const spacecraft::Spacecraft ship{"probe", 1000.0, 1000.0, engine(1.0)};
+    propulsion::MainEngineForce main_engine{ship};
+
+    propagation::PropagationState initial{};
+    initial.state.position = Vec3{1.0e7, 0.0, 0.0};
+    initial.state.velocity = Vec3{};
+    initial.mass = ship.initial_mass();
+
+    // Nose along +y: 90 degrees from the body's default +x.
+    initial.attitude.orientation =
+        math::Quaternion::from_axis_angle(Vec3::unit_z(), units::pi / 2.0);
+
+    const auto inertia = attitude::InertiaTensor::solid_box(1000.0, Vec3{8.0, 3.0, 3.0});
+    propagation::DormandPrince54Propagator propagator{main_engine, integrator_config()};
+    propagator.set_inertia(&inertia);
+
+    // Idle: nothing happens at all.
+    const auto t0 = time::CoordinateTime::j2000();
+    const auto coasting = propagator.propagate(initial, t0, t0 + time::Duration::seconds(10.0));
+    REQUIRE(coasting.ok());
+    CHECK_NEAR_ABS(coasting.state.state.velocity.norm(), 0.0, 0.0,
+                   "throttle zero means no acceleration and no consumption: not a small number, "
+                   "exactly zero");
+    CHECK_NEAR_ABS(coasting.state.mass, ship.initial_mass(), 0.0, "and no propellant burnt");
+
+    main_engine.set_throttle(1.0);
+    const double dt = 100.0;
+    const auto burn = propagator.propagate(initial, t0, t0 + time::Duration::seconds(dt));
+    REQUIRE(burn.ok());
+
+    const double delta_v = ship.engine().effective_exhaust_velocity() *
+                           std::log(ship.initial_mass() / (ship.initial_mass() - dt));
+
+    std::ostringstream os;
+    os << "throttle 1.0 for " << dt << " s with the nose along +y: dv = "
+       << burn.state.state.velocity.norm() << " m/s, Tsiolkovsky " << delta_v
+       << ", transverse " << std::hypot(burn.state.state.velocity.x, burn.state.state.velocity.z);
+    INFO(os.str());
+
+    CHECK_NEAR_REL(burn.state.state.velocity.y, delta_v, 1.0e-10,
+                   "with no gravity in this force model the rocket equation is exact, and the "
+                   "burn went along the nose");
+    CHECK_NEAR_ABS(std::hypot(burn.state.state.velocity.x, burn.state.state.velocity.z), 0.0,
+                   1.0e-9,
+                   "nothing pushed sideways: the direction comes from the attitude quaternion and "
+                   "nothing else");
+    CHECK_NEAR_REL(burn.state.mass, ship.initial_mass() - dt, 1.0e-12, "q = 1 kg/s for 100 s");
+
+    // Point the other way and the same throttle undoes it.
+    propagation::PropagationState reversed = burn.state;
+    reversed.attitude.orientation =
+        math::Quaternion::from_axis_angle(Vec3::unit_z(), -units::pi / 2.0);
+    const auto back = propagator.propagate(reversed, t0, t0 + time::Duration::seconds(10.0));
+    REQUIRE(back.ok());
+    CHECK(back.state.state.velocity.y < burn.state.state.velocity.y);
+
+    // Tank dry: thrust stops with no special case anywhere.
+    propagation::PropagationState empty = initial;
+    empty.mass = ship.dry_mass();
+    const auto nothing = propagator.propagate(empty, t0, t0 + time::Duration::seconds(10.0));
+    REQUIRE(nothing.ok());
+    CHECK_NEAR_ABS(nothing.state.state.velocity.norm(), 0.0, 0.0,
+                   "no propellant, no thrust -- because the thrust IS the consumption");
 }

@@ -18,7 +18,9 @@
 #include "core/ephemeris/spice_time_converter.hpp"
 #include "core/gravity/composite_force_model.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
+#include "core/propulsion/main_engine_force.hpp"
 #include "core/render/render_transform.hpp"
+#include "core/spacecraft/spacecraft.hpp"
 #include "core/simulation/simulation_clock.hpp"
 #include "core/simulation/snapshot.hpp"
 
@@ -89,6 +91,12 @@ public:
     // overrides the pointing controller; Vector3.ZERO hands it back.
     void set_manual_torque(const godot::Vector3& torque_body);
 
+    // --- main engine -------------------------------------------------------
+    // Thrust goes along the nose, so where the burn goes is decided by where the
+    // ship is pointing: aim with 1-6, then open the throttle.
+    void set_throttle(double throttle);
+    double get_throttle() const;
+
     // Everything else, as a Dictionary: the cockpit reads this once per frame
     // instead of making twenty calls.
     godot::Dictionary get_snapshot() const;
@@ -114,6 +122,8 @@ private:
     std::unique_ptr<sf::attitude::RcsSystem> rcs_;
     std::unique_ptr<sf::attitude::PointingController> pointing_;
     std::unique_ptr<sf::attitude::RcsForce> rcs_force_;
+    std::unique_ptr<sf::spacecraft::Spacecraft> craft_;
+    std::unique_ptr<sf::propulsion::MainEngineForce> main_engine_;
 
     sf::propagation::PropagationState state_{};
     sf::simulation::SimulationSnapshot snapshot_{};

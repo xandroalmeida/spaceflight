@@ -44,6 +44,8 @@ var warp_index := 0
 var exaggeration_index := 0
 var _headless_seconds := 0.0
 var _headless_slew_commanded := false
+var _headless_burn_commanded := false
+var throttle := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
 
@@ -276,6 +278,15 @@ func _process(delta: float) -> void:
 const MANUAL_TORQUE := 400.0   ## N m, about what the modelled RCS can deliver
 
 
+func _set_throttle(value: float) -> void:
+	## The throttle is changed BETWEEN frames, never inside a propagation step:
+	## opening it mid-step would be a discontinuity in the derivative, which is
+	## the same reason planned burns are split at their ignition epochs
+	## (docs/architecture/navigation.md section 4).
+	throttle = clampf(value, 0.0, 1.0)
+	simulation.set_throttle(throttle)
+
+
 func _apply_manual_rcs() -> void:
 	## Held keys become a torque REQUEST in the body frame. The request goes to
 	## the RCS, which fires thrusters, which burn propellant -- there is no path
@@ -393,7 +404,7 @@ func _update_readout() -> void:
 		"focus: %s   body scale %.0fx" % [("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)), EXAGGERATION_LEVELS[exaggeration_index]],
 		"(, . warp   F focus   B body scale   R restart)",
 		"(1 prograde  2 retrograde  3 normal  4 anti-normal  5 radial-out  0 hold)",
-		"(arrows/PgUp/PgDn: manual RCS torque)",
+		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
 	]
 	readout.text = "\n".join(lines)
 
@@ -408,6 +419,23 @@ func _update_readout() -> void:
 			_headless_slew_commanded = true
 			simulation.set_pointing_mode("prograde")
 			print("\n[headless] commanded PROGRADE")
+		# Once pointed, burn: the apoapsis should climb while the propellant
+		# falls. That exercises attitude, engine and orbit in one go.
+		# 3 degrees, not 1: a PD controller settles at the tracking lag
+		# 2 zeta n / omega_n = 2.593 deg and never gets closer
+		# (docs/physics/attitude.md section 7.1). A threshold below that waits
+		# forever -- which is what the first version did.
+		#
+		# Note the first condition: pointing_error is 0 while the mode is HOLD
+		# (no target, no error), so without it the burn fires immediately -- at
+		# 90 degrees off prograde, which is a fine demonstration of a cockpit
+		# mistake and a poor demonstration of anything else.
+		if _headless_slew_commanded and not _headless_burn_commanded \
+				and s["pointing_mode"] == "PROGRADE" and s["pointing_error_deg"] < 3.0:
+			_headless_burn_commanded = true
+			_set_throttle(1.0)
+			print("\n[headless] throttle 100%% at %.3f deg of pointing error"
+				% s["pointing_error_deg"])
 		_headless_seconds += get_process_delta_time()
 		if _headless_seconds >= 1.0:
 			_headless_seconds = 0.0
@@ -442,3 +470,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_5: simulation.set_pointing_mode("radial_out")
 		KEY_6: simulation.set_pointing_mode("radial_in")
 		KEY_0: simulation.set_pointing_mode("")
+		KEY_Z: _set_throttle(1.0)
+		KEY_X: _set_throttle(0.0)
+		KEY_EQUAL: _set_throttle(throttle + 0.1)
+		KEY_MINUS: _set_throttle(throttle - 0.1)

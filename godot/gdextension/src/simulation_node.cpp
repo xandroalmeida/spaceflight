@@ -88,6 +88,9 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_pointing_error_deg);
     godot::ClassDB::bind_method(D_METHOD("set_manual_torque", "torque_body"),
                                 &SpaceflightSimulation::set_manual_torque);
+    godot::ClassDB::bind_method(D_METHOD("set_throttle", "throttle"),
+                                &SpaceflightSimulation::set_throttle);
+    godot::ClassDB::bind_method(D_METHOD("get_throttle"), &SpaceflightSimulation::get_throttle);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -125,6 +128,15 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         rcs_force_ = std::make_unique<sf::attitude::RcsForce>(*rcs_, *pointing_);
         forces_->add_reference(*rcs_force_);
 
+        // Main engine: chemical class, v_eff = 8993.8 m/s, 135 kN at full
+        // throttle. 600 kg dry + 400 kg of propellant gives a budget of 4.6 km/s,
+        // which is enough to do something interesting from low orbit and not
+        // enough to be boring about it.
+        const sf::propulsion::EngineSpec main{"Orbital Tug", 15.0, 3.0e-5, 1.0};
+        craft_ = std::make_unique<sf::spacecraft::Spacecraft>("Tug", 600.0, 400.0, main);
+        main_engine_ = std::make_unique<sf::propulsion::MainEngineForce>(*craft_);
+        forces_->add_reference(*main_engine_);
+
         const auto epoch_time = time_converter_->parse(epoch);
 
         sf::propagation::IntegratorConfig config{};
@@ -144,10 +156,10 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         // v_eff. Without this the propellant readout would sit at zero while the
         // thrusters fired, which is the sort of quiet lie this project exists to
         // avoid.
-        builder_->set_propulsion(900.0, rcs_thruster.effective_exhaust_velocity());
+        builder_->set_propulsion(craft_->dry_mass(), main.effective_exhaust_velocity());
 
         state_ = sf::propagation::PropagationState{};
-        state_.mass = 1000.0;
+        state_.mass = craft_->initial_mass();
     });
 }
 
@@ -174,6 +186,8 @@ bool SpaceflightSimulation::start_circular_orbit(double altitude_m, double incli
             earth_state.state.velocity +
             sf::math::Vec3{0.0, speed * std::cos(inclination), speed * std::sin(inclination)};
         state_.proper_time = sf::time::Duration::zero();
+        state_.mass = craft_->initial_mass();
+        state_.attitude = sf::attitude::AttitudeState{};
 
         rebuild_snapshot();
         focus_on_spacecraft();
@@ -337,6 +351,16 @@ void SpaceflightSimulation::set_manual_torque(const godot::Vector3& torque_body)
         sf::math::Vec3{torque_body.x, torque_body.y, torque_body.z});
 }
 
+void SpaceflightSimulation::set_throttle(double throttle) {
+    if (main_engine_ != nullptr) {
+        main_engine_->set_throttle(throttle);
+    }
+}
+
+double SpaceflightSimulation::get_throttle() const {
+    return main_engine_ != nullptr ? main_engine_->throttle() : 0.0;
+}
+
 godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     godot::Dictionary out;
     if (builder_ == nullptr) {
@@ -360,8 +384,8 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     out["mass_kg"] = craft.mass;
     out["propellant_kg"] = craft.propellant;
     out["delta_v_budget_ms"] = craft.delta_v_budget;
-    out["thrust_n"] = craft.thrust;
-    out["throttle"] = craft.throttle;
+    out["thrust_n"] = main_engine_ != nullptr ? main_engine_->current_thrust() : 0.0;
+    out["throttle"] = get_throttle();
 
     out["apoapsis_m"] = craft.elements.apoapsis_radius;
     out["periapsis_m"] = craft.elements.periapsis_radius;
