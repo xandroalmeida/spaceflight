@@ -174,11 +174,18 @@ func _build_hud() -> void:
 func _scale_hud() -> void:
 	## The HUD is sized from the viewport, not fixed in pixels: the same scene has
 	## to be readable in a small embedded game window and on a 4K display.
+	##
+	## With stretch mode `canvas_items` the engine already scales the UI by the
+	## window/base ratio, so this mostly matters when the aspect ratio changes --
+	## `expand` grows the canvas rather than scaling it, and then the font would
+	## otherwise stay put while the frame grew.
 	var height := get_viewport().get_visible_rect().size.y
 	if height <= 0.0:
 		height = 720.0
 
-	var font_size := int(clampf(roundf(height / 30.0), 16.0, 34.0))
+	# height/30 was legible but the panel then covered most of the frame. /38 keeps
+	# it roughly twice the original 13 px while leaving the view to the view.
+	var font_size := int(clampf(roundf(height / 38.0), 15.0, 28.0))
 	readout.add_theme_font_size_override("font_size", font_size)
 
 	var margin := int(maxf(roundf(height * 0.018), 8.0))

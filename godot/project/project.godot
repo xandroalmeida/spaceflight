@@ -19,3 +19,15 @@ config/features=PackedStringArray("4.5", "Forward Plus")
 
 window/size/viewport_width=1440
 window/size/viewport_height=900
+window/size/resizable=true
+
+; Sem isto o viewport fica preso no tamanho base e a janela só ganha borda: o
+; desenho não acompanha o redimensionamento.
+;
+; canvas_items: o 3D é renderizado na resolução nativa da janela (nítido, sem
+; upscale borrado) e a UI 2D é escalada pela razão em relação à base acima.
+; expand: janela mais larga mostra MAIS cena na horizontal em vez de esticar a
+; imagem -- o FOV vertical da câmera fica fixo, que é o comportamento correto
+; para uma cena 3D.
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
