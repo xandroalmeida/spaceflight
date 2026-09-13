@@ -10,9 +10,9 @@ entra depois, como consumidor de snapshots (ADR-0002).
 N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
 targeting diferencial, e a camada de renderização (snapshot, origem flutuante,
 GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, e o
-cockpit, e propulsão relativística em espaço plano. Sem gameplay. 23 suítes de
-teste, das quais 13 comparam resultados contra o JPL Horizons ou contra soluções
-analíticas fechadas.
+cockpit, propulsão relativística em espaço plano, e a óptica do Milestone 5 no
+núcleo. Sem gameplay. 24 suítes de teste, das quais 14 comparam resultados contra
+o JPL Horizons/SPICE ou contra soluções analíticas fechadas.
 
 ---
 
@@ -59,6 +59,7 @@ spaceflight/
 │   │   ├── lambert.md                 variáveis universais, casos degenerados, targeting
 │   │   ├── attitude.md                Euler, quaternions, RCS, eixo intermediário
 │   │   ├── relativistic-propulsion.md redução em componentes, foguete, limites
+│   │   ├── relativistic-rendering.md   tempo de luz, aberração, Doppler, Terrell
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
 │   ├── adr/                           0001 linguagem .. 0007 formato de configuração
@@ -84,7 +85,7 @@ spaceflight/
 │   ├── spacecraft/             SpacecraftState
 │   ├── simulation/             SimulationClock, SimulationSnapshot
 │   ├── render/                 RenderTransform: absoluto → câmera → float
-│   ├── relativity/             cinemática em u = γv, sem cancelamento
+│   ├── relativity/             cinemática em u = γv, óptica, tempo de luz
 │   ├── attitude/               inércia, RCS, controle de apontamento PD
 │   ├── autopilot/              Milestone 3
 │
@@ -133,7 +134,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 23
+100% tests passed, 0 tests failed out of 24
 ```
 
 Entre outras coisas:
@@ -163,6 +164,9 @@ Entre outras coisas:
   circular com `e = 4,9·10⁻⁶`;
 * Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
   diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**;
+* o solver de tempo de luz concorda com a correção convergida do próprio SPICE
+  até o último bit — 0 m para Sol e Marte, 3·10⁻⁵ m para Júpiter, que é o ulp de
+  subtrair duas posições baricêntricas;
 * um casco de 1 t com 19 t de propelente e exaustão a `0,5 c` chega a
   `β = 0,904762` — exatamente o que a equação do foguete prevê — depois de **oito
   anos de queima**, cobrindo 12,5 anos-luz enquanto o relógio de bordo marca
@@ -215,12 +219,12 @@ revelou estão em `godot/README.md`.
 
 ## Próximo
 
-Milestone 5: renderização relativística. A regra §38 vale como a §37 valeu: antes
-de qualquer código, `docs/physics/relativistic-rendering.md` — tempo de trânsito
-da luz, aberração, Doppler, *beaming*, posição aparente, rotação de Terrell. E
-**não** representar contração de Lorentz escalando meshes.
+A metade visual do Milestone 5: shaders de cor e brilho a partir do fator Doppler,
+starfield vindo de um catálogo real em vez de ruído, e o deslocamento por vértice
+que produz a rotação de Terrell **sozinha** — não como efeito, mas como
+consequência do tempo de trânsito aplicado ponto a ponto.
 
-Aberta desde o Milestone 4, e maior que ele: gravidade em regime relativístico
+Aberta desde o Milestone 4, e maior que ela: gravidade em regime relativístico
 (`relativity-roadmap.md` §5). Hoje o propagador **recusa** misturar cinemática
 relativística com campo gravitacional newtoniano, porque é uma aproximação válida
 colada numa inválida.

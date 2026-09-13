@@ -47,6 +47,24 @@ public:
                                             time::CoordinateTime t,
                                             coordinates::FrameAxes axes) const override;
 
+    // The SAME state, but with SPICE's own CONVERGED light-time correction
+    // ("CN") applied:
+    // the target as it was when the light left, seen from the frame's origin body
+    // at `t`.
+    //
+    // Not part of EphemerisProvider on purpose. It only answers the question for
+    // an observer that IS a body, which a spacecraft is not -- for that,
+    // core/relativity/light_time.hpp solves the same equation generically. This
+    // exists so the two can be compared, which is the only way to know ours is
+    // right (docs/physics/relativistic-rendering.md section 2).
+    //
+    // "CN" and not "LT": the toolkit's "LT" is deliberately a THREE-ITERATION
+    // estimate, and comparing against it measures SPICE's truncation rather than
+    // our error. Measured difference between the two for Mars: 252 m.
+    [[nodiscard]] BodyState light_time_corrected_state(celestial::BodyId body,
+                                                       time::CoordinateTime t,
+                                                       coordinates::ReferenceFrame frame) const;
+
     [[nodiscard]] const SpiceKernelSet& kernels() const { return *kernels_; }
 
 private:

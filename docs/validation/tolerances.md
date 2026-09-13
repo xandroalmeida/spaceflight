@@ -273,7 +273,33 @@ não é um `double` distinguível. `u`, `γ` e a rapidez continuam exatos, e é 
 que as equações são escritas. O teste passou a exigir `β ≤ 1` e a verificar `γ` e
 a rapidez, em vez de exigir `β < 1` de um número que não pode representá-lo.
 
-### 3.12 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.12 Óptica relativística (`tests/scientific/test_relativistic_optics.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| tempo de luz vs SPICE `"CN"` | 0 m (Sol, Marte), 3,1·10⁻⁵ m (Júpiter) | 10⁻³ m | duas soluções independentes da mesma equação implícita |
+| aberração: forma vetorial vs escalar | — | 10⁻¹² | mesma transformação, caminhos aritméticos diferentes |
+| fonte a 90° aparece em `arccos β` | — | 10⁻⁹ rel | forma fechada |
+| `D` à frente × `D` à ré | 1,0000000000 | 10⁻¹⁴ | `γ²(1−β²) = 1` identicamente |
+| Doppler transversal | — | 10⁻¹⁴ rel | `= γ`, sem contrapartida newtoniana |
+| beaming `D⁴` vs `(T'/T)⁴` | — | 10⁻¹² rel | Stefan–Boltzmann: duas rotas ao mesmo número |
+| aberração × Doppler | — | 10⁻¹² rel | o mesmo 4-momento do fóton lido em dois lugares |
+
+**A correção `"LT"` do SPICE é uma estimativa de três iterações, não a
+convergida.** A primeira versão do teste comparava contra ela e acusava o *nosso*
+solver: Marte divergia 252 m, Júpiter 100 m, a Lua 2,1 m. Trocando para `"CN"` —
+a correção convergida do toolkit — a diferença cai para **zero** em Sol e Marte e
+para o ulp do cancelamento baricêntrico (3·10⁻⁵ m) nos outros. O que o teste media
+antes era a truncagem deliberada do JPL.
+
+Duas expectativas minhas também estavam erradas, as duas por citar médias:
+
+* tempo de luz da Lua — 1,28 s é a **média**; no epoch do teste ela está perto do
+  perigeu e o valor é 1,204 s (faixa 1,189–1,357 s);
+* tempo de luz do Sol — 8,32 min é a **1 UA exata**; em 1º de janeiro a Terra está
+  a 0,983 UA (periélio em 3 de janeiro) e o valor é 8,178 min.
+
+### 3.13 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|

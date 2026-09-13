@@ -198,6 +198,34 @@ CoverageWindow SpiceEphemerisProvider::coverage(celestial::BodyId body) const {
     return window;
 }
 
+BodyState SpiceEphemerisProvider::light_time_corrected_state(
+    celestial::BodyId body, time::CoordinateTime t, coordinates::ReferenceFrame frame) const {
+    BodyState out{};
+    out.body = body;
+    out.epoch = t;
+    out.frame = frame;
+
+    if (body == frame.origin) {
+        return out;
+    }
+
+    const SpiceDouble et = t.seconds_since_j2000();
+    const std::string frame_name{coordinates::spice_frame_name(frame.axes)};
+
+    std::array<SpiceDouble, 6> sv{};
+    SpiceDouble light_time = 0.0;
+    {
+        const std::lock_guard lock{detail::spice_mutex()};
+        spkez_c(static_cast<SpiceInt>(body.naif_id()), et, frame_name.c_str(), "CN",
+                static_cast<SpiceInt>(frame.origin.naif_id()), sv.data(), &light_time);
+        detail::throw_if_spice_failed("spkez CN(" + body.name() + ")");
+    }
+
+    out.state.position = units::km_to_m(math::Vec3{sv[0], sv[1], sv[2]});
+    out.state.velocity = units::km_to_m(math::Vec3{sv[3], sv[4], sv[5]});
+    return out;
+}
+
 math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
                                                   time::CoordinateTime t,
                                                   coordinates::FrameAxes axes) const {

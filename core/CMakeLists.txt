@@ -22,6 +22,7 @@ add_library(spaceflight_core STATIC
     gravity/point_mass_gravity.cpp
     gravity/composite_force_model.cpp
     gravity/oblateness_gravity.cpp
+    relativity/light_time.cpp
     propulsion/engine.cpp
     propulsion/main_engine_force.cpp
     spacecraft/spacecraft.cpp
