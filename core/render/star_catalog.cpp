@@ -87,6 +87,27 @@ double temperature_from_colour_index(double colour_index) {
     return 4600.0 * (1.0 / (b + 1.70) + 1.0 / (b + 0.62));
 }
 
+double colour_index_from_temperature(double temperature) {
+    if (!(temperature > 0.0) || !std::isfinite(temperature)) {
+        throw std::invalid_argument(
+            "colour_index_from_temperature: temperature must be finite and > 0");
+    }
+    // k = T / 4600.  The two poles of the forward relation sit at b = -1.70 and
+    // b = -0.62, so the physical branch is b > -0.62, which is the + root.
+    const double k = temperature / 4600.0;
+    const double a = k;
+    const double b = 2.32 * k - 2.0;
+    const double c = 1.054 * k - 2.32;
+    const double discriminant = b * b - 4.0 * a * c;
+    if (!(discriminant >= 0.0)) {
+        // Unreachable for T > 0 -- the discriminant is 4 + 0.5184 k^2 + ... -- but
+        // saying so out loud beats returning a NaN that travels.
+        throw std::domain_error("colour_index_from_temperature: no real B-V for this temperature");
+    }
+    const double root = (-b + std::sqrt(discriminant)) / (2.0 * a);
+    return root / 0.92;
+}
+
 math::Vec3 equatorial_to_unit_vector(double right_ascension_deg, double declination_deg) {
     const double ra = units::deg_to_rad(right_ascension_deg);
     const double dec = units::deg_to_rad(declination_deg);
@@ -165,6 +186,44 @@ StarCatalog StarCatalog::from_bsc5_file(const std::string& path) {
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return from_bsc5_text(buffer.str());
+}
+
+void StarCatalog::add_star(const math::Vec3& direction, double temperature,
+                           double visual_magnitude, std::string name) {
+    const double length = direction.norm();
+    if (!(length > 0.0) || !std::isfinite(length)) {
+        throw std::invalid_argument("StarCatalog::add_star: direction must be finite and non-zero");
+    }
+    if (!(temperature > 0.0) || !std::isfinite(temperature)) {
+        throw std::invalid_argument("StarCatalog::add_star: temperature must be finite and > 0");
+    }
+    if (!std::isfinite(visual_magnitude)) {
+        throw std::invalid_argument("StarCatalog::add_star: magnitude must be finite");
+    }
+
+    CatalogStar star{};
+    star.hr = static_cast<int>(stars_.size()) + 1;
+    star.name = std::move(name);
+    star.direction = direction / length;
+    star.temperature = temperature;
+    star.visual_magnitude = visual_magnitude;
+    star.rest_flux = flux_from_magnitude(visual_magnitude);
+    // Ballesteros inverted, so that a synthetic star's B-V is the one that would
+    // have produced its temperature.  Nothing downstream reads it, but a
+    // catalogue whose fields disagree with each other is a trap for whoever does.
+    star.colour_index = colour_index_from_temperature(temperature);
+
+    stars_.push_back(std::move(star));
+    ++report_.records_read;
+    ++report_.accepted;
+}
+
+StarCatalog StarCatalog::from_stars(const std::vector<CatalogStar>& stars) {
+    StarCatalog catalog;
+    for (const auto& star : stars) {
+        catalog.add_star(star.direction, star.temperature, star.visual_magnitude, star.name);
+    }
+    return catalog;
 }
 
 void StarCatalog::keep_brighter_than(double magnitude_limit) {

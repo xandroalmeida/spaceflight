@@ -56,6 +56,24 @@ public:
     static StarCatalog from_bsc5_file(const std::string& path);
     static StarCatalog from_bsc5_text(const std::string& text);
 
+    // A catalogue built by hand, for tests and for the starfield validation
+    // harness.  The real sky is a poor first instrument: 8786 stars all over the
+    // sphere cannot tell "the projection is wrong" from "the photometry returned
+    // zero", because every wrong answer looks like an empty screen.  Six stars on
+    // the axes can, and that is what docs/validation/starfield-debug.md section 5
+    // starts with.
+    //
+    // `direction` is normalised here; `temperature` and `visual_magnitude` are
+    // taken as given, and `rest_flux` and `colour_index` are derived so that a
+    // synthetic star goes through exactly the same arithmetic downstream as a
+    // BSC5 one.  Throws std::invalid_argument for a zero direction or a
+    // non-positive temperature -- neither is a dim star, both are a caller error.
+    static StarCatalog from_stars(const std::vector<CatalogStar>& stars);
+
+    // Builder form, so a harness can name what it is making.
+    void add_star(const math::Vec3& direction, double temperature, double visual_magnitude,
+                  std::string name = {});
+
     [[nodiscard]] const std::vector<CatalogStar>& stars() const noexcept { return stars_; }
     [[nodiscard]] std::size_t size() const noexcept { return stars_.size(); }
     [[nodiscard]] bool empty() const noexcept { return stars_.empty(); }
@@ -88,6 +106,16 @@ private:
 // between 4000 and 10000 K and poor at the hot end -- -15% for Achernar -- which
 // is in the validity table of docs/physics/relativistic-rendering.md section 7.
 [[nodiscard]] double temperature_from_colour_index(double colour_index);
+
+// The same relation read the other way, for a star that was DEFINED by its
+// temperature -- a synthetic one.  Ballesteros is a quadratic in b = 0.92 (B-V):
+//
+//     (T/4600) b^2 + (2.32 T/4600 - 2) b + (1.054 T/4600 - 2.32) = 0
+//
+// and the root taken is the one on the physical branch, where B-V falls as the
+// star gets hotter.  Exact inverse, not a fit: the round trip is a test
+// (tests/scientific/test_relativistic_sky.cpp).
+[[nodiscard]] double colour_index_from_temperature(double temperature);
 
 // Right ascension and declination (degrees, J2000) to a unit vector on the same
 // axes as the integration frame.

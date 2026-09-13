@@ -20,7 +20,10 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -38,6 +41,21 @@ public:
     // Reads BSC5.  An empty path means "wherever the build was told the
     // catalogues live", which is what a run from the editor wants.
     bool load_catalogue(const godot::String& path);
+
+    // A catalogue built from the arguments instead of from a file, for the
+    // starfield validation harness (docs/validation/starfield-debug.md).
+    //
+    // Six stars on the axes are a better first instrument than 8786 real ones:
+    // with the real sky, "the projection is wrong" and "the photometry returned
+    // zero" produce the SAME empty screen, and the harness has to be able to tell
+    // those apart before it is allowed to believe anything about aberration.
+    //
+    // `directions` are in the same J2000 axes as the catalogue's; the three
+    // arrays must be the same length.  The magnitude limit is NOT applied -- a
+    // synthetic star is asked for by name and must not be filtered away silently.
+    bool load_synthetic(const godot::PackedVector3Array& directions,
+                        const godot::PackedFloat64Array& temperatures,
+                        const godot::PackedFloat64Array& magnitudes);
     [[nodiscard]] bool is_ready() const { return sky_ != nullptr; }
     godot::String get_last_error() const;
     godot::String describe_catalogue() const;
@@ -93,6 +111,39 @@ public:
     // (docs/architecture/rendering.md section 2), so the camera's forward vector
     // and beta are directly comparable.
     double get_doppler_in_direction(const godot::Vector3& to_source) const;
+
+    // ---- the oracle side of the validation harness -------------------------
+    //
+    // Every number the GPU is checked against comes from here, which is to say
+    // from core/: the harness measures a screenshot and compares it with what the
+    // shipped C++ says the answer is.  A screenshot compared against a human
+    // impression is not a test (docs/validation/relativistic-rendering-visual.md
+    // section 2).
+
+    // The star's direction as the observer sees it, after aberration -- the same
+    // vector that goes into ARRAY_VERTEX, unscaled.
+    godot::Vector3 get_apparent_direction(int index) const;
+
+    // The star's direction at rest, before aberration: the catalogue entry.
+    godot::Vector3 get_rest_direction(int index) const;
+
+    // The detector response of one star at the current beta: flux, band-limited
+    // beaming and the saturation curve, exactly as the shader computes it but in
+    // double precision.  This is what a measured pixel intensity is compared with.
+    double get_expected_response(int index) const;
+
+    // The linear-sRGB chromaticity the shader will sample for this star, already
+    // Doppler-shifted, multiplied by the response.  Component-wise, this IS the
+    // colour the fragment should paint.
+    godot::Color get_expected_colour(int index) const;
+
+    // Per-star Doppler and beaming factors of the last update, so the harness can
+    // separate "the shift is wrong" from "the colour table is wrong".
+    double get_doppler_of(int index) const;
+    double get_beaming_of(int index) const;
+
+    double get_star_temperature(int index) const;
+    double get_star_magnitude(int index) const;
 
 protected:
     static void _bind_methods();

@@ -18,7 +18,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 using namespace sf;
@@ -245,4 +247,85 @@ TEST(the_diagnostics_agree_with_the_closed_forms) {
                    "section 10.2, recomputed here through the 256-entry table this file "
                    "uses; the 5% bound is that table's coarseness against the 3% the "
                    "4096-entry one achieves in test_blackbody_colour.cpp");
+}
+
+// ---------------------------------------------------------------------------
+// The synthetic catalogue (Milestone 6.1, Part B).
+//
+// The starfield validation harness builds its stars by hand, and a harness whose
+// inputs are wrong reports the renderer's answer as the renderer's fault.  These
+// two tests fix the properties the harness depends on: that a synthetic star
+// carries the same derived fields a BSC5 record would, and that the colour index
+// it is given back is the one that produces its temperature.
+// See docs/validation/starfield-debug.md section 5.
+// ---------------------------------------------------------------------------
+
+TEST(the_colour_index_inverse_is_exact_and_not_a_fit) {
+    // Ballesteros is a quadratic in 0.92 (B-V), so its inverse is algebraic and
+    // the round trip has no business losing anything but rounding.  Tolerance
+    // 1e-12 relative -- origin #1 of docs/validation/tolerances.md: the exact
+    // answer is known, and the only error allowed is the arithmetic's own.
+    for (const double temperature : {1500.0, 3000.0, 4600.0, 5772.0, 8000.0, 12000.0, 25000.0,
+                                     40000.0}) {
+        const double colour_index = render::colour_index_from_temperature(temperature);
+        const double back = render::temperature_from_colour_index(colour_index);
+        CHECK_NEAR_REL(back, temperature, 1.0e-12,
+                       "the inverse of an exact quadratic root, evaluated in double: nothing "
+                       "but rounding may be lost");
+    }
+
+    // The physical branch, not the other root: B-V falls as a star gets hotter.
+    double previous = std::numeric_limits<double>::infinity();
+    for (const double temperature : {2000.0, 4000.0, 6000.0, 10000.0, 20000.0}) {
+        const double colour_index = render::colour_index_from_temperature(temperature);
+        CHECK(colour_index < previous);
+        previous = colour_index;
+    }
+
+    CHECK_THROWS_AS(render::colour_index_from_temperature(0.0), std::invalid_argument);
+    CHECK_THROWS_AS(render::colour_index_from_temperature(-1.0), std::invalid_argument);
+}
+
+TEST(a_synthetic_star_goes_through_the_same_arithmetic_as_a_catalogue_one) {
+    render::StarCatalog catalogue;
+    catalogue.add_star(Vec3{3.0, 0.0, 4.0}, 5800.0, 2.0, "on the x-z diagonal");
+    catalogue.add_star(Vec3{0.0, -1.0, 0.0}, 3000.0, -1.0);
+
+    REQUIRE(catalogue.size() == 2);
+    // The report has to count them, or describe() would say a catalogue of two
+    // stars was built from zero records.
+    CHECK_EQ(catalogue.report().accepted, std::size_t{2});
+    CHECK_EQ(catalogue.report().records_read, std::size_t{2});
+
+    const auto& first = catalogue.stars()[0];
+    // Normalised, so that a caller may hand in any vector along the direction.
+    CHECK_NEAR_ABS(first.direction.norm(), 1.0, 1.0e-15, "add_star normalises the direction");
+    CHECK_NEAR_ABS(first.direction.x, 0.6, 1.0e-15, "3-4-5 triangle, exactly");
+    CHECK_NEAR_ABS(first.direction.z, 0.8, 1.0e-15, "3-4-5 triangle, exactly");
+    // The derived fields are the ones the loader derives, from the same functions.
+    CHECK_NEAR_REL(first.rest_flux, render::flux_from_magnitude(2.0), 1.0e-15,
+                   "rest_flux must come from flux_from_magnitude, not from a second formula");
+    CHECK_NEAR_REL(render::temperature_from_colour_index(first.colour_index), 5800.0, 1.0e-12,
+                   "a synthetic star's B-V must be the one that produces its temperature, or a "
+                   "catalogue whose fields disagree with each other travels");
+
+    // Brightness ordering survives: the second star is three magnitudes brighter.
+    CHECK_NEAR_REL(catalogue.stars()[1].rest_flux / first.rest_flux,
+                   std::pow(10.0, -0.4 * (-1.0 - 2.0)), 1.0e-14,
+                   "the magnitude scale is a definition, not an approximation");
+
+    // A zero direction and a non-positive temperature are caller errors, not dim
+    // stars, and returning a NaN-filled record would let them travel.
+    CHECK_THROWS_AS(catalogue.add_star(Vec3{}, 5800.0, 0.0), std::invalid_argument);
+    CHECK_THROWS_AS(catalogue.add_star(Vec3::unit_x(), 0.0, 0.0), std::invalid_argument);
+
+    // And it has to work as a sky: the harness feeds exactly this into
+    // RelativisticSky, so the constructor must accept it.
+    render::RelativisticSky sky{render::StarCatalog::from_stars(catalogue.stars()),
+                                render::build_planck_table(256)};
+    REQUIRE(sky.star_count() == 2);
+    sky.update(Vec3{});
+    CHECK_NEAR_ABS(sky.frame().doppler[0], 1.0, 0.0,
+                   "at rest the Doppler factor is exactly one, and nothing about a synthetic "
+                   "catalogue may change that");
 }

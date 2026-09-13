@@ -13,6 +13,8 @@
 
 #include <cstring>
 #include <exception>
+#include <stdexcept>
+#include <string>
 
 namespace spaceflight_godot {
 namespace {
@@ -74,6 +76,25 @@ void SpaceflightSky::_bind_methods() {
                                 &SpaceflightSky::get_diagnostics_at);
     godot::ClassDB::bind_method(D_METHOD("get_doppler_in_direction", "to_source"),
                                 &SpaceflightSky::get_doppler_in_direction);
+    godot::ClassDB::bind_method(
+        D_METHOD("load_synthetic", "directions", "temperatures", "magnitudes"),
+        &SpaceflightSky::load_synthetic);
+    godot::ClassDB::bind_method(D_METHOD("get_apparent_direction", "index"),
+                                &SpaceflightSky::get_apparent_direction);
+    godot::ClassDB::bind_method(D_METHOD("get_rest_direction", "index"),
+                                &SpaceflightSky::get_rest_direction);
+    godot::ClassDB::bind_method(D_METHOD("get_expected_response", "index"),
+                                &SpaceflightSky::get_expected_response);
+    godot::ClassDB::bind_method(D_METHOD("get_expected_colour", "index"),
+                                &SpaceflightSky::get_expected_colour);
+    godot::ClassDB::bind_method(D_METHOD("get_doppler_of", "index"),
+                                &SpaceflightSky::get_doppler_of);
+    godot::ClassDB::bind_method(D_METHOD("get_beaming_of", "index"),
+                                &SpaceflightSky::get_beaming_of);
+    godot::ClassDB::bind_method(D_METHOD("get_star_temperature", "index"),
+                                &SpaceflightSky::get_star_temperature);
+    godot::ClassDB::bind_method(D_METHOD("get_star_magnitude", "index"),
+                                &SpaceflightSky::get_star_magnitude);
 }
 
 bool SpaceflightSky::load_catalogue(const godot::String& path) {
@@ -87,6 +108,33 @@ bool SpaceflightSky::load_catalogue(const godot::String& path) {
 
         // 1024 entries: 45 K per texel at 5800 K, far below the scale on which the
         // chromaticity moves (docs/architecture/relativistic-shaders.md 3.2).
+        sky_ = std::make_unique<sf::render::RelativisticSky>(
+            std::move(catalogue), sf::render::build_planck_table(1024));
+        sky_->set_half_saturation(half_saturation_);
+        sky_->update(beta_);
+    });
+}
+
+bool SpaceflightSky::load_synthetic(const godot::PackedVector3Array& directions,
+                                    const godot::PackedFloat64Array& temperatures,
+                                    const godot::PackedFloat64Array& magnitudes) {
+    return guarded(last_error_, "load_synthetic", [&] {
+        const int64_t count = directions.size();
+        if (temperatures.size() != count || magnitudes.size() != count) {
+            throw std::invalid_argument(
+                "load_synthetic: directions, temperatures and magnitudes must be the same length");
+        }
+        if (count == 0) {
+            throw std::invalid_argument("load_synthetic: no stars given");
+        }
+
+        sf::render::StarCatalog catalogue;
+        for (int64_t i = 0; i < count; ++i) {
+            const auto& d = directions[i];
+            catalogue.add_star(sf::math::Vec3{d.x, d.y, d.z}, temperatures[i], magnitudes[i],
+                               "synthetic " + std::to_string(i));
+        }
+
         sky_ = std::make_unique<sf::render::RelativisticSky>(
             std::move(catalogue), sf::render::build_planck_table(1024));
         sky_->set_half_saturation(half_saturation_);
@@ -224,6 +272,75 @@ godot::Dictionary to_dictionary(const sf::render::SkyDiagnostics& d, std::size_t
 }
 
 }  // namespace
+
+namespace {
+
+// One place where an out-of-range index is turned into a refusal, because six
+// call sites silently returning zero would be six ways for a harness to conclude
+// the GPU is right when nothing was compared at all.
+std::size_t checked_index(const sf::render::RelativisticSky* sky, int index, const char* what) {
+    if (sky == nullptr) {
+        throw std::runtime_error(std::string{what} + ": no catalogue loaded");
+    }
+    if (index < 0 || static_cast<std::size_t>(index) >= sky->star_count()) {
+        throw std::out_of_range(std::string{what} + ": star index out of range");
+    }
+    return static_cast<std::size_t>(index);
+}
+
+}  // namespace
+
+godot::Vector3 SpaceflightSky::get_apparent_direction(int index) const {
+    const auto i = checked_index(sky_.get(), index, "get_apparent_direction");
+    const auto& d = sky_->frame().apparent_direction[i];
+    return godot::Vector3{static_cast<float>(d.x), static_cast<float>(d.y),
+                          static_cast<float>(d.z)};
+}
+
+godot::Vector3 SpaceflightSky::get_rest_direction(int index) const {
+    const auto i = checked_index(sky_.get(), index, "get_rest_direction");
+    const auto& d = sky_->catalog().stars()[i].direction;
+    return godot::Vector3{static_cast<float>(d.x), static_cast<float>(d.y),
+                          static_cast<float>(d.z)};
+}
+
+double SpaceflightSky::get_expected_response(int index) const {
+    return sky_->response_of(checked_index(sky_.get(), index, "get_expected_response"));
+}
+
+godot::Color SpaceflightSky::get_expected_colour(int index) const {
+    const auto i = checked_index(sky_.get(), index, "get_expected_colour");
+    const auto& star = sky_->catalog().stars()[i];
+    const double doppler = static_cast<double>(sky_->frame().doppler[i]);
+    // The same two lines the fragment stage runs: the shifted chromaticity, scaled
+    // by the response.  Written here in double precision so that a disagreement
+    // with the GPU is a disagreement about the PIPELINE and not about float.
+    const auto rgb = sky_->planck_table().sample_rgb(star.temperature * doppler);
+    const double response = sky_->response_of(i);
+    return godot::Color{static_cast<float>(rgb.r * response),
+                        static_cast<float>(rgb.g * response),
+                        static_cast<float>(rgb.b * response), 1.0F};
+}
+
+double SpaceflightSky::get_doppler_of(int index) const {
+    return static_cast<double>(
+        sky_->frame().doppler[checked_index(sky_.get(), index, "get_doppler_of")]);
+}
+
+double SpaceflightSky::get_beaming_of(int index) const {
+    return static_cast<double>(
+        sky_->frame().beaming[checked_index(sky_.get(), index, "get_beaming_of")]);
+}
+
+double SpaceflightSky::get_star_temperature(int index) const {
+    return sky_->catalog().stars()[checked_index(sky_.get(), index, "get_star_temperature")]
+        .temperature;
+}
+
+double SpaceflightSky::get_star_magnitude(int index) const {
+    return sky_->catalog().stars()[checked_index(sky_.get(), index, "get_star_magnitude")]
+        .visual_magnitude;
+}
 
 double SpaceflightSky::get_doppler_in_direction(const godot::Vector3& to_source) const {
     const sf::math::Vec3 direction{to_source.x, to_source.y, to_source.z};

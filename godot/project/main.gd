@@ -53,6 +53,36 @@ const VISUAL_TEST_BETAS := [-1.0, 0.0, 0.1, 0.5, 0.9, 0.99]
 ## 1.47e5, so the Sun still occludes it.
 const SKY_RADIUS := 1.9e5
 
+## Where the near plane has to be, and it is not a taste.
+##
+## The depth buffer has 24 bits. With reverse-Z the depth of a fragment is
+## near/distance, so a star on the sky sphere lands at
+##
+##     near / SKY_RADIUS
+##
+## and to be distinguishable from the far plane at all that has to clear one
+## quantisation step, 2^-24 = 5.96e-8. At the 0.01 this scene shipped with,
+## 0.01 / 1.9e5 = 5.26e-8 -- BELOW one step. Measured on Godot 4.5 / Metal 3.2,
+## 200 stars, 39 of them inside the frame:
+##
+##     near 0.01    29 of 39 rendered      <- what Milestone 6 saw
+##     near 0.012   39 of 39
+##     near 0.05    39 of 39
+##     near 0.5     39 of 39
+##
+## Two thirds of the sky survived by rounding. 0.05 is four times the cliff and
+## still only 50 km, which is inside anything a camera needs to see.
+## docs/validation/starfield-debug.md section 6.
+const CAMERA_NEAR := 0.05
+const CAMERA_FAR := 2.0e5
+
+## How many near planes of clearance the camera keeps from whatever it is looking
+## at. A camera that can be zoomed inside its own near plane shows nothing, and
+## the near plane is now large enough for that to be reachable -- so the limit is
+## on the DISTANCE, where the near plane is, rather than on a zoom factor that
+## would have to be retuned every time either number moved.
+const NEAR_PLANE_CLEARANCE := 3.0
+
 ## BSC5 reaches V = 7.96, two magnitudes past the naked eye. Keeping all of it
 ## costs nothing and the faint stars are what make the aberration legible: they
 ## are the ones that sweep.
@@ -179,6 +209,20 @@ var _headless_mission_reported := false
 ## lunar transfer is four days and a cruise burn is eight years -- so it is one or
 ## the other, chosen deliberately rather than by whichever check runs first.
 var _headless_mission_mode := OS.get_environment("SPACEFLIGHT_HEADLESS_MISSION") == "1"
+
+## Set SPACEFLIGHT_CAPTURE to a directory to have the scene photograph itself and
+## quit: one frame per rung of the visual-test ladder.
+##
+## It exists because the harness in starfield_debug.gd proves the SHADER is right
+## and cannot prove that this scene is -- the near plane, the camera placement
+## and the body meshes are all here, not there, and the only honest evidence
+## about them is a picture of them.
+## docs/validation/relativistic-rendering-visual.md section 6.
+var _capture_dir := OS.get_environment("SPACEFLIGHT_CAPTURE")
+var _capture_index := 0
+var _capture_frames := 0
+var _capture_started := false
+
 var throttle := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
@@ -286,11 +330,11 @@ func _build_scene() -> void:
 	add_child(ship_mesh)
 
 	camera = Camera3D.new()
-	# near 0.01 = 10 km; far 2e5 = 2e11 m = 1.3 au, which reaches past the Sun at
+	# near 0.05 = 50 km; far 2e5 = 2e11 m = 1.3 au, which reaches past the Sun at
 	# 147 000 units. Godot 4 uses a reverse-Z depth buffer, which survives this
 	# ratio far better than the classic one would.
-	camera.near = 0.01
-	camera.far = 2.0e5
+	camera.near = CAMERA_NEAR
+	camera.far = CAMERA_FAR
 	camera.current = true
 	add_child(camera)
 
@@ -504,6 +548,50 @@ func _process(delta: float) -> void:
 			"half_saturation", EXPOSURE_LEVELS[exposure_index])
 	_update_readout()
 
+	if not _capture_dir.is_empty():
+		_capture_step()
+
+
+func _capture_step() -> void:
+	## One photograph per (visual beta, look direction), then quit.
+	##
+	## Both directions, because at beta = 0.9 they are two different claims and
+	## only one of them is about the pile-up: looking forward shows the cone and
+	## the blue shift, looking aft shows a sky that has genuinely gone out --
+	## 5.3e-7 of its rest brightness in the visible band, which is black and is
+	## supposed to be. A capture that only looked one way could not tell a dark
+	## aft sky from a broken one.
+	##
+	## The ladder is walked with the SAME setters the keyboard uses, so what is
+	## photographed is what a pilot would see and not a private path.
+	hud_mode = HUD_MODES.find("off")
+	if not _capture_started:
+		_capture_started = true
+		look_mode = LOOK_MODES.find("prograde")
+		_apply_look_preset()
+	_capture_frames += 1
+	if _capture_frames < 30:
+		return
+	_capture_frames = 0
+
+	var beta_index := _capture_index / 2
+	var looking: String = "forward" if _capture_index % 2 == 0 else "aft"
+	var beta: float = VISUAL_TEST_BETAS[beta_index]
+	var name := "scene_%s_beta_%s" % [looking,
+		"propagated" if beta < 0.0 else str(beta).replace(".", "p")]
+	DirAccess.make_dir_recursive_absolute(_capture_dir)
+	get_viewport().get_texture().get_image().save_png("%s/%s.png" % [_capture_dir, name])
+	print("[capture] %s.png | %s" % [name, " | ".join(_sky_lines())])
+
+	_capture_index += 1
+	if _capture_index >= VISUAL_TEST_BETAS.size() * 2:
+		get_tree().quit()
+		return
+	visual_test_index = _capture_index / 2
+	simulation.set_visual_test_beta(VISUAL_TEST_BETAS[visual_test_index])
+	look_mode = LOOK_MODES.find("prograde" if _capture_index % 2 == 0 else "retrograde")
+	_apply_look_preset()
+
 
 const MANUAL_TORQUE := 400.0   ## N m, about what the modelled RCS can deliver
 
@@ -637,7 +725,12 @@ func _place_camera() -> void:
 	# pick a replacement up vector is gone rather than retuned.
 	var meridian := forward * (-se * ca) + right * (-se * sa) + up * ce
 
-	camera.position = target + offset * (natural * orbit_zoom)
+	# The near plane is a structure, not a preference: inside it there is nothing
+	# to see. Clamping the DISTANCE here rather than the zoom factor keeps the one
+	# statement of that fact next to the one place the distance is decided
+	# (CAMERA_NEAR).
+	var distance := maxf(natural * orbit_zoom, CAMERA_NEAR * NEAR_PLANE_CLEARANCE)
+	camera.position = target + offset * distance
 	_aim_camera(-offset, meridian)
 
 
