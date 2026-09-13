@@ -105,6 +105,13 @@ const ZOOM_MAX := 40.0
 ## behind the ship at all: with the hull 70 degrees off prograde, sweeping azimuth
 ## traced a circle that reached 138 degrees from the nose and stopped -- a rear
 ## quarter, never the tail. Measured, not guessed.
+## The HUD is sized to fit, between these two. The floor is where a monospaced
+## face stops being readable; the ceiling stops a three-line compact HUD from
+## becoming a billboard.
+const HUD_FONT_MIN := 10.0
+const HUD_FONT_MAX := 22.0
+const HUD_MODES := ["full", "compact", "off"]
+
 const LOOK_MODES := ["ship", "prograde", "retrograde"]
 const LOOK_MODE_AZIMUTH := [PI, PI, 0.0]
 const LOOK_MODE_ELEVATION := [0.3491, 0.0, 0.0]   ## 20 deg above the hull, 0 for the locks
@@ -133,6 +140,8 @@ var orbit_azimuth: float = LOOK_MODE_AZIMUTH[0]
 var orbit_elevation: float = LOOK_MODE_ELEVATION[0]
 var orbit_zoom := 1.0
 var look_mode := 0
+var hud_mode := 0
+var _hud_last_shape := Vector2i.ZERO
 var _mouse_drag := false
 ## Headless printing is counted in FRAMES, not wall seconds. `--quit-after N` is
 ## a frame count, so gating the print on elapsed real time made the verification
@@ -300,25 +309,54 @@ func _build_hud() -> void:
 
 
 func _scale_hud() -> void:
-	## The HUD is sized from the viewport, not fixed in pixels: the same scene has
-	## to be readable in a small embedded game window and on a 4K display.
-	##
-	## With stretch mode `canvas_items` the engine already scales the UI by the
-	## window/base ratio, so this mostly matters when the aspect ratio changes --
-	## `expand` grows the canvas rather than scaling it, and then the font would
-	## otherwise stay put while the frame grew.
+	## Only the margins here; the font is sized from the CONTENT, in _fit_hud,
+	## because it is the content that decides whether the panel fits.
 	var height := get_viewport().get_visible_rect().size.y
 	if height <= 0.0:
 		height = 720.0
-
-	# height/30 was legible but the panel then covered most of the frame. /38 keeps
-	# it roughly twice the original 13 px while leaving the view to the view.
-	var font_size := int(clampf(roundf(height / 38.0), 15.0, 28.0))
-	readout.add_theme_font_size_override("font_size", font_size)
-
-	var margin := int(maxf(roundf(height * 0.018), 8.0))
+	var margin := int(maxf(roundf(height * 0.012), 6.0))
 	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
 		hud_margin.add_theme_constant_override(side, margin)
+	_hud_last_shape = Vector2i.ZERO      # force a refit at the new margins
+
+
+func _fit_hud(lines: Array) -> void:
+	## Pick the largest font at which the panel still FITS, in both directions.
+	##
+	## The old version guessed -- viewport height over 38, clamped to [15, 28] --
+	## and a guess cannot know how many lines there are. The readout grew from 33
+	## lines to 52 when the relativistic optics and the camera readouts arrived,
+	## and at 24 px that is 1500 px of text in a 900 px window: it ran off the
+	## bottom of the screen, which is what a guess does when the thing it was
+	## guessing about changes.
+	##
+	## This does not guess either. It asks the FONT how tall a line is and how wide
+	## the longest one comes out, and walks the size down until both fit. Thirteen
+	## iterations at worst, and only when the shape of the text changes.
+	var longest := ""
+	for line in lines:
+		if (line as String).length() > longest.length():
+			longest = line
+	var shape := Vector2i(lines.size(), longest.length())
+	if shape == _hud_last_shape:
+		return          # nothing changed; do not touch the theme every frame
+	_hud_last_shape = shape
+
+	var view := get_viewport().get_visible_rect().size
+	var margin := float(hud_margin.get_theme_constant("margin_left"))
+	var available_h := view.y - 2.0 * margin - 16.0     # panel content margins
+	var available_w := view.x - 2.0 * margin - 24.0
+
+	var font: Font = readout.get_theme_font("font")
+	var spacing := float(readout.get_theme_constant("line_spacing"))
+	var size := int(HUD_FONT_MAX)
+	while size > int(HUD_FONT_MIN):
+		var text_h := float(lines.size()) * (font.get_height(size) + spacing)
+		var text_w := font.get_string_size(longest, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		if text_h <= available_h and text_w <= available_w:
+			break
+		size -= 1
+	readout.add_theme_font_size_override("font_size", size)
 
 
 func _build_starfield() -> void:
@@ -438,6 +476,31 @@ func _process(delta: float) -> void:
 
 
 const MANUAL_TORQUE := 400.0   ## N m, about what the modelled RCS can deliver
+
+
+func _sci(value: float, digits: int = 4) -> String:
+	## Scientific notation with a fixed number of SIGNIFICANT digits.
+	##
+	## String.num_scientific prints everything the double has -- "clock diff
+	## 4.014566457044566e-13" -- and sixteen digits of a quantity whose point is
+	## that it is of order 1e-13 is not precision, it is noise that costs a line of
+	## screen and buys nothing. Four digits is already finer than any tolerance in
+	## docs/validation/tolerances.md.
+	##
+	## GDScript's % has no %e (only %s %c %d %o %x %X %f %v %%), which is why this
+	## is assembled by hand rather than formatted.
+	if not is_finite(value) or value == 0.0:
+		return "0"
+	var exponent := floori(log(absf(value)) / log(10.0))
+	# Inside the range a person reads without decoding, print it that way: an
+	# exponent is a cost, and "8.072e-1 m" is strictly worse than "0.8072 m".
+	if exponent >= -3 and exponent < 6:
+		return String.num(value, maxi(digits - 1 - exponent, 0))
+	var mantissa := value / pow(10.0, exponent)
+	if absf(mantissa) >= 10.0:      # rounding can push 9.9996 to 10.0
+		mantissa /= 10.0
+		exponent += 1
+	return "%se%+d" % [String.num(mantissa, digits - 1), exponent]
 
 
 func _format_duration(seconds: float) -> String:
@@ -766,9 +829,12 @@ func _sky_lines() -> Array:
 			% [d["forward_cone_deg"], d["stars_in_forward_cone"],
 			   100.0 * float(d["fraction_in_forward_cone"])],
 		"doppler        %.6f astern .. %.6f ahead" % [d["min_doppler"], d["max_doppler"]],
+		# Seven digits, not four: at beta = 1e-4 the whole signal is in the sixth
+		# decimal (1.000464) and at beta = 0.9 it is 51.48. One format has to carry
+		# both, and the digits are free.
 		"5800 K star    %s x ahead, %s x astern  (visible band)"
-			% [String.num_scientific(d["reference_forward_visible"]),
-			   String.num_scientific(d["reference_aft_visible"])],
+			% [_sci(d["reference_forward_visible"], 7),
+			   _sci(d["reference_aft_visible"], 7)],
 		"exposure       %.4f half-saturation flux" % sky.get_half_saturation(),
 		"light time     Moon %.4f s" % moon_light,
 	] + _look_lines(d)
@@ -823,8 +889,8 @@ func _sky_projection_lines(beta: float) -> Array:
 			   100.0 * float(d["fraction_in_forward_cone"])],
 		"  doppler      %.4f astern .. %.4f ahead" % [d["min_doppler"], d["max_doppler"]],
 		"  5800 K star  %s x ahead, %s x astern  (visible band, not bolometric)"
-			% [String.num_scientific(d["reference_forward_visible"]),
-			   String.num_scientific(d["reference_aft_visible"])],
+			% [_sci(d["reference_forward_visible"]),
+			   _sci(d["reference_aft_visible"])],
 		"",
 	]
 
@@ -838,9 +904,86 @@ func _reference_body_position() -> Vector3:
 
 
 func _update_readout() -> void:
+	var lines := _hud_lines(hud_mode == 1)
+	if lines.is_empty():
+		return
+	readout.visible = hud_mode != 2
+	if readout.visible:
+		# The full readout is 52 lines and a 900 px window fits that at 10 px --
+		# legible, barely, and nobody wants to read it. The face is MONOSPACED, so
+		# two columns need no layout at all: pad the left one and concatenate. 26
+		# lines wide instead of 52 tall buys roughly 5 px of font in the same box.
+		var shown: Array = _two_columns(lines) if hud_mode == 0 else lines
+		readout.text = "\n".join(shown)
+		_fit_hud(shown)
+
+	# Headless runs have no window: mirror the readout to stdout so that
+	# `--headless --quit-after N` is a real verification and not a silent no-op.
+	# ALWAYS the full set, whatever the on-screen mode is -- the verification must
+	# not depend on which way a UI toggle happens to be pointing.
+	if DisplayServer.get_name() == "headless":
+		_headless_drive("\n".join(_hud_lines(false)))
+
+
+func _two_columns(lines: Array) -> Array:
+	## Split at the blank line nearest the middle, so a section is never cut in
+	## half, and pad the left column to a fixed width. Only correct because the
+	## HUD font is monospaced -- which it is on purpose, and for this same reason
+	## (the readout is a table of aligned columns).
+	if lines.size() < 24:
+		return lines
+
+	var middle := lines.size() / 2
+	var split := middle
+	for offset in range(0, middle):
+		if middle - offset > 0 and (lines[middle - offset] as String).is_empty():
+			split = middle - offset
+			break
+		if middle + offset < lines.size() and (lines[middle + offset] as String).is_empty():
+			split = middle + offset
+			break
+
+	var left: Array = lines.slice(0, split)
+	var right: Array = lines.slice(split + 1)     # drop the blank line we split on
+	var width := 0
+	for line in left:
+		width = maxi(width, (line as String).length())
+
+	var out: Array = []
+	for i in range(maxi(left.size(), right.size())):
+		var l: String = left[i] if i < left.size() else ""
+		var r: String = right[i] if i < right.size() else ""
+		out.append((l.rpad(width) + "   " + r).rstrip(" ") if not r.is_empty() else l)
+	return out
+
+
+func _hud_lines(compact: bool) -> Array:
 	var s := simulation.get_snapshot()
 	if s.is_empty():
-		return
+		return []
+
+	if compact:
+		# The dozen numbers you actually fly on, short enough to leave the view to
+		# the view. Everything else is one keypress away.
+		var sky_compact := []
+		if sky != null and sky.is_ready():
+			var d := sky.get_diagnostics()
+			sky_compact = [
+				"",
+				"D ahead %.4f  astern %.4f" % [d["max_doppler"], d["min_doppler"]],
+				"look  %s  D %.6f" % [LOOK_MODES[look_mode] if _at_look_preset() else "free",
+					sky.get_doppler_in_direction(-camera.global_transform.basis.z)],
+			]
+		return ([
+			"warp %.0fx   %s" % [s["time_warp"], s["reference"]],
+			"altitude   %.1f km" % (s["altitude_m"] / 1000.0),
+			"speed      %.1f m/s" % s["speed_ms"],
+			"apo/peri   %.1f / %.1f km" % [s["apoapsis_m"] / 1000.0, s["periapsis_m"] / 1000.0],
+			"propellant %.1f kg   throttle %.0f %%" % [s["propellant_kg"], s["throttle"] * 100.0],
+			"engine     %s" % s["engine_mode"],
+			"pointing   %s  err %.2f deg" % [s["pointing_mode"], s["pointing_error_deg"]],
+			"beta       %s" % _sci(s["beta"]),
+		] + sky_compact + ["", "(TAB: full HUD)"])
 
 	# GDScript's % operator supports %s %c %d %o %x %X %f %v %% -- and NOT %e or
 	# %g. Scientific notation goes through String.num_scientific instead; the
@@ -849,7 +992,7 @@ func _update_readout() -> void:
 		"t (TDB)        %+.3f s since J2000" % s["time_tdb_s"],
 		"elapsed        %.6f s   warp %.0fx" % [s["elapsed_s"], s["time_warp"]],
 		"proper time    %.6f s" % s["proper_time_s"],
-		"clock diff     %s s" % String.num_scientific(s["clock_difference_s"]),
+		"clock diff     %s s" % _sci(s["clock_difference_s"]),
 		"",
 		"reference      %s" % s["reference"],
 		"altitude       %.3f km" % (s["altitude_m"] / 1000.0),
@@ -864,10 +1007,10 @@ func _update_readout() -> void:
 		"",
 		"mass           %.1f kg" % s["mass_kg"],
 		"propellant     %.3f kg" % s["propellant_kg"],
-		"flow           %s kg/s   endurance %s" % [String.num_scientific(s["mass_flow_kg_s"]), _format_duration(s["endurance_s"])],
+		"flow           %s kg/s   endurance %s" % [_sci(s["mass_flow_kg_s"]), _format_duration(s["endurance_s"])],
 		"engine         %s   w = %.3f c" % [s["engine_mode"], s["exhaust_velocity_c"]],
 		"throttle       %.0f %%      thrust %.1f N" % [s["throttle"] * 100.0, s["thrust_n"]],
-		"delta-v left   %s m/s" % String.num_scientific(s["delta_v_budget_ms"]),
+		"delta-v left   %s m/s" % _sci(s["delta_v_budget_ms"]),
 		"along track    %+.3f   orbit energy %+.1f J/kg/s" % [s["thrust_along_track"], s["specific_energy_rate"]],
 		"",
 		"pointing       %s   error %.3f deg" % [s["pointing_mode"], s["pointing_error_deg"]],
@@ -876,9 +1019,9 @@ func _update_readout() -> void:
 		"spin rate      %.4f deg/s" % s["rotation_rate_deg_s"],
 		"target         %s at %.0f km, %.1f m/s" % [s["target"], s["target_distance_m"] / 1000.0, s["target_relative_speed_ms"]],
 		"",
-		"beta           %s" % String.num_scientific(s["beta"]),
-		"gamma - 1      %s" % String.num_scientific(s["lorentz_factor_minus_one"]),
-		"render res.    %s m per float ulp at %s" % [String.num_scientific(s["render_resolution_m"]), s["reference"]],
+		"beta           %s" % _sci(s["beta"]),
+		"gamma - 1      %s" % _sci(s["lorentz_factor_minus_one"]),
+		"render res.    %s m per float ulp at %s" % [_sci(s["render_resolution_m"]), s["reference"]],
 		"",
 	]
 	lines.append_array(_sky_lines())
@@ -891,61 +1034,63 @@ func _update_readout() -> void:
 		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
 		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
 		"(V: ship/prograde/retrograde frame   H: recentre)",
+		"(TAB: compact HUD / off)",
 	])
-	readout.text = "\n".join(lines)
+	return lines
 
-	# Headless runs have no window: mirror the readout to stdout once a second so
-	# that `--headless --quit-after N` is a real verification and not a silent
-	# no-op. This is how Milestone 2 is checked on a machine with no display.
-	if DisplayServer.get_name() == "headless":
-		# Nobody can press a key without a display, so command a slew on the way
-		# past: the printed pointing error then exercises the whole attitude
-		# chain -- controller, RCS, torque, Euler's equations -- end to end.
-		if not _headless_slew_commanded and s["elapsed_s"] > 2.0:
-			_headless_slew_commanded = true
-			simulation.set_pointing_mode("prograde")
-			print("\n[headless] commanded PROGRADE")
-		# Once pointed, burn: the apoapsis should climb while the propellant
-		# falls. That exercises attitude, engine and orbit in one go.
-		# 3 degrees, not 1: a PD controller settles at the tracking lag
-		# 2 zeta n / omega_n = 2.593 deg and never gets closer
-		# (docs/physics/attitude.md section 7.1). A threshold below that waits
-		# forever -- which is what the first version did.
-		#
-		# Note the first condition: pointing_error is 0 while the mode is HOLD
-		# (no target, no error), so without it the burn fires immediately -- at
-		# 90 degrees off prograde, which is a fine demonstration of a cockpit
-		# mistake and a poor demonstration of anything else.
-		if _headless_slew_commanded and not _headless_burn_commanded \
-				and s["pointing_mode"] == "PROGRADE" and s["pointing_error_deg"] < 3.0:
-			_headless_burn_commanded = true
-			_set_throttle(1.0)
-			print("\n[headless] throttle 100%% at %.3f deg of pointing error"
-				% s["pointing_error_deg"])
-		# Once the impulse burn has been demonstrated, switch to CRUISE and the top
-		# of the warp ladder. The optics of section 3 and section 10 are invisible
-		# below beta ~ 0.1, and the only honest way to reach them is to actually
-		# burn for eight years -- which at warp 1e8 is a few thousand frames.
-		# Then fly, because the optics of section 3 and section 10 are invisible
-		# below beta ~ 0.1 and the only honest way to reach them is to burn for
-		# eight years. The ladder is keyed on SIMULATION time, not wall time, so
-		# the same frame budget gets to the same place on any machine.
-		#
-		# Each rung waits for the one before to have done its job: no warp until
-		# the attitude has settled, because a 1e8x step would ask the propagator to
-		# cross the whole slew in one go.
-		_headless_warp_schedule(s)
 
-		_headless_frames += 1
-		if _headless_frames % HEADLESS_PRINT_EVERY_FRAMES == 0:
-			print("\n" + readout.text)
-		# Once, early: the headline numbers of the milestone, produced by the
-		# shipped code rather than quoted from the document. Section 3's cone,
-		# section 4's reciprocal Doppler and section 10.2's band-limited beaming,
-		# all against the 8786 real stars.
-		if _headless_frames == HEADLESS_PRINT_EVERY_FRAMES:
-			for beta in [0.0896, 0.9048, 0.99]:
-				print("\n".join(_sky_projection_lines(beta)))
+func _headless_drive(text: String) -> void:
+	## Without a display nobody can press a key, so the headless run flies itself:
+	## slew, burn, warp up, and print. This is how the project is verified on a
+	## machine with no screen, and it is deliberately driven off the FULL readout
+	## regardless of what the on-screen HUD mode is.
+	var s := simulation.get_snapshot()
+	if s.is_empty():
+		return
+	# Nobody can press a key without a display, so command a slew on the way
+	# past: the printed pointing error then exercises the whole attitude
+	# chain -- controller, RCS, torque, Euler's equations -- end to end.
+	if not _headless_slew_commanded and s["elapsed_s"] > 2.0:
+		_headless_slew_commanded = true
+		simulation.set_pointing_mode("prograde")
+		print("\n[headless] commanded PROGRADE")
+	# Once pointed, burn: the apoapsis should climb while the propellant
+	# falls. That exercises attitude, engine and orbit in one go.
+	# 3 degrees, not 1: a PD controller settles at the tracking lag
+	# 2 zeta n / omega_n = 2.593 deg and never gets closer
+	# (docs/physics/attitude.md section 7.1). A threshold below that waits
+	# forever -- which is what the first version did.
+	#
+	# Note the first condition: pointing_error is 0 while the mode is HOLD
+	# (no target, no error), so without it the burn fires immediately -- at
+	# 90 degrees off prograde, which is a fine demonstration of a cockpit
+	# mistake and a poor demonstration of anything else.
+	if _headless_slew_commanded and not _headless_burn_commanded \
+			and s["pointing_mode"] == "PROGRADE" and s["pointing_error_deg"] < 3.0:
+		_headless_burn_commanded = true
+		_set_throttle(1.0)
+		print("\n[headless] throttle 100%% at %.3f deg of pointing error"
+			% s["pointing_error_deg"])
+	# Then fly, because the optics of section 3 and section 10 are invisible
+	# below beta ~ 0.1 and the only honest way to reach them is to burn for
+	# eight years. The ladder is keyed on SIMULATION time, not wall time, so
+	# the same frame budget gets to the same place on any machine.
+	#
+	# Each rung waits for the one before to have done its job: no warp until
+	# the attitude has settled, because a 1e8x step would ask the propagator to
+	# cross the whole slew in one go.
+	_headless_warp_schedule(s)
+
+	_headless_frames += 1
+	if _headless_frames % HEADLESS_PRINT_EVERY_FRAMES == 0:
+		print("\n" + text)
+	# Once, early: the headline numbers of the milestone, produced by the
+	# shipped code rather than quoted from the document. Section 3's cone,
+	# section 4's reciprocal Doppler and section 10.2's band-limited beaming,
+	# all against the 8786 real stars.
+	if _headless_frames == HEADLESS_PRINT_EVERY_FRAMES:
+		for beta in [0.0896, 0.9048, 0.99]:
+			print("\n".join(_sky_projection_lines(beta)))
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1001,6 +1146,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			look_mode = (look_mode + 1) % LOOK_MODES.size()
 			_apply_look_preset()
 		KEY_H: _recentre_camera()
+		KEY_TAB:
+			hud_mode = (hud_mode + 1) % HUD_MODES.size()
+			_hud_last_shape = Vector2i.ZERO
 		KEY_BRACKETLEFT: _zoom_camera(1.0)
 		KEY_BRACKETRIGHT: _zoom_camera(-1.0)
 		KEY_M: simulation.cycle_engine_mode()

@@ -110,19 +110,19 @@ nave está a `β = 10⁻⁴`.
 Depois, o HUD, uma vez a cada 150 quadros:
 
 ```
-elapsed        82.767170 s   warp 10x
-altitude       399.957 km
-speed          7672.579 m/s
+elapsed        10.277051 s   warp 10x
+altitude       399.999 km
+speed          7672.593 m/s
 ...
-beta           0.0001025289154362769
-render res.    0.8071619902045453 m per float ulp at Earth
+beta           1.005e-4
+render res.    0.8072 m per float ulp at Earth
 
 stars          8786  (apparent)
-forward cone   89.994 deg holds 4405 stars (50.14 %)
-doppler        0.999897 astern .. 1.000103 ahead
-5800 K star    1.000463768920553 x ahead, 0.9995364461543639 x astern  (visible band)
+forward cone   89.994 deg holds 4407 stars (50.16 %)
+doppler        0.999900 astern .. 1.000100 ahead
+5800 K star    1.000454 x ahead, 0.9995458 x astern  (visible band)
 exposure       0.1585 half-saturation flux
-light time     Moon 1.1937 s
+light time     Moon 1.1952 s
 ```
 
 Cada número é conferível: `v = √(GM/r)` a 6771 km dá 7672,6 m/s; o período
@@ -131,6 +131,43 @@ kepleriano dá 5544,87 s; a resolução de renderização é `6771 km · ε_floa
 é a distância dela dividida por `c`. A `β = 10⁻⁴` o Doppler é `1 ± 10⁻⁴` e o
 brilho muda 0,05 % — o efeito **existe** e é desprezível, que é o que tem de ser
 nessa velocidade.
+
+### O HUD cabe por construção, e não por palpite
+
+A fonte era `altura_da_viewport / 38`, limitada a `[15, 28]` px. Um palpite não
+sabe quantas linhas existem: a leitura cresceu de 33 para 52 linhas quando a
+ótica relativística e a câmera chegaram, e a 24 px isso é 1 500 px de texto numa
+janela de 900 — passava da borda de baixo.
+
+Agora não há palpite. `_fit_hud` **pergunta à fonte** a altura de uma linha
+(`Font.get_height`) e a largura da linha mais comprida (`Font.get_string_size`),
+e desce o tamanho até que as duas caibam. No máximo treze iterações, e só quando
+o formato do texto muda.
+
+E como a fonte é monoespaçada — o que já era de propósito, porque a leitura é uma
+tabela de colunas alinhadas — o modo completo é empacotado em **duas colunas**,
+cortando numa linha em branco para não partir uma seção ao meio. Numa janela de
+1440 × 900:
+
+| | linhas | fonte |
+|---|---|---|
+| uma coluna | 52 | 10 px |
+| **duas colunas** | **28** | **18 px** |
+| compacto | 13 | 22 px |
+
+`TAB` alterna completo → compacto → desligado. O compacto tem os números com que
+se voa; o resto está a uma tecla.
+
+⚠️ A saída headless imprime **sempre** o conjunto completo, em uma coluna, seja
+qual for o modo na tela. A verificação não pode depender de para que lado um
+botão da interface está apontando.
+
+Os números também perderam ruído: `String.num_scientific` imprimia tudo o que o
+`double` tem (`clock diff 4.014566457044566e-13`), e dezesseis dígitos de uma
+grandeza cujo ponto é ser da ordem de `10⁻¹³` não são precisão, são uma linha de
+tela gasta à toa. Agora são quatro algarismos significativos — mais fino que
+qualquer tolerância de `docs/validation/tolerances.md` — e notação decimal dentro
+da faixa que uma pessoa lê sem decodificar (`0.8072 m`, não `8.072e-1 m`).
 
 ### A cadência do print é em quadros, não em segundos
 
