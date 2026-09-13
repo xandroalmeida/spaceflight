@@ -5,6 +5,7 @@
 # only external dependency, and only core/ephemeris/*.cpp may include it.
 
 add_library(spaceflight_core STATIC
+    config/json.cpp
     math/vec3.cpp
     time/coordinate_time.cpp
     celestial/body_id.cpp
@@ -17,9 +18,17 @@ add_library(spaceflight_core STATIC
     gravity/point_mass_gravity.cpp
     gravity/composite_force_model.cpp
     gravity/oblateness_gravity.cpp
+    propulsion/engine.cpp
+    spacecraft/spacecraft.cpp
+    navigation/maneuver.cpp
+    navigation/maneuver_executor.cpp
+    navigation/mission.cpp
+    navigation/targeting.cpp
+    navigation/trajectory_planner.cpp
     propagation/dense_output.cpp
     propagation/dormand_prince_54.cpp
     propagation/propagator_report.cpp
+    trajectory/lambert.cpp
     trajectory/orbital_elements.cpp
     simulation/simulation_clock.cpp
 )

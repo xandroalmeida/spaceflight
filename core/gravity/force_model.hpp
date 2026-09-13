@@ -21,8 +21,15 @@ namespace sf::gravity {
 struct ForceResult {
     math::Vec3 acceleration{};  // [m/s^2], in the integration frame
 
-    // Milestone 1 adds `mass_flow_rate` here for propulsion; Milestone 3 adds
-    // torque.  Kept out until the physics documents exist (rule section 39).
+    // Rate of change of the spacecraft's rest mass [kg/s].  Negative while an
+    // engine is burning, zero for every conservative force.  It is part of the
+    // force result because thrust and consumption are one physical process:
+    // F = eta * q * w with q = -dm/dt (docs/physics/propulsion-model.md section 3).
+    // Reporting them separately would allow them to drift apart, which is exactly
+    // the failure mode rule section 17 forbids.
+    double mass_flow_rate{0.0};
+
+    // Milestone 3 adds torque here, once attitude exists.
 
     // Set when the evaluation happened inside a body's radius.  Point-mass
     // gravity remains mathematically defined there but stops being physical, so

@@ -1,0 +1,51 @@
+{
+  // Milestone 1: intercept the region of the Moon.
+  //
+  // No maneuvers here on purpose -- `orbit-cli intercept` solves Lambert from
+  // this initial state to where the Moon WILL BE, builds the burn, executes it in
+  // the full model and reports the miss:
+  //
+  //   orbit-cli intercept tests/scenarios/lunar-intercept.json --to Moon --tof 4.5
+  //
+  // The miss is not a bug. It is the perturbation the two-body plan ignored, plus
+  // the gravity loss of a finite burn (docs/physics/lambert.md section 5).
+  "name": "Lunar intercept from a 400 km parking orbit",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 388800.0,   // 4.5 days
+
+  "bodies": ["Sun", "Earth", "Moon"],
+  "perturbations": { "j2_bodies": ["Earth"] },
+
+  "spacecraft": {
+    "relative_to": "Earth",
+
+    // A 400 km parking orbit in the Moon's orbital plane (inclination 28.27 deg
+    // at this epoch), with the departure point placed 170 degrees away from where
+    // the Moon will be at arrival. Geometry is most of the cost of a transfer:
+    // leaving from an equatorial orbit, or at the wrong point in it, turns a
+    // 3 km/s injection into a 6 km/s plane change. Exactly 180 degrees is
+    // degenerate for Lambert (docs/physics/lambert.md section 3), hence 170.
+    "position_m":  [5403733.3475775, -3679897.2695510, -1788660.3908598],
+    "velocity_ms": [4623.3381510, 5322.9266799, 3016.4827353],
+
+    "name": "Tug",
+    "dry_mass_kg": 2000.0,
+    "propellant_mass_kg": 4000.0,
+    "engine": {
+      "name": "Orbital Tug",
+      "max_mass_flow_kg_s": 15.0,
+      "exhaust_velocity_fraction_c": 0.00003,
+      "efficiency": 1.0
+    }
+  },
+
+  "integrator": {
+    "rtol": 1e-11,
+    "atol_position_m": 1e-3,
+    "atol_velocity_ms": 1e-6,
+    "initial_step_s": 1.0,
+    "max_step_s": 3600.0
+  },
+
+  "output": { "samples": 20 }
+}

@@ -1,7 +1,7 @@
 #include "tools/orbit-cli/scenario.hpp"
 
 #include "core/celestial/body_catalog.hpp"
-#include "tools/orbit-cli/json.hpp"
+#include "core/config/json.hpp"
 
 #include <sstream>
 
@@ -10,10 +10,10 @@ namespace {
 
 using sf::math::Vec3;
 
-Vec3 read_vec3(const json::Value& value, const std::string& context) {
+Vec3 read_vec3(const sf::config::json::Value& value, const std::string& context) {
     const auto& arr = value.as_array(context);
     if (arr.size() != 3) {
-        throw json::ParseError(context + ": expected 3 components, got " + std::to_string(arr.size()));
+        throw sf::config::json::ParseError(context + ": expected 3 components, got " + std::to_string(arr.size()));
     }
     return Vec3{arr[0].as_number(context), arr[1].as_number(context), arr[2].as_number(context)};
 }
@@ -21,7 +21,7 @@ Vec3 read_vec3(const json::Value& value, const std::string& context) {
 sf::celestial::BodyId read_body(const std::string& name, const std::string& context) {
     const auto lookup = sf::celestial::body_from_name(name);
     if (!lookup.ok) {
-        throw json::ParseError(context + ": unknown body \"" + name + "\"");
+        throw sf::config::json::ParseError(context + ": unknown body \"" + name + "\"");
     }
     return lookup.id;
 }
@@ -29,9 +29,9 @@ sf::celestial::BodyId read_body(const std::string& name, const std::string& cont
 }  // namespace
 
 Scenario Scenario::load(const std::string& path) {
-    const json::Value root = json::parse_file(path);
+    const sf::config::json::Value root = sf::config::json::parse_file(path);
     if (!root.is_object()) {
-        throw json::ParseError(path + ": top level must be an object");
+        throw sf::config::json::ParseError(path + ": top level must be an object");
     }
 
     Scenario s{};
@@ -39,7 +39,7 @@ Scenario Scenario::load(const std::string& path) {
     s.epoch_text = root.require("epoch", path).as_string("epoch");
     s.duration_seconds = root.require("duration_s", path).as_number("duration_s");
 
-    if (const json::Value* bodies = root.get("bodies"); bodies != nullptr) {
+    if (const sf::config::json::Value* bodies = root.get("bodies"); bodies != nullptr) {
         for (const auto& entry : bodies->as_array("bodies")) {
             s.bodies.push_back(read_body(entry.as_string("bodies[]"), "bodies[]"));
         }
@@ -47,20 +47,68 @@ Scenario Scenario::load(const std::string& path) {
         s.bodies = sf::celestial::BodyCatalog::default_solar_system_ids();
     }
     if (s.bodies.empty()) {
-        throw json::ParseError(path + ": \"bodies\" must list at least one body");
+        throw sf::config::json::ParseError(path + ": \"bodies\" must list at least one body");
     }
 
-    const json::Value& craft = root.require("spacecraft", path);
+    const sf::config::json::Value& craft = root.require("spacecraft", path);
     s.relative_to = read_body(craft.string_or("relative_to", "Earth"), "spacecraft.relative_to");
     s.position = read_vec3(craft.require("position_m", "spacecraft"), "spacecraft.position_m");
     s.velocity = read_vec3(craft.require("velocity_ms", "spacecraft"), "spacecraft.velocity_ms");
-    s.mass = craft.number_or("mass_kg", 1000.0);
-    if (s.mass <= 0.0) {
-        throw json::ParseError("spacecraft.mass_kg must be > 0");
+    if (craft.get("engine") != nullptr) {
+        s.craft = sf::spacecraft::Spacecraft::from_json(craft, "spacecraft");
+        s.mass = s.craft->initial_mass();
+    } else {
+        s.mass = craft.number_or("mass_kg", 1000.0);
+        if (s.mass <= 0.0) {
+            throw sf::config::json::ParseError("spacecraft.mass_kg must be > 0");
+        }
     }
 
-    if (const json::Value* perturbations = root.get("perturbations"); perturbations != nullptr) {
-        if (const json::Value* j2 = perturbations->get("j2_bodies"); j2 != nullptr) {
+    if (const sf::config::json::Value* list = root.get("maneuvers"); list != nullptr) {
+        if (!s.craft.has_value()) {
+            throw sf::config::json::ParseError(
+                "maneuvers were given but spacecraft.engine was not: a burn needs an engine "
+                "(docs/physics/propulsion-model.md)");
+        }
+        for (const auto& entry : list->as_array("maneuvers")) {
+            ScenarioManeuver m{};
+            m.name = entry.string_or("name", "burn");
+            m.ignition_s = entry.require("ignition_s", "maneuvers[]").as_number("ignition_s");
+            if (const auto* d = entry.get("duration_s"); d != nullptr) {
+                m.duration_s = d->as_number("duration_s");
+            }
+            if (const auto* dv = entry.get("delta_v_ms"); dv != nullptr) {
+                m.delta_v_ms = dv->as_number("delta_v_ms");
+            }
+            if (m.duration_s.has_value() == m.delta_v_ms.has_value()) {
+                throw sf::config::json::ParseError(
+                    "maneuver \"" + m.name +
+                    "\": give exactly one of duration_s or delta_v_ms; the rocket equation "
+                    "supplies the other");
+            }
+            m.throttle = entry.number_or("throttle", 1.0);
+
+            const std::string guidance = entry.string_or("guidance", "prograde");
+            const auto parsed = sf::navigation::guidance_from_string(guidance);
+            if (!parsed.has_value()) {
+                throw sf::config::json::ParseError("maneuver \"" + m.name +
+                                                   "\": unknown guidance \"" + guidance + "\"");
+            }
+            m.guidance = *parsed;
+
+            if (const auto* reference = entry.get("reference"); reference != nullptr) {
+                m.reference = read_body(reference->as_string("maneuvers[].reference"),
+                                        "maneuvers[].reference");
+            }
+            if (const auto* direction = entry.get("direction"); direction != nullptr) {
+                m.inertial_direction = read_vec3(*direction, "maneuvers[].direction");
+            }
+            s.maneuvers.push_back(std::move(m));
+        }
+    }
+
+    if (const sf::config::json::Value* perturbations = root.get("perturbations"); perturbations != nullptr) {
+        if (const sf::config::json::Value* j2 = perturbations->get("j2_bodies"); j2 != nullptr) {
             for (const auto& entry : j2->as_array("perturbations.j2_bodies")) {
                 s.j2_bodies.push_back(
                     read_body(entry.as_string("perturbations.j2_bodies[]"),
@@ -69,7 +117,7 @@ Scenario Scenario::load(const std::string& path) {
         }
     }
 
-    if (const json::Value* integ = root.get("integrator"); integ != nullptr) {
+    if (const sf::config::json::Value* integ = root.get("integrator"); integ != nullptr) {
         auto& cfg = s.integrator;
         cfg.relative_tolerance = integ->number_or("rtol", cfg.relative_tolerance);
         cfg.absolute_tolerance_position =
@@ -84,7 +132,7 @@ Scenario Scenario::load(const std::string& path) {
             integ->number_or("max_steps", static_cast<double>(cfg.max_steps)));
     }
 
-    if (const json::Value* out = root.get("output"); out != nullptr) {
+    if (const sf::config::json::Value* out = root.get("output"); out != nullptr) {
         s.samples = static_cast<int>(out->number_or("samples", s.samples));
         s.csv_path = out->string_or("csv", "");
     }
@@ -105,6 +153,9 @@ std::string Scenario::describe() const {
         os << (i > 0 ? ", " : "") << bodies[i].name();
     }
     os << "\n";
+    if (craft) {
+        os << "ship       : " << craft->describe() << "\n";
+    }
     os << "J2         : ";
     if (j2_bodies.empty()) {
         os << "(none -- point masses only)";
@@ -117,7 +168,7 @@ std::string Scenario::describe() const {
        << "initial    : relative to " << relative_to.name() << " (J2000 axes)\n"
        << "  position : " << position << " m\n"
        << "  velocity : " << velocity << " m/s\n"
-       << "  mass     : " << mass << " kg\n"
+       << "  mass     : " << initial_mass() << " kg\n"
        << "tolerances : rtol " << integrator.relative_tolerance
        << ", atol_r " << integrator.absolute_tolerance_position << " m"
        << ", atol_v " << integrator.absolute_tolerance_velocity << " m/s";

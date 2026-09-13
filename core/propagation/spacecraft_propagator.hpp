@@ -23,6 +23,9 @@ struct IntegratorConfig {
     double relative_tolerance{1.0e-10};
     double absolute_tolerance_position{1.0e-3};   // [m]
     double absolute_tolerance_velocity{1.0e-6};   // [m/s]
+    // Mass is error-controlled too: its error feeds straight back into the
+    // acceleration through a = F/m while an engine is burning.
+    double absolute_tolerance_mass{1.0e-6};       // [kg]
 
     time::Duration min_step{time::Duration::seconds(1.0e-6)};
     time::Duration max_step{time::Duration::days(1.0)};
@@ -38,6 +41,13 @@ struct IntegratorConfig {
     // "elementary" controller; 0.04 is the standard value for DOPRI5 and damps
     // the step size oscillation seen on eccentric orbits.
     double pi_beta{0.04};
+
+    // Stop the propagation when the trajectory enters a body's radius.  Right for
+    // flying a mission; wrong for TARGETING one, where the corrector needs a
+    // smooth map from departure velocity to arrival position and a trajectory
+    // that clips the target is a perfectly good intermediate iterate.  The point
+    // mass model stays valid inside the radius; it just stops being physical.
+    bool stop_inside_body{true};
 };
 
 struct IntegratorStats {
@@ -55,6 +65,7 @@ struct IntegratorStats {
 
 enum class PropagationStatus {
     Success,
+    OutOfPropellant,      // the tank ran dry mid-burn (reported, not an error)
     MinimumStepReached,   // error control demanded a step below min_step
     MaxStepsExceeded,
     NonFiniteState,       // NaN/Inf appeared: reported, never swept under a clamp

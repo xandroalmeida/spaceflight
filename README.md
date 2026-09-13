@@ -6,10 +6,11 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 0 concluído, mais as duas dívidas que ele deixou em aberto**
-(achatamento J₂ e dense output). Sem gráficos, sem gameplay, sem relatividade.
-O que existe é uma base verificável: 13 suítes de teste, das quais 6 comparam
-resultados contra o JPL Horizons ou contra soluções analíticas fechadas.
+**Estado: Milestone 1 concluído.** Núcleo científico, efemérides JPL, gravidade de
+N corpos com J₂, propagação com dense output, propulsão, planejamento e execução
+de manobras, Lambert e targeting diferencial. Sem gráficos, sem gameplay, sem
+relatividade. 18 suítes de teste, das quais 10 comparam resultados contra o JPL
+Horizons ou contra soluções analíticas fechadas.
 
 ---
 
@@ -27,6 +28,8 @@ Sem Godot instalado. Sem rede depois do primeiro `cmake`.
 ```bash
 ./build/bin/orbit-cli body Earth --date 2026-01-01
 ./build/bin/orbit-cli propagate tests/scenarios/leo-circular.json
+./build/bin/orbit-cli propagate tests/scenarios/leo-raise-apoapsis.json
+./build/bin/orbit-cli intercept tests/scenarios/lunar-intercept.json --to Moon --tof 4.5
 ```
 
 ## Estrutura
@@ -44,13 +47,16 @@ spaceflight/
 ├── docs/
 │   ├── architecture/
 │   │   ├── system-architecture.md     camadas, regra de dependência, fluxo de dados
-│   │   └── coordinate-system.md       SSB/J2000, TDB, orçamento de erro do double
+│   │   ├── coordinate-system.md       SSB/J2000, TDB, orçamento de erro do double
+│   │   └── navigation.md              planejar × executar, perda gravitacional, descontinuidades
 │   ├── physics/
 │   │   ├── gravity-model.md           N corpos pontuais, domínio de validade, o que falta
 │   │   ├── geopotential.md            J2: forma sem referencial girante, constantes, testes
+│   │   ├── propulsion-model.md        F = eta*q*w derivado de conservação; o que eta custa
+│   │   ├── lambert.md                 variáveis universais, casos degenerados, targeting
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
-│   ├── adr/                           0001 linguagem .. 0006 dense output
+│   ├── adr/                           0001 linguagem .. 0007 formato de configuração
 │   └── validation/
 │       └── tolerances.md              toda tolerância, medida e justificada
 │
@@ -66,13 +72,15 @@ spaceflight/
 │   ├── ephemeris/              EphemerisProvider, SpiceEphemerisProvider, kernels, erros
 │   ├── gravity/                ForceModel, PointMassGravity, OblatenessGravity (J2), Composite
 │   ├── propagation/            SpacecraftPropagator, Dormand-Prince 5(4), dense output, estatísticas
-│   ├── trajectory/             elementos orbitais osculadores (diagnóstico)
+│   ├── trajectory/             elementos osculadores (diagnóstico), Lambert
+│   ├── propulsion/             motor: F = eta*q*w, contabilidade de energia
+│   ├── navigation/             manobras, executor, missão, planejador, targeting
+│   ├── config/                 leitor de JSON com comentários (ADR-0007)
 │   ├── spacecraft/             SpacecraftState
 │   ├── simulation/             SimulationClock (wall / coordinate / proper / render)
 │   ├── relativity/             Milestone 4  (vazio: precisa do documento antes)
-│   ├── propulsion/             Milestone 1
 │   ├── attitude/               Milestone 3
-│   ├── navigation/ autopilot/  Milestone 1+
+│   ├── autopilot/              Milestone 3
 │
 ├── tools/
 │   ├── orbit-cli/              kernels, bodies, time, body, elements, gravity, propagate
@@ -101,6 +109,7 @@ Registradas em `docs/adr/`:
 | 0004 | Estado em SSB / J2000 (ICRF), SI, TDB em representação de duas partes |
 | 0005 | Dormand–Prince 5(4) adaptativo, desacoplado de frame e de time warp |
 | 0006 | Dense output de 4ª ordem: estado em qualquer instante, sem forçar o passo |
+| 0007 | Configuração em JSON com comentários, parser no core |
 
 E três regras que valem para tudo o que vier:
 
@@ -115,7 +124,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 13
+100% tests passed, 0 tests failed out of 18
 ```
 
 Entre outras coisas:
@@ -135,12 +144,32 @@ Entre outras coisas:
   **−5,002 °/dia** — o valor da ISS — e `L·n̂` (invariante exato de um campo
   axialmente simétrico) se conserva a 4·10⁻¹² enquanto `|L|` deriva 3·10⁻⁴;
 * gravar dense output não altera a trajetória em **um único bit**, e amostrar
-  100 000 estados de uma órbita não custa nenhuma avaliação de força.
+  100 000 estados de uma órbita não custa nenhuma avaliação de força;
+* uma queima em espaço livre reproduz Tsiolkovsky a 10⁻¹⁰, e o modelo de motor
+  entrega o limite do foguete de fótons (`F = P/c`) e o **defeito de massa** de
+  uma reação química (4,5·10⁻¹⁰) sem ter sido construído para nenhum dos dois;
+* a perda gravitacional escala com `(nΔt)²`: dez vezes o empuxo reduz a perda por
+  um fator **99,2**, contra os 100 previstos;
+* uma transferência de Hohmann LEO→GEO executada com duas queimas chega em órbita
+  circular com `e = 4,9·10⁻⁶`;
+* Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
+  diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**.
 
 Toda tolerância acima tem origem declarada em `docs/validation/tolerances.md`.
 
+## Milestone 1, item por item
+
+| Enunciado §34 | Como verificar |
+|---|---|
+| propagar 1 órbita | `orbit-cli propagate tests/scenarios/leo-circular.json` |
+| propagar 1 dia | `orbit-cli propagate tests/scenarios/leo-j2-nodal-regression.json` |
+| executar burn | `orbit-cli propagate tests/scenarios/leo-raise-apoapsis.json` |
+| alterar apoastro | idem — 6 778 km → 19 950 km, com a perda gravitacional reportada |
+| escapar da Terra | `orbit-cli propagate tests/scenarios/earth-escape.json` — energia cruza zero |
+| interceptar região da Lua | `orbit-cli intercept tests/scenarios/lunar-intercept.json --to Moon --tof 4.5` |
+
 ## Próximo
 
-Milestone 1: propulsão newtoniana (`docs/physics/propulsion-model.md` já fixa o
-modelo), queimas pela CLI, alteração de apoastro, escape da Terra, interceptação
-da região lunar com um solver de Lambert.
+Milestone 2: Godot como consumidor de snapshots — câmera externa, Terra, Lua,
+nave, starfield, floating origin, time warp. O core já entrega tudo de que ele
+precisa (`Trajectory::state_at` em qualquer instante, sem forçar o passo).

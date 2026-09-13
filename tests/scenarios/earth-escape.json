@@ -1,0 +1,43 @@
+{
+  // Milestone 1: escape the Earth.
+  //
+  // From the same 400 km parking orbit, a single prograde burn of 3200 m/s --
+  // slightly more than the 3176.6 m/s that vis-viva says is needed to reach
+  // escape velocity -- leaves the ship on a hyperbolic trajectory. Watch the
+  // specific energy cross zero and stay there.
+  "name": "Earth escape from a 400 km parking orbit",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 864000.0,
+
+  "bodies": ["Sun", "Earth", "Moon", "Venus Barycenter", "Mars Barycenter", "Jupiter Barycenter"],
+  "perturbations": { "j2_bodies": ["Earth"] },
+
+  "spacecraft": {
+    "relative_to": "Earth",
+    "position_m":  [6778000.0, 0.0, 0.0],
+    "velocity_ms": [0.0, 7668.6356146, 0.0],
+    "name": "Tug",
+    "dry_mass_kg": 2000.0,
+    "propellant_mass_kg": 3000.0,
+    "engine": {
+      "name": "Orbital Tug",
+      "max_mass_flow_kg_s": 15.0,
+      "exhaust_velocity_fraction_c": 0.00003,
+      "efficiency": 1.0
+    }
+  },
+
+  "maneuvers": [
+    { "name": "escape burn", "ignition_s": 300.0, "delta_v_ms": 3200.0, "guidance": "prograde" }
+  ],
+
+  "integrator": {
+    "rtol": 1e-11,
+    "atol_position_m": 1e-3,
+    "atol_velocity_ms": 1e-6,
+    "initial_step_s": 1.0,
+    "max_step_s": 3600.0
+  },
+
+  "output": { "samples": 20 }
+}

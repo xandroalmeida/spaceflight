@@ -129,29 +129,67 @@ modelo paralelo: apenas a forma de baixa velocidade das mesmas equações.
 ### 4.3 Empuxo por potência
 
 ```
-F / P = η w / c²          com  P = q c² (potência total consumida)
+F / (q c²) = η w / c²
 ```
 
-No limite `w → c, η → 1` isso vira `F = P/c`: o foguete de fótons. O modelo
-reproduz esse limite conhecido sem ter sido construído para isso — é o teste de
-sanidade mais forte que temos dele.
+No limite `w → c, η → 1` o jato não leva massa de repouso nenhuma (`μ = ηq/γ_w →
+0`), toda a massa consumida vira energia, e a relação vira `F = P/c`: o foguete
+de fótons. O modelo reproduz esse limite conhecido sem ter sido construído para
+isso — é o teste de sanidade mais forte que temos dele.
 
-### 4.4 O preço de um motor interessante (por que a matemática importa)
+### 4.4 O preço de um motor, e o que `η` realmente significa
 
-Um motor com `w = 0,1c`, `η = 0,5`, `q_max = 0,01 kg/s`:
+A contabilidade completa de energia, por unidade de tempo próprio:
 
 ```
-F   = η q w  = 0,5 · 0,01 · 3,0·10⁷  = 1,5·10⁵ N
-P   = q c²   = 0,01 · 8,99·10¹⁶      = 9,0·10¹⁴ W  (900 TW)
-P_perdida = (1−η) P = 450 TW  a dissipar
+fluxo bruto de energia de repouso   q c²
+massa de repouso que sai no jato    μ = η q / γ_w
+energia de repouso convertida       (q − μ) c² = q c² (1 − η/γ_w)
+   ↳ vira energia cinética do jato  (γ_w − 1) μ c² = η q c² (1 − 1/γ_w)
+   ↳ vira calor residual            (1 − η) q c²
 ```
 
-Isto é, meio quatrilhão de watts de calor residual. O modelo **expõe** esse custo
-em vez de escondê-lo — e é exatamente por isso que ele vale mais que
-`fuel -= 1`. A decisão de gameplay (radiadores? `η` mais alto? aceitar e ignorar?)
-passa a ser uma decisão informada.
+As duas últimas somam exatamente a terceira — identidade do modelo, verificada em
+`tests/unit/test_engine.cpp` para todo par `(w, η)`.
 
----
+**Motor de classe química** (`w = 9 km/s = 3·10⁻⁵ c`, `η = 1`, `q = 15 kg/s`):
+
+```
+v_eff  = 8 993,8 m/s        Isp = 917 s
+fração da massa convertida  = 1 − 1/γ_w = (w/c)²/2 = 4,5·10⁻¹⁰
+potência no jato            = ½ q w² = 6,07·10⁸ W
+calor residual              = 0
+```
+
+O modelo reproduz sozinho o **defeito de massa** de uma reação química: a massa
+convertida é 4,5·10⁻¹⁰ da consumida. Ninguém disse isso a ele; é a forma da
+equação de energia no limite `w ≪ c`. É essa a razão para confiar nele no outro
+extremo.
+
+**Motor de fusão/aniquilação** (`w = 0,1c`, `η = 0,5`, `q = 0,01 kg/s`):
+
+```
+F                  = η q w                 = 1,50·10⁵ N
+energia convertida = q c²(1 − η/γ_w)       = 4,52·10¹⁴ W  (452 TW)
+   ↳ no jato       = η q c²(1 − 1/γ_w)     = 2,25·10¹² W  (2,25 TW)
+   ↳ calor         = (1 − η) q c²          = 4,49·10¹⁴ W  (449 TW)
+```
+
+E aqui está a lição que o modelo entrega de graça:
+
+> **`η = 0,5` a `w = 0,1c` significa aniquilar metade do propelente à toa.**
+> O calor residual é ~200 vezes a energia que chega ao jato.
+
+`η` **não** é uma "eficiência" no sentido intuitivo de "quão bem o motor
+funciona". É a fração da energia de repouso consumida que sai como jato dirigido
+(massa de repouso do jato **mais** sua energia cinética). Um motor sensato tem
+`η → 1`; o restante é literalmente massa destruída sem produzir empuxo.
+
+O efeito de `η` no desempenho é direto — `v_eff = η w`, então `η = 0,5` custa
+metade do `Δv` por quilo — e o efeito na energia é brutal. Os cenários de exemplo
+em `tests/scenarios/` usam `η ≈ 0,98` por essa razão, e não por gosto.
+
+Isto é exatamente o tipo de coisa que `thrust = throttle * maxThrust` esconde.
 
 ## 5. Throttle e consumo
 
@@ -198,10 +236,48 @@ initial_mass_kg >= 0
 dry_mass_kg > 0
 ```
 
-O formato exato (subconjunto de YAML ou JSON) e o parser serão decididos no
-Milestone 1; o que está fixado agora é que **os parâmetros não moram no código**.
+O formato adotado é **JSON com comentários de linha** (ADR-0007); o equivalente
+do arquivo acima é:
+
+```json
+{
+  // Fusion Torch Mk I -- tecnologia fictícia, matemática real.
+  "engine": {
+    "name": "Fusion Torch Mk I",
+    "max_mass_flow_kg_s": 0.01,          // q_max
+    "exhaust_velocity_fraction_c": 0.1,  // w/c, em (0, 1]
+    "efficiency": 0.5                    // eta, em (0, 1]
+  },
+  "propellant": { "initial_mass_kg": 40000.0 },
+  "spacecraft":  { "dry_mass_kg": 12000.0 }
+}
+```
 
 ---
+
+## 6.1 Como o modelo entra no integrador
+
+A massa de repouso é **variável de estado**, integrada junto com posição e
+velocidade — não atualizada "por fora" depois do passo. O motivo é que a
+aceleração depende da massa instantânea, e o integrador avalia a derivada sete
+vezes dentro de um único passo, em instantes distintos:
+
+```
+dr/dt = v
+dv/dt = a_gravidade + (η q w / m) ê        ê = direção do empuxo
+dm/dt = −q                                 q = throttle · q_max
+```
+
+Atualizar a massa só no fim do passo faria os sete estágios usarem a massa
+errada, degradando o método de 5ª ordem para algo entre 1ª e 2ª durante toda
+queima. Consequências práticas:
+
+* o vetor de estado tem 8 componentes: `[x y z vx vy vz τ m]`;
+* a massa participa do controle de erro (com tolerância absoluta própria, em kg),
+  porque o erro dela realimenta a aceleração;
+* ligar e desligar o motor é uma descontinuidade na derivada, e por isso a
+  propagação é quebrada nos instantes de chaveamento em vez de atravessá-los
+  (`docs/architecture/navigation.md` §4).
 
 ## 7. Testes previstos
 

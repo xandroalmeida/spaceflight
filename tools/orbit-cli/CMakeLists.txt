@@ -1,6 +1,5 @@
 add_executable(orbit-cli
     main.cpp
-    json.cpp
     scenario.cpp
 )
 

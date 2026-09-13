@@ -44,7 +44,7 @@ private:
     using Vector = StateArray;
 
     [[nodiscard]] Vector derivative(const Vector& y, time::CoordinateTime t,
-                                    double mass, gravity::ForceResult& out_force) const;
+                                    gravity::ForceResult& out_force) const;
 
     [[nodiscard]] double error_norm(const Vector& y, const Vector& y_new, const Vector& err) const;
 

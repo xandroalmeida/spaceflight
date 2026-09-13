@@ -1,11 +1,11 @@
-#include "tools/orbit-cli/json.hpp"
+#include "core/config/json.hpp"
 
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 
-namespace orbitcli::json {
+namespace sf::config::json {
 namespace {
 
 class Parser {
@@ -283,4 +283,4 @@ Value parse_file(const std::string& path) {
     return parse(text);
 }
 
-}  // namespace orbitcli::json
+}  // namespace sf::config::json

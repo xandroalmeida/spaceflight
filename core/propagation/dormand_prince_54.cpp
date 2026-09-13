@@ -1,6 +1,7 @@
 #include "core/propagation/dormand_prince_54.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -69,8 +70,8 @@ void DormandPrince54Propagator::set_config(IntegratorConfig config) {
 }
 
 DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
-    const Vector& y, time::CoordinateTime t, double mass, gravity::ForceResult& out_force) const {
-    const PropagationState s = state_from_array(y, mass);
+    const Vector& y, time::CoordinateTime t, gravity::ForceResult& out_force) const {
+    const PropagationState s = state_from_array(y);
     out_force = forces_.evaluate(s, t);
 
     Vector dy{};
@@ -84,24 +85,35 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     // with 1/gamma (special relativity) and later with the weak-field form.
     // See docs/physics/relativity-roadmap.md section 3.2.
     dy[6] = 1.0;
+    // dm/dt: negative while an engine burns, zero otherwise.
+    dy[7] = out_force.mass_flow_rate;
     return dy;
 }
 
 double DormandPrince54Propagator::error_norm(const Vector& y, const Vector& y_new,
                                              const Vector& err) const {
-    // RMS of the componentwise error scaled by  atol + rtol*max(|y|,|y_new|).
-    // Proper time (component 6) is excluded: its derivative is exact, so
-    // including it would let it dominate or dilute the norm for no reason.
+    // RMS of the componentwise error scaled by  atol + rtol*max(|y|,|y_new|),
+    // over position, velocity and mass.
+    //
+    // Proper time (component 6) is excluded: its derivative is exact in this
+    // regime, so including it would dilute the norm for no reason.  Mass
+    // (component 7) IS included, because while an engine burns the acceleration
+    // is F/m and an error in m propagates straight into the trajectory.
+    constexpr std::size_t kControlled[] = {0, 1, 2, 3, 4, 5, 7};
     double sum = 0.0;
-    for (std::size_t i = 0; i < 6; ++i) {
-        const double atol = (i < 3) ? config_.absolute_tolerance_position
-                                    : config_.absolute_tolerance_velocity;
+    for (const std::size_t i : kControlled) {
+        double atol = config_.absolute_tolerance_velocity;
+        if (i < 3) {
+            atol = config_.absolute_tolerance_position;
+        } else if (i == 7) {
+            atol = config_.absolute_tolerance_mass;
+        }
         const double scale = atol + config_.relative_tolerance *
                                         std::max(std::abs(y[i]), std::abs(y_new[i]));
         const double ratio = err[i] / scale;
         sum += ratio * ratio;
     }
-    return std::sqrt(sum / 6.0);
+    return std::sqrt(sum / static_cast<double>(std::size(kControlled)));
 }
 
 PropagationResult DormandPrince54Propagator::propagate(const PropagationState& initial,
@@ -131,11 +143,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     }
     const double direction = total > 0.0 ? 1.0 : -1.0;
 
-    Vector y{initial.state.position.x, initial.state.position.y, initial.state.position.z,
-             initial.state.velocity.x, initial.state.velocity.y, initial.state.velocity.z,
-             initial.proper_time.seconds()};
-
-    const double mass = initial.mass;  // constant until propulsion exists (Milestone 1)
+    Vector y = array_from_state(initial);
     time::CoordinateTime t = from;
 
     double h = direction * std::min({std::abs(config_.initial_step.seconds()),
@@ -146,7 +154,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     }
 
     gravity::ForceResult force{};
-    Vector k1 = derivative(y, t, mass, force);
+    Vector k1 = derivative(y, t, force);
     result.stats.force_evaluations = 1;
 
     double error_previous = 1.0e-4;  // seeds the PI controller
@@ -176,33 +184,33 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         for (std::size_t i = 0; i < kDim; ++i) {
             y2[i] = y[i] + h_step * a21 * k1[i];
         }
-        Vector k2 = derivative(y2, t + time::Duration{c2 * h_step}, mass, force);
+        Vector k2 = derivative(y2, t + time::Duration{c2 * h_step}, force);
 
         for (std::size_t i = 0; i < kDim; ++i) {
             y3[i] = y[i] + h_step * (a31 * k1[i] + a32 * k2[i]);
         }
-        Vector k3 = derivative(y3, t + time::Duration{c3 * h_step}, mass, force);
+        Vector k3 = derivative(y3, t + time::Duration{c3 * h_step}, force);
 
         for (std::size_t i = 0; i < kDim; ++i) {
             y4[i] = y[i] + h_step * (a41 * k1[i] + a42 * k2[i] + a43 * k3[i]);
         }
-        Vector k4 = derivative(y4, t + time::Duration{c4 * h_step}, mass, force);
+        Vector k4 = derivative(y4, t + time::Duration{c4 * h_step}, force);
 
         for (std::size_t i = 0; i < kDim; ++i) {
             y5[i] = y[i] + h_step * (a51 * k1[i] + a52 * k2[i] + a53 * k3[i] + a54 * k4[i]);
         }
-        Vector k5 = derivative(y5, t + time::Duration{c5 * h_step}, mass, force);
+        Vector k5 = derivative(y5, t + time::Duration{c5 * h_step}, force);
 
         for (std::size_t i = 0; i < kDim; ++i) {
             y6[i] = y[i] + h_step * (a61 * k1[i] + a62 * k2[i] + a63 * k3[i] + a64 * k4[i] + a65 * k5[i]);
         }
-        Vector k6 = derivative(y6, t + time::Duration{h_step}, mass, force);
+        Vector k6 = derivative(y6, t + time::Duration{h_step}, force);
 
         for (std::size_t i = 0; i < kDim; ++i) {
             y_new[i] = y[i] + h_step * (b1 * k1[i] + b3 * k3[i] + b4 * k4[i] + b5 * k5[i] + b6 * k6[i]);
         }
         gravity::ForceResult force_new{};
-        Vector k7 = derivative(y_new, t + time::Duration{h_step}, mass, force_new);
+        Vector k7 = derivative(y_new, t + time::Duration{h_step}, force_new);
         result.stats.force_evaluations += 6;
 
         for (std::size_t i = 0; i < kDim; ++i) {
@@ -226,7 +234,6 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
                 DenseSegment segment{};
                 segment.begin = t;
                 segment.step_seconds = h_step;
-                segment.mass = mass;
                 for (std::size_t i = 0; i < kDim; ++i) {
                     const double difference = y_new[i] - y[i];
                     const double bspl = h_step * k1[i] - difference;
@@ -255,10 +262,10 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             max_h = std::max(max_h, std::abs(h_step));
 
             if (observer_) {
-                observer_(StepInfo{t, state_from_array(y, mass), h_step, error, true});
+                observer_(StepInfo{t, state_from_array(y), h_step, error, true});
             }
 
-            if (force_new.inside_body) {
+            if (force_new.inside_body && config_.stop_inside_body) {
                 result.status = PropagationStatus::InsideBody;
                 result.message = "trajectory entered " + force_new.inside_of.name();
                 break;
@@ -266,7 +273,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         } else {
             ++result.stats.rejected_steps;
             if (observer_ && observe_rejected_) {
-                observer_(StepInfo{t + time::Duration{h_step}, state_from_array(y_new, mass),
+                observer_(StepInfo{t + time::Duration{h_step}, state_from_array(y_new),
                                    h_step, error, false});
             }
             if (!finite) {
@@ -316,10 +323,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         h = h_next;
     }
 
-    result.state.state.position = math::Vec3{y[0], y[1], y[2]};
-    result.state.state.velocity = math::Vec3{y[3], y[4], y[5]};
-    result.state.mass = mass;
-    result.state.proper_time = time::Duration{y[6]};
+    result.state = state_from_array(y);
     result.time = t;
 
     result.stats.min_step_seconds = std::isfinite(min_h) ? min_h : 0.0;

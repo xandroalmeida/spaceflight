@@ -6,6 +6,7 @@
 #include "core/math/vec3.hpp"
 
 #include <array>
+#include <cmath>
 
 namespace sf::math {
 
@@ -45,6 +46,49 @@ struct Mat3 {
             }
         }
         return p;
+    }
+    [[nodiscard]] constexpr double determinant() const {
+        return at(0, 0) * (at(1, 1) * at(2, 2) - at(1, 2) * at(2, 1)) -
+               at(0, 1) * (at(1, 0) * at(2, 2) - at(1, 2) * at(2, 0)) +
+               at(0, 2) * (at(1, 0) * at(2, 1) - at(1, 1) * at(2, 0));
+    }
+
+    // Solves M x = b by Cramer's rule.  Three unknowns is small enough that the
+    // determinant form is both the clearest and the fastest; `ok` reports a
+    // singular (or near-singular) matrix rather than returning infinities, which
+    // is what a differential corrector needs in order to give up honestly.
+    struct Solution {
+        Vec3 x{};
+        bool ok{false};
+    };
+
+    [[nodiscard]] Solution solve(const Vec3& b) const {
+        const double det = determinant();
+        if (!std::isfinite(det) || det == 0.0) {
+            return {};
+        }
+
+        Mat3 mx = *this;
+        Mat3 my = *this;
+        Mat3 mz = *this;
+        for (int row = 0; row < 3; ++row) {
+            mx.m[static_cast<std::size_t>(row)][0] = b[row];
+            my.m[static_cast<std::size_t>(row)][1] = b[row];
+            mz.m[static_cast<std::size_t>(row)][2] = b[row];
+        }
+
+        Solution out{};
+        out.x = Vec3{mx.determinant() / det, my.determinant() / det, mz.determinant() / det};
+        out.ok = out.x.is_finite();
+        return out;
+    }
+
+    // Builds a matrix from three column vectors -- the natural shape of a
+    // numerically estimated Jacobian.
+    static constexpr Mat3 from_columns(const Vec3& c0, const Vec3& c1, const Vec3& c2) {
+        Mat3 out{};
+        out.m = {{{c0.x, c1.x, c2.x}, {c0.y, c1.y, c2.y}, {c0.z, c1.z, c2.z}}};
+        return out;
     }
 };
 

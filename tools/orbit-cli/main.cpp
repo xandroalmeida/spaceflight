@@ -11,6 +11,10 @@
 #include "core/gravity/composite_force_model.hpp"
 #include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
+#include "core/navigation/mission.hpp"
+#include "core/navigation/targeting.hpp"
+#include "core/navigation/trajectory_planner.hpp"
+#include "core/trajectory/lambert.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/trajectory/orbital_elements.hpp"
 #include "core/units/constants.hpp"
@@ -25,6 +29,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -44,6 +49,9 @@ Usage:
   orbit-cli elements <name> [--center <body>] [--date <epoch>]
   orbit-cli gravity [--center <body>] [--position x,y,z] [--date <epoch>]
   orbit-cli propagate <scenario.json> [--csv <file>] [--samples <n>] [--j2]
+  orbit-cli lambert --to <body> --depart <epoch> --tof <days> [--center <body>] [--from <body|x,y,z>]
+  orbit-cli intercept <scenario.json> --to <body> --tof <days> [--csv <file>]
+                    [--no-retarget] [--tolerance-km <n>]
 
 Options:
   --date <epoch>    Any format SPICE accepts: "2026-01-01", "2026-01-01T12:00:00",
@@ -51,6 +59,8 @@ Options:
   --origin <body>   Origin of the reference frame.  Default: SSB.
   --center <body>   Central body for orbital elements / gravity queries.
   --j2              Add the central body's J2 oblateness term (docs/physics/geopotential.md).
+  --tof <days>      Time of flight for the Lambert transfer.
+  --from <x,y,z>    Departure position relative to --center, in metres; or a body name.
   --kernels <dir>   Kernel directory.  Default: $SPACEFLIGHT_KERNEL_DIR or the build-time path.
 
 All output is SI: metres, metres per second, seconds, kilograms.
@@ -164,6 +174,17 @@ time::CoordinateTime epoch_from(const Args& args, const Context& ctx) {
         return time::CoordinateTime::j2000();
     }
     return ctx.time->parse(*text);
+}
+
+Vec3 parse_vec3(const std::string& text) {
+    Vec3 v{};
+    std::string copy = text;
+    std::replace(copy.begin(), copy.end(), ',', ' ');
+    std::istringstream is{copy};
+    if (!(is >> v.x >> v.y >> v.z)) {
+        throw std::runtime_error("cannot parse vector \"" + text + "\" (expected x,y,z)");
+    }
+    return v;
 }
 
 int command_kernels(const Args& args) {
@@ -283,17 +304,6 @@ int command_elements(const Args& args) {
     return 0;
 }
 
-Vec3 parse_vec3(const std::string& text) {
-    Vec3 v{};
-    std::string copy = text;
-    std::replace(copy.begin(), copy.end(), ',', ' ');
-    std::istringstream is{copy};
-    if (!(is >> v.x >> v.y >> v.z)) {
-        throw std::runtime_error("cannot parse vector \"" + text + "\" (expected x,y,z)");
-    }
-    return v;
-}
-
 int command_gravity(const Args& args) {
     const Context ctx = make_context(args);
     const auto center = resolve_body(args.option_or("center", "399"));
@@ -334,6 +344,302 @@ int command_gravity(const Args& args) {
     return 0;
 }
 
+int command_lambert(const Args& args) {
+    const Context ctx = make_context(args);
+    const auto center = resolve_body(args.option_or("center", "399"));
+    const auto t0 = epoch_from(args, ctx);
+
+    const auto tof_days = args.option("tof");
+    if (!tof_days.has_value()) {
+        throw std::runtime_error("orbit-cli lambert requires --tof <days>");
+    }
+    const auto tof = time::Duration::days(std::stod(*tof_days));
+    const auto t1 = t0 + tof;
+
+    const auto target_name = args.option("to");
+    if (!target_name.has_value()) {
+        throw std::runtime_error("orbit-cli lambert requires --to <body>");
+    }
+    const auto target = resolve_body(*target_name);
+
+    const coordinates::ReferenceFrame frame = coordinates::ReferenceFrame::centered_on(center);
+    const double gm = ctx.provider->gravitational_parameter(center);
+
+    // Departure: a body (we then also know its velocity, so we can quote a real
+    // delta-v) or a bare position (we can only quote the required velocity).
+    Vec3 r1{};
+    Vec3 v_departure_body{};
+    bool departure_is_body = false;
+    std::string departure_label;
+
+    const std::string from = args.option_or("from", "");
+    if (from.empty() || from.find(',') != std::string::npos) {
+        r1 = parse_vec3(from.empty() ? "6778000,0,0" : from);
+        departure_label = "position " + std::string{from.empty() ? "6778000,0,0" : from};
+    } else {
+        const auto body = resolve_body(from);
+        const auto state = ctx.provider->state(body, t0, frame);
+        r1 = state.state.position;
+        v_departure_body = state.state.velocity;
+        departure_is_body = true;
+        departure_label = body.name();
+    }
+
+    // Arrival: where the target WILL BE, not where it is now.  This is the whole
+    // point of solving Lambert against an ephemeris.
+    const auto target_state = ctx.provider->state(target, t1, frame);
+    const Vec3 r2 = target_state.state.position;
+
+    const auto solution = trajectory::solve_lambert(r1, r2, tof, gm);
+
+    std::cout << "central body   : " << center.name() << "  GM = " << fmt(gm, 16) << " m^3/s^2\n"
+              << "departure      : " << departure_label << " at " << ctx.time->to_utc_string(t0, 3)
+              << "\n"
+              << "arrival        : " << target.name() << " at " << ctx.time->to_utc_string(t1, 3)
+              << "\n"
+              << "time of flight : " << fmt(tof.days(), 10) << " d (" << fmt(tof.seconds(), 12)
+              << " s)\n"
+              << "transfer angle : " << fmt(units::rad_to_deg(solution.transfer_angle), 10)
+              << " deg\n"
+              << "transfer a     : " << fmt(solution.semi_major_axis, 12) << " m ("
+              << (solution.semi_major_axis > 0.0 ? "elliptic" : "hyperbolic") << ")\n"
+              << "bisection      : " << solution.iterations << " iterations, achieved tof "
+              << fmt(solution.achieved_time_of_flight, 15) << " s\n\n";
+
+    print_vector("departure velocity required", solution.departure_velocity, "m/s");
+    std::cout << "\n";
+    print_vector("arrival velocity", solution.arrival_velocity, "m/s");
+
+    if (departure_is_body) {
+        std::cout << "\n";
+        print_vector("departure delta-v (from the body's own velocity)",
+                     solution.departure_velocity - v_departure_body, "m/s");
+    }
+
+    const Vec3 arrival_relative = solution.arrival_velocity - target_state.state.velocity;
+    std::cout << "\n";
+    print_vector("arrival velocity relative to " + target.name(), arrival_relative, "m/s");
+
+    std::cout << "\nThis is a two-body solution. Propagated in the full model the arrival will\n"
+                 "miss by the perturbation accumulated over the transfer -- see\n"
+                 "docs/physics/lambert.md section 5. Lambert is the first guess, not the answer.\n";
+    return 0;
+}
+
+// Plans a Lambert intercept from a scenario's initial state, executes it as a
+// finite burn, and reports how far the full model ends up from the two-body
+// plan.  That last number is the point of the command (docs/physics/lambert.md
+// section 5).
+int command_intercept(const Args& args) {
+    if (args.positional.empty()) {
+        throw std::runtime_error("usage: orbit-cli intercept <scenario.json> --to <body> --tof <days>");
+    }
+    const Context ctx = make_context(args);
+    const orbitcli::Scenario scenario = orbitcli::Scenario::load(args.positional.front());
+
+    if (!scenario.craft.has_value()) {
+        throw std::runtime_error("intercept needs a scenario with spacecraft.engine configured");
+    }
+    const auto target_name = args.option("to");
+    const auto tof_option = args.option("tof");
+    if (!target_name.has_value() || !tof_option.has_value()) {
+        throw std::runtime_error("intercept requires --to <body> and --tof <days>");
+    }
+
+    const auto target = resolve_body(*target_name);
+    const auto tof = time::Duration::days(std::stod(*tof_option));
+    const auto t0 = ctx.time->parse(scenario.epoch_text);
+    const auto t1 = t0 + tof;
+
+    const auto center = scenario.relative_to;
+    const coordinates::ReferenceFrame ssb = coordinates::ReferenceFrame::ssb_j2000();
+    const coordinates::ReferenceFrame centered = coordinates::ReferenceFrame::centered_on(center);
+    const double gm = ctx.provider->gravitational_parameter(center);
+
+    // Two-body plan, in the frame centred on the body we are leaving.
+    const Vec3 r1 = scenario.position;
+    const auto target_arrival = ctx.provider->state(target, t1, centered);
+    const auto solution = trajectory::solve_lambert(r1, target_arrival.state.position, tof, gm);
+
+    const Vec3 delta_v = solution.departure_velocity - scenario.velocity;
+
+    std::cout << scenario.describe() << "\n\n"
+              << "intercept target : " << target.name() << "\n"
+              << "departure        : " << ctx.time->to_utc_string(t0, 3) << "\n"
+              << "arrival          : " << ctx.time->to_utc_string(t1, 3) << "  (tof "
+              << fmt(tof.days(), 8) << " d)\n"
+              << "transfer angle   : " << fmt(units::rad_to_deg(solution.transfer_angle), 8)
+              << " deg, a = " << fmt(solution.semi_major_axis, 12) << " m\n\n";
+    print_vector("Lambert departure delta-v", delta_v, "m/s");
+
+    const double delta_v_magnitude = delta_v.norm();
+    const double budget = scenario.craft->delta_v_budget(scenario.craft->initial_mass());
+    std::cout << "\nrequired  : " << fmt(delta_v_magnitude, 12) << " m/s\n"
+              << "available : " << fmt(budget, 12) << " m/s\n";
+    if (delta_v_magnitude > budget) {
+        std::cout << "\nThe ship cannot fly this transfer. Try a longer time of flight.\n";
+        return 2;
+    }
+
+    // Everything from here runs the FULL model.  `fly` maps a requested departure
+    // velocity to where the ship actually ends up, executing the difference from
+    // the current velocity as a finite burn.  That map is what the differential
+    // corrector inverts.
+    const auto catalog = celestial::BodyCatalog::resolve(*ctx.provider, scenario.bodies);
+    const auto center_state = ctx.provider->state(center, t0, ssb);
+
+    propagation::PropagationState initial{};
+    initial.state.position = center_state.state.position + scenario.position;
+    initial.state.velocity = center_state.state.velocity + scenario.velocity;
+    initial.mass = scenario.craft->initial_mass();
+
+    const auto target_at_arrival_ssb = ctx.provider->state(target, t1, ssb).state.position;
+
+    struct Flight {
+        navigation::MissionResult mission;
+        navigation::ManeuverPlan plan;
+    };
+
+    auto fly = [&](const Vec3& departure_velocity, propagation::Trajectory* arc,
+                   bool stop_on_impact) -> Flight {
+        const Vec3 impulse = departure_velocity - scenario.velocity;
+        Flight flight{};
+
+        auto maneuver = navigation::maneuver_for_delta_v(
+            *scenario.craft, scenario.craft->initial_mass(), impulse.norm(), t0,
+            navigation::GuidanceMode::Inertial, center, 1.0, "lambert injection");
+        maneuver.ignition = t0;
+        maneuver.inertial_direction = impulse.normalized();
+        flight.plan.add(std::move(maneuver));
+
+        gravity::CompositeForceModel forces;
+        forces.add(std::make_unique<gravity::PointMassGravity>(*ctx.provider, catalog, ssb));
+        for (const auto body : scenario.j2_bodies) {
+            forces.add(gravity::OblatenessGravity::for_body(*ctx.provider, *ctx.provider, body, ssb));
+        }
+        navigation::ManeuverExecutor executor{*ctx.provider, *scenario.craft, flight.plan, ssb};
+        forces.add_reference(executor);
+
+        auto integrator = scenario.integrator;
+        integrator.stop_inside_body = stop_on_impact;
+        propagation::DormandPrince54Propagator propagator{forces, integrator};
+        flight.mission = navigation::run_mission(propagator, executor, initial, t0, t1, arc);
+        return flight;
+    };
+
+    Vec3 departure_velocity = solution.departure_velocity;
+
+    if (!args.has_flag("no-retarget")) {
+        navigation::TargetingConfig targeting{};
+        if (const auto tolerance = args.option("tolerance-km"); tolerance.has_value()) {
+            targeting.position_tolerance = std::stod(*tolerance) * 1000.0;
+        }
+        if (const auto step = args.option("fd-step"); step.has_value()) {
+            targeting.velocity_step = std::stod(*step);
+        }
+
+        const auto correction = navigation::correct_departure(
+            // Targeting flies THROUGH the target if it has to: an iterate that
+            // clips the Moon is still a useful data point for the Jacobian, and
+            // stopping there would put a cliff in the middle of the map.
+            [&](const Vec3& v) { return fly(v, nullptr, false).mission.state.state.position; },
+            solution.departure_velocity, target_at_arrival_ssb, targeting);
+
+        std::cout << "\ndifferential targeting (full model):\n"
+                  << "  initial miss   : " << fmt(correction.initial_miss / 1000.0, 10) << " km\n"
+                  << "  final miss     : " << fmt(correction.miss_distance / 1000.0, 10) << " km\n"
+                  << "  iterations     : " << correction.iterations << " ("
+                  << correction.evaluations << " trajectories)\n"
+                  << "  status         : " << correction.message << "\n";
+        print_vector("  correction to the Lambert velocity",
+                     correction.departure_velocity - solution.departure_velocity, "m/s");
+        departure_velocity = correction.departure_velocity;
+    }
+
+    propagation::Trajectory arc;
+    const Flight flight = fly(departure_velocity, &arc, true);
+    const auto& mission = flight.mission;
+
+    // Closest approach over the whole arc, which is the number an intercept is
+    // actually judged by -- the state at the nominal arrival epoch says nothing
+    // if the ship passed the target an hour earlier.
+    double closest_approach = std::numeric_limits<double>::infinity();
+    time::CoordinateTime closest_time = mission.time;
+    for (const auto& [t, state] : arc.sample(4000)) {
+        const auto body = ctx.provider->state(target, t, ssb);
+        const double distance = (state.state.position - body.state.position).norm();
+        if (distance < closest_approach) {
+            closest_approach = distance;
+            closest_time = t;
+        }
+    }
+
+    std::cout << "\nburn:\n" << mission.describe_burns() << "\n";
+    if (!mission.ok()) {
+        std::cout << "\npropagation stopped: " << propagation::to_string(mission.status) << " -- "
+                  << mission.message << "\n";
+    }
+
+    const auto target_final = ctx.provider->state(target, mission.time, ssb);
+    const Vec3 miss = mission.state.state.position - target_final.state.position;
+    const double target_radius = ctx.provider->mean_radius(target);
+
+    std::cout << "\narrival (full model):\n";
+    print_vector("position relative to " + target.name(), miss, "m");
+    std::cout << "\nmiss at arrival  : " << fmt(miss.norm() / 1000.0, 10) << " km";
+    if (target_radius > 0.0) {
+        std::cout << "  (" << fmt(miss.norm() / target_radius, 6) << " target radii)";
+    }
+    std::cout << "\nclosest approach : " << fmt(closest_approach / 1000.0, 10) << " km at "
+              << ctx.time->to_utc_string(closest_time, 0);
+    if (target_radius > 0.0 && closest_approach < target_radius) {
+        std::cout << "\n                   *** that is INSIDE " << target.name()
+                  << ": this is an impact trajectory, not a flyby. Aiming for a"
+                     "\n                       flyby altitude needs B-plane targeting, which is"
+                     "\n                       not implemented ***";
+    }
+    std::cout << "\nrelative speed   : "
+              << fmt((mission.state.state.velocity - target_final.state.velocity).norm(), 10)
+              << " m/s\n"
+              << (args.has_flag("no-retarget")
+                      ? "\nThis is the raw two-body plan. The miss is the perturbation it ignored\n"
+                        "plus the gravity loss of executing an impulse as a finite burn. Drop\n"
+                        "--no-retarget to let the differential corrector close it.\n"
+                      : "\nThe corrector inverted the FULL model, so the residual miss is the\n"
+                        "corrector's own tolerance, not a modelling error.\n")
+              << "\nintegrator: " << mission.stats.to_string() << "\n";
+
+    if (const auto csv = args.option("csv"); csv.has_value()) {
+        std::ofstream out{*csv};
+        if (!out) {
+            throw std::runtime_error("cannot write " + *csv);
+        }
+        out << std::setprecision(17)
+            << "t_tdb_s,x_m,y_m,z_m,vx_ms,vy_ms,vz_ms,rel_x_m,rel_y_m,rel_z_m,"
+               "rel_vx_ms,rel_vy_ms,rel_vz_ms,radius_m,speed_ms,sma_m,ecc,inc_deg,raan_deg,"
+               "argp_deg,energy_j_kg,angular_momentum_m2_s\n";
+        for (const auto& [t, state] : arc.sample(2000)) {
+            const auto body_state = ctx.provider->state(center, t, ssb);
+            const coordinates::StateVector relative{
+                state.state.position - body_state.state.position,
+                state.state.velocity - body_state.state.velocity};
+            const auto el = trajectory::elements_from_state(relative, gm);
+            out << t.seconds_since_j2000() << "," << state.state.position.x << ","
+                << state.state.position.y << "," << state.state.position.z << ","
+                << state.state.velocity.x << "," << state.state.velocity.y << ","
+                << state.state.velocity.z << "," << relative.position.x << ","
+                << relative.position.y << "," << relative.position.z << "," << relative.velocity.x
+                << "," << relative.velocity.y << "," << relative.velocity.z << ","
+                << relative.radius() << "," << relative.speed() << "," << el.semi_major_axis << ","
+                << el.eccentricity << "," << units::rad_to_deg(el.inclination) << ","
+                << units::rad_to_deg(el.raan) << "," << units::rad_to_deg(el.argument_of_periapsis)
+                << "," << el.specific_energy << "," << el.specific_angular_momentum << "\n";
+        }
+        std::cout << "csv written: " << *csv << "\n";
+    }
+    return mission.ok() ? 0 : 1;
+}
+
 int command_propagate(const Args& args) {
     if (args.positional.empty()) {
         throw std::runtime_error("usage: orbit-cli propagate <scenario.json>");
@@ -367,14 +673,53 @@ int command_propagate(const Args& args) {
     propagation::PropagationState initial{};
     initial.state.position = center_state.state.position + scenario.position;
     initial.state.velocity = center_state.state.velocity + scenario.velocity;
-    initial.mass = scenario.mass;
+    initial.mass = scenario.initial_mass();
+
+    // The plan.  A burn given as a delta-v is turned into a duration here, using
+    // the mass the ship will have when it reaches that burn -- which is known in
+    // advance because each earlier burn consumes q times its own duration.
+    navigation::ManeuverPlan plan;
+    double running_mass = initial.mass;
+    if (!scenario.maneuvers.empty()) {
+        for (const auto& entry : scenario.maneuvers) {
+            const auto& engine = scenario.craft->engine();
+            navigation::Maneuver maneuver{};
+            maneuver.name = entry.name;
+            maneuver.ignition = t0 + time::Duration::seconds(entry.ignition_s);
+            maneuver.throttle = entry.throttle;
+            maneuver.guidance = entry.guidance;
+            maneuver.reference = entry.reference.value_or(scenario.relative_to);
+            maneuver.inertial_direction = entry.inertial_direction;
+
+            if (entry.duration_s.has_value()) {
+                maneuver.duration = time::Duration::seconds(*entry.duration_s);
+            } else {
+                maneuver.duration = time::Duration::seconds(engine.burn_duration_for_delta_v(
+                    running_mass, std::abs(*entry.delta_v_ms), entry.throttle));
+                if (*entry.delta_v_ms < 0.0 && maneuver.guidance == navigation::GuidanceMode::Prograde) {
+                    maneuver.guidance = navigation::GuidanceMode::Retrograde;
+                }
+            }
+            running_mass -= engine.mass_flow_at(maneuver.throttle) * maneuver.duration.seconds();
+            plan.add(std::move(maneuver));
+        }
+    }
 
     const double gm_center = ctx.provider->gravitational_parameter(scenario.relative_to);
     const coordinates::StateVector initial_relative{scenario.position, scenario.velocity};
     const auto elements0 = trajectory::elements_from_state(initial_relative, gm_center);
 
+    // A ship with an engine gets an executor even when the plan is empty, so that
+    // the force model printed below is the one that actually ran.
+    std::optional<navigation::ManeuverExecutor> executor;
+    if (scenario.craft.has_value()) {
+        executor.emplace(*ctx.provider, *scenario.craft, plan, ssb);
+        forces.add_reference(*executor);
+    }
+
     std::cout << scenario.describe() << "\n\n"
               << "force model    : " << forces.describe() << "\n"
+              << "plan           :\n" << plan.describe() << "\n"
               << "epoch UTC      : " << ctx.time->to_utc_string(t0, 6) << "\n"
               << "end UTC        : " << ctx.time->to_utc_string(t1, 6) << "\n\n"
               << "initial osculating elements about " << scenario.relative_to.name() << ":\n"
@@ -386,12 +731,36 @@ int command_propagate(const Args& args) {
     // user asked to see.  See ADR-0006.
     propagation::Trajectory arc;
     propagation::DormandPrince54Propagator propagator{forces, scenario.integrator};
-    propagator.set_trajectory_recorder(&arc);
 
-    const auto result = propagator.propagate(initial, t0, t1);
-    if (!result.ok()) {
-        std::cout << "propagation stopped: " << propagation::to_string(result.status) << " -- "
-                  << result.message << "\n\n";
+    propagation::PropagationStatus status = propagation::PropagationStatus::Success;
+    std::string message;
+    propagation::IntegratorStats stats{};
+    propagation::PropagationState final_state{};
+    time::CoordinateTime final_time = t0;
+    std::string burn_report;
+
+    if (executor.has_value()) {
+        const auto mission =
+            navigation::run_mission(propagator, *executor, initial, t0, t1, &arc);
+        status = mission.status;
+        message = mission.message;
+        stats = mission.stats;
+        final_state = mission.state;
+        final_time = mission.time;
+        burn_report = mission.describe_burns();
+    } else {
+        propagator.set_trajectory_recorder(&arc);
+        const auto result = propagator.propagate(initial, t0, t1);
+        status = result.status;
+        message = result.message;
+        stats = result.stats;
+        final_state = result.state;
+        final_time = result.time;
+    }
+
+    if (status != propagation::PropagationStatus::Success) {
+        std::cout << "propagation stopped: " << propagation::to_string(status) << " -- " << message
+                  << "\n\n";
     }
 
     std::ofstream csv;
@@ -467,12 +836,21 @@ int command_propagate(const Args& args) {
               << " relative\n"
               << "  (non-zero drift here is physics -- third bodies, J2 -- plus integration error;\n"
               << "   see tests/scientific for the isolated two-body check)\n\n"
-              << "integrator: " << result.stats.to_string() << "\n"
+              << (burn_report.empty() ? "" : "burns:\n" + burn_report + "\n\n")
+              << "integrator: " << stats.to_string() << "\n"
               << "dense output: " << arc.size() << " segments, "
               << fmt(static_cast<double>(arc.size() * sizeof(propagation::DenseSegment)) / 1024.0, 4)
               << " kB; sampled " << rows.size() << " states at no extra force evaluation\n"
-              << "proper time elapsed: " << fmt(result.state.proper_time.seconds(), 17) << " s"
-              << "  (coordinate " << fmt((result.time - t0).seconds(), 17)
+              << "final mass: " << fmt(final_state.mass, 12) << " kg"
+              << (scenario.craft ? "  (propellant left " +
+                                       fmt(scenario.craft->propellant_at(final_state.mass), 10) +
+                                       " kg, remaining budget " +
+                                       fmt(scenario.craft->delta_v_budget(final_state.mass), 10) +
+                                       " m/s)"
+                                 : std::string{})
+              << "\n"
+              << "proper time elapsed: " << fmt(final_state.proper_time.seconds(), 17) << " s"
+              << "  (coordinate " << fmt((final_time - t0).seconds(), 17)
               << " s; equal while Newtonian)\n";
 
     if (csv.is_open()) {
@@ -499,6 +877,8 @@ int main(int argc, char** argv) {
         if (args.command == "elements")  return command_elements(args);
         if (args.command == "gravity")   return command_gravity(args);
         if (args.command == "propagate") return command_propagate(args);
+        if (args.command == "lambert")   return command_lambert(args);
+        if (args.command == "intercept") return command_intercept(args);
 
         std::cerr << "unknown command \"" << args.command << "\"\n\n" << kUsage;
         return 1;

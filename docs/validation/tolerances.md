@@ -139,7 +139,45 @@ Um achado colateral: o solver de Kepler dos testes usava critério de convergên
 de iterações. Só apareceu ao amostrar 2000 pontos ao longo da órbita. O critério
 agora é relativo.
 
-### 3.7 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.7 Propulsão (`tests/unit/test_engine.cpp`, `tests/scientific/test_propulsion.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| `F = ηqw`, linearidade no throttle | — | 10⁻¹⁵ rel | recálculo das mesmas constantes |
+| limite de fótons `F = P/c` | — | 10⁻¹⁵ rel | identidade do modelo em `w = c, η = 1` |
+| `convertida = jato + desperdício` | — | 10⁻¹² rel | identidade, para todo `(w, η)` |
+| fração convertida, motor químico | 4,5·10⁻¹⁰ | 10⁻⁶ rel | `(w/c)²/2` — o defeito de massa da reação |
+| Tsiolkovsky em espaço livre | — | 10⁻¹⁰ rel | é a solução **exata** ali; resíduo = erro do integrador |
+| massa final após queima | — | 10⁻¹² rel | `dm/dt` constante ⇒ linear ⇒ RK exato |
+| corte por tanque vazio | — | 10⁻¹² rel | instante de exaustão em forma fechada, `t = propelente/q` |
+| escala da perda gravitacional | 99,19 | ±25 % | lei `(nΔt)²`; previsto 100 para 10× de empuxo |
+| queima curta vs plano impulsivo | — | 10⁻⁴ rel | `(nΔt)²/24 ≈ 6·10⁻⁸` para queima de 1 s |
+| `Δv` de Hohmann vs vis-viva | — | 10⁻¹⁴ rel | mesma álgebra, ordem de operações diferente |
+| Hohmann LEO→GEO executada | `a` exato, `e = 4,9·10⁻⁶` | `a` 2·10⁻³, `e` 5·10⁻³ | nível em que a transferência deixaria de ser utilizável |
+
+**O coeficiente da perda gravitacional não é universal.** A primeira versão do
+documento afirmava `κ = 1/24`, que vale para guiamento inercial (o empuxo perde
+alinhamento). Com guiamento *prograde* o mecanismo é outro — a nave sobe durante
+a queima — e o valor medido é `κ ≈ 0,31`. O teste verifica o **expoente**, que é
+robusto; o coeficiente está documentado com o valor medido.
+
+### 3.8 Lambert e targeting (`tests/scientific/test_lambert.cpp`, `tests/unit/test_targeting.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| velocidade reconstruída de um arco conhecido | 4·10⁻¹² … 7·10⁻¹¹ | 10⁻⁹ rel | tolerância da bisseção (10⁻¹⁰ no tempo de voo) propagada |
+| chegada verificada por propagação numérica | 0,5 … 2 mm | 10⁻² m | bisseção + erro global do integrador a `rtol = 10⁻¹³` |
+| `Δv` de Lambert a 179,9° vs Hohmann | — | 5·10⁻³ rel | a diferença que 0,1° de geometria faz |
+| soma dos ângulos prógrado + retrógrado | 0 | 10⁻¹² | identidade `= 2π` |
+| ramos de Stumpff no limiar | 8·10⁻¹⁰ | 10⁻⁷ rel | o **fechado** perde ~7 dígitos por cancelamento ali — é a razão de a série existir |
+| corretor: recuperar velocidade conhecida | 2,4·10⁻⁷ m | 10⁻³ m | mapa suave e invertível; Newton chega em 3 iterações |
+| corretor: intercepto lunar | 3,5 km (de 267 573 km) | — | limitado pela não linearidade perto do alvo |
+
+O passo de diferença finita **é** uma tolerância, e foi medido em vez de
+escolhido: 0,5 m/s estagna em 36 km, 0,1 m/s em 155 km, 10⁻³ m/s converge em
+3,5 km (`docs/physics/lambert.md` §6).
+
+### 3.9 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|

@@ -1,0 +1,50 @@
+{
+  // Milestone 1: execute a burn and change the apoapsis.
+  //
+  // A 400 km circular orbit, one prograde burn ten minutes in, sized by delta-v
+  // rather than by duration -- the rocket equation supplies the burn time.
+  // 1703.94 m/s is the vis-viva delta-v to raise the apoapsis to 20 000 km; the
+  // achieved apoapsis comes out slightly lower, and the difference is the gravity
+  // loss printed in the burn report (docs/architecture/navigation.md section 2).
+  "name": "LEO burn: raise apoapsis to 20 000 km",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 20000.0,
+
+  "bodies": ["Sun", "Earth", "Moon"],
+  "perturbations": { "j2_bodies": ["Earth"] },
+
+  "spacecraft": {
+    "relative_to": "Earth",
+    "position_m":  [6778000.0, 0.0, 0.0],
+    "velocity_ms": [0.0, 4763.3559898, 6009.8595578],
+    "name": "Tug",
+    "dry_mass_kg": 2000.0,
+    "propellant_mass_kg": 3000.0,
+    "engine": {
+      "name": "Orbital Tug",
+      "max_mass_flow_kg_s": 15.0,
+      "exhaust_velocity_fraction_c": 0.00003,
+      "efficiency": 1.0
+    }
+  },
+
+  "maneuvers": [
+    {
+      "name": "raise apoapsis",
+      "ignition_s": 600.0,
+      "delta_v_ms": 1703.94,
+      "guidance": "prograde",
+      "reference": "Earth"
+    }
+  ],
+
+  "integrator": {
+    "rtol": 1e-12,
+    "atol_position_m": 1e-5,
+    "atol_velocity_ms": 1e-8,
+    "initial_step_s": 1.0,
+    "max_step_s": 120.0
+  },
+
+  "output": { "samples": 40 }
+}

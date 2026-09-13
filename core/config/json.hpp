@@ -1,11 +1,11 @@
 #pragma once
 
-// A small, strict JSON reader for scenario files.
+// A small, strict JSON reader for configuration: scenarios, engines, spacecraft.
 //
-// Written rather than vendored: the scenario format is a handful of numbers and
-// strings, and a parser we control gives error messages that point at the line
-// the user got wrong.  It is deliberately read-only and rejects anything it does
-// not understand instead of guessing.
+// JSON with line comments, read-only, no dependencies.  Written rather than
+// vendored so that error messages can name the line, the column and the field a
+// user got wrong -- a bad configuration file is the most likely way someone meets
+// this project for the first time.  See ADR-0007.
 
 #include <map>
 #include <memory>
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace orbitcli::json {
+namespace sf::config::json {
 
 class ParseError : public std::runtime_error {
 public:
@@ -67,4 +67,4 @@ private:
 Value parse(const std::string& text);
 Value parse_file(const std::string& path);
 
-}  // namespace orbitcli::json
+}  // namespace sf::config::json

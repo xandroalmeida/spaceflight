@@ -1,0 +1,14 @@
+{
+  // Orbital Tug -- a chemical-class engine: modest exhaust velocity, high thrust,
+  // eta = 1 (nothing is annihilated; the mass converted is the mass defect of the
+  // reaction, which the model works out to be 4.5e-10 of the propellant).
+  //
+  //   v_eff  = 8993.8 m/s      Isp = 917 s
+  //   thrust = 134 907 N       at q = 15 kg/s
+  "engine": {
+    "name": "Orbital Tug",
+    "max_mass_flow_kg_s": 15.0,
+    "exhaust_velocity_fraction_c": 0.00003,
+    "efficiency": 1.0
+  }
+}

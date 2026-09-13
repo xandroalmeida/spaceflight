@@ -7,19 +7,19 @@
 
 namespace sf::propagation {
 
-PropagationState state_from_array(const StateArray& y, double mass) {
+PropagationState state_from_array(const StateArray& y) {
     PropagationState state{};
     state.state.position = math::Vec3{y[0], y[1], y[2]};
     state.state.velocity = math::Vec3{y[3], y[4], y[5]};
-    state.mass = mass;
     state.proper_time = time::Duration{y[6]};
+    state.mass = y[7];
     return state;
 }
 
 StateArray array_from_state(const PropagationState& state) {
     return StateArray{state.state.position.x, state.state.position.y, state.state.position.z,
                       state.state.velocity.x, state.state.velocity.y, state.state.velocity.z,
-                      state.proper_time.seconds()};
+                      state.proper_time.seconds(), state.mass};
 }
 
 PropagationState DenseSegment::at_theta(double theta) const {
@@ -37,7 +37,7 @@ PropagationState DenseSegment::at_theta(double theta) const {
                      th1 * (coefficients[2][i] +
                             th * (coefficients[3][i] + th1 * coefficients[4][i])));
     }
-    return state_from_array(y, mass);
+    return state_from_array(y);
 }
 
 bool DenseSegment::contains(time::CoordinateTime t) const {

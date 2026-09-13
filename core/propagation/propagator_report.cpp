@@ -8,6 +8,7 @@ namespace sf::propagation {
 std::string to_string(PropagationStatus status) {
     switch (status) {
         case PropagationStatus::Success:            return "success";
+        case PropagationStatus::OutOfPropellant:    return "propellant exhausted";
         case PropagationStatus::MinimumStepReached: return "minimum step reached";
         case PropagationStatus::MaxStepsExceeded:   return "maximum step count exceeded";
         case PropagationStatus::NonFiniteState:     return "non-finite state";

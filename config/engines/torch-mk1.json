@@ -1,0 +1,14 @@
+{
+  // Fusion Torch Mk I -- fictional engine, real arithmetic.
+  //
+  // eta is NOT "how well the engine works": it is the fraction of the consumed
+  // rest-mass energy that leaves as directed jet.  Everything else is annihilated
+  // for nothing, so a sane design has eta close to 1.  See
+  // docs/physics/propulsion-model.md section 4.4 for what eta = 0.5 would cost.
+  "engine": {
+    "name": "Fusion Torch Mk I",
+    "max_mass_flow_kg_s": 0.01,
+    "exhaust_velocity_fraction_c": 0.1,   // w = 29 979 km/s
+    "efficiency": 0.98
+  }
+}

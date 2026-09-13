@@ -20,11 +20,15 @@
 
 namespace sf::propagation {
 
-// [x y z vx vy vz tau] -- the vector the propagator integrates.
-inline constexpr std::size_t kStateDimension = 7;
+// [x y z vx vy vz tau m] -- the vector the propagator integrates.
+//
+// Mass is a state component, not a value updated after the step: the acceleration
+// depends on the instantaneous mass and the integrator evaluates the derivative
+// seven times inside one step.  See docs/physics/propulsion-model.md section 6.1.
+inline constexpr std::size_t kStateDimension = 8;
 using StateArray = std::array<double, kStateDimension>;
 
-PropagationState state_from_array(const StateArray& y, double mass);
+PropagationState state_from_array(const StateArray& y);
 StateArray array_from_state(const PropagationState& state);
 
 // One accepted step, stored as the five coefficient vectors of the Dormand-Prince
@@ -33,7 +37,6 @@ StateArray array_from_state(const PropagationState& state);
 struct DenseSegment {
     time::CoordinateTime begin{};
     double step_seconds{0.0};  // signed: negative when propagating backwards
-    double mass{1.0};
     std::array<StateArray, 5> coefficients{};
 
     [[nodiscard]] time::CoordinateTime end() const {

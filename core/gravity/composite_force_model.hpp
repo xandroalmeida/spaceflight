@@ -16,7 +16,14 @@ class CompositeForceModel final : public ForceModel {
 public:
     CompositeForceModel() = default;
 
+    // Takes ownership.
     CompositeForceModel& add(std::unique_ptr<ForceModel> model);
+
+    // Borrows.  Needed when the caller must keep talking to the model after
+    // adding it -- the mission runner reads the plan out of the ManeuverExecutor
+    // while the integrator is calling it as a force.  The referenced model must
+    // outlive this object.
+    CompositeForceModel& add_reference(const ForceModel& model);
 
     [[nodiscard]] ForceResult evaluate(const propagation::PropagationState& spacecraft,
                                        time::CoordinateTime t) const override;
@@ -27,7 +34,10 @@ public:
     [[nodiscard]] std::string describe() const;
 
 private:
-    std::vector<std::unique_ptr<ForceModel>> models_;
+    // Insertion order is preserved across both kinds, so the summation order --
+    // and therefore the result, bit for bit -- is deterministic.
+    std::vector<std::unique_ptr<ForceModel>> owned_;
+    std::vector<const ForceModel*> models_;
 };
 
 }  // namespace sf::gravity
