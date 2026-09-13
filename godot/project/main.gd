@@ -90,8 +90,16 @@ func _build_scene() -> void:
 	for i in range(simulation.get_body_count()):
 		var mesh_instance := MeshInstance3D.new()
 		var sphere := SphereMesh.new()
-		sphere.radial_segments = 32
-		sphere.rings = 16
+		sphere.radial_segments = 48
+		sphere.rings = 24
+		# SphereMesh defaults to radius 0.5 / height 1.0, so scaling the node by
+		# `radius` would draw a body of HALF the right size. From a 400 km orbit
+		# that is the difference between a planet filling the screen (70 deg of
+		# angular radius) and one entirely outside the frame (28 deg, starting
+		# 62 deg off-axis, against a 37.5 deg half-FOV) -- which is exactly the
+		# black screen this scene showed the first time it was run.
+		sphere.radius = 1.0
+		sphere.height = 2.0
 		mesh_instance.mesh = sphere
 
 		var material := StandardMaterial3D.new()
@@ -140,6 +148,10 @@ func _build_starfield() -> void:
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.vertex_color_use_as_albedo = true
 	material.albedo_color = Color.WHITE
+	# PRIMITIVE_POINTS renders nothing at all without this.
+	material.use_point_size = true
+	material.point_size = 2.0
+	material.disable_receive_shadows = true
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260101
@@ -148,11 +160,14 @@ func _build_starfield() -> void:
 		var direction := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
 		var brightness := rng.randf_range(0.25, 1.0)
 		immediate.surface_set_color(Color(brightness, brightness, brightness))
-		immediate.surface_add_vertex(direction * 5.0e5)
+		# Inside the camera's far plane (2e5), and beyond the Sun at 1.47e5, so the
+		# Sun still occludes them. The first version put the stars at 5e5 -- past
+		# `far` -- and they were simply clipped away.
+		immediate.surface_add_vertex(direction * 1.9e5)
 	immediate.surface_end()
 
 	stars.mesh = immediate
-	stars.extra_cull_margin = 1.0e6
+	stars.extra_cull_margin = 4.0e5
 	add_child(stars)
 
 
@@ -211,21 +226,43 @@ func _warn_if_camera_is_inside_a_body() -> void:
 
 
 func _place_camera() -> void:
-	## Chase camera, positioned relative to the focus in scene units. The origin
-	## of the projection is the focus itself, so the camera sits a few units from
-	## the origin and the float precision stays microscopic.
-	var target := ship_mesh.position if focus_index < 0 else body_meshes[focus_index].position
-	var distance := CHASE_DISTANCE
+	## Chase camera, in scene units. The projection origin is the focus itself, so
+	## the camera sits a fraction of a unit from the origin and the float
+	## precision stays microscopic (docs/architecture/rendering.md).
+	##
+	## Orientation matters more than distance here. From a 400 km orbit the Earth
+	## subtends 140 degrees: pointing the camera along the velocity leaves the
+	## planet starting 20 degrees off-axis and mostly out of frame. Offsetting the
+	## camera OUTWARD (away from the planet) and using that outward direction as
+	## "up" puts the planet in the lower part of the screen, where it belongs,
+	## with the horizon visible above it.
 	if focus_index >= 0:
-		# Far enough out to see the whole body, with a floor for the barycentres,
-		# which have no radius at all.
-		distance = maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
+		var body_target := body_meshes[focus_index].position
+		var body_distance := maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
+		camera.position = body_target + Vector3(0.0, body_distance * 0.35, body_distance)
+		camera.look_at(body_target, Vector3.UP)
+		return
+
+	var target := ship_mesh.position
+	# "Down" is towards the reference body; the ship is the projection origin, so
+	# the body's render position already IS the nadir direction.
+	var nadir := _reference_body_position() - target
+	var outward := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
 
 	var back := -simulation.get_spacecraft_velocity_direction()
 	if back.length() < 0.5:
 		back = Vector3.BACK
-	camera.position = target + back * distance + Vector3.UP * (distance * 0.35)
-	camera.look_at(target, Vector3.UP)
+
+	camera.position = target + outward * (CHASE_DISTANCE * 0.5) + back * CHASE_DISTANCE
+	camera.look_at(target, outward)
+
+
+func _reference_body_position() -> Vector3:
+	var reference: String = simulation.get_snapshot().get("reference", "")
+	for i in range(simulation.get_body_count()):
+		if simulation.get_body_name(i) == reference:
+			return simulation.get_body_position(i)
+	return Vector3.ZERO
 
 
 func _update_readout() -> void:
