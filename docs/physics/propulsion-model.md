@@ -191,29 +191,64 @@ em `tests/scenarios/` usam `η ≈ 0,98` por essa razão, e não por gosto.
 
 Isto é exatamente o tipo de coisa que `thrust = throttle * maxThrust` esconde.
 
-### 4.5 Os dois motores dos cenários, lado a lado
+### 4.5 Dois modos, uma usina
 
-`config/engines/` traz os dois, e a comparação é o argumento inteiro:
+Não existe regulagem que ganhe nos dois lados. Segurando a **potência convertida**
+fixa,
 
-| | classe química | tocha (Mk II) |
+```
+P = q c² (1 − η/γ_w)        constante
+```
+
+subir `w` obriga `q` a descer, e o empuxo `F = η q w` desce junto. É assim que um
+motor de impulso específico variável funciona de verdade, e é o que torna "dois
+modos" uma escolha física em vez de um interruptor.
+
+O motor dos cenários, `config/engines/torch-mk3.json`, tem dois pontos de
+operação da mesma usina de **900 GW**:
+
+| | IMPULSO | CRUZEIRO |
 |---|---|---|
-| `w` | 8 993,8 m/s | 8 993 800 m/s (`0,03 c`) |
-| `q_max` | 15 kg/s | 0,015 kg/s |
-| **empuxo** | **134 907 N** | **134 907 N** |
-| `Isp` | 917 s | 917 100 s |
-| massa convertida | 4,5·10⁻¹⁰ | 4,5·10⁻⁴ |
-| potência no jato | 0,61 GW | 607 GW |
-| budget (600 kg secos + 400 de propelente) | 4,59 km/s | 4 594 km/s = 0,0153 c |
+| `w` | 0,03 c | 0,5 c |
+| `q_max` | 2,2238·10⁻² kg/s | 7,4710·10⁻⁵ kg/s |
+| **empuxo** | 200 000 N | 11 199 N |
+| `Isp` | 9,17·10⁵ s | 1,53·10⁷ s |
+| fração convertida | 4,5·10⁻⁴ | 0,134 |
+| `Δφ` com razão 20:1 | 0,0899 | 1,4979 |
+| **`β` alcançável** | **0,0896** | **0,9048** |
+| queimar o tanque | 9,9 dias | 8,06 anos |
 
-O empuxo é **igual de propósito**: a velocidade de exaustão subiu mil vezes e o
-fluxo de massa desceu mil vezes. A nave voa exatamente igual — mesma aceleração,
-mesma duração de queima, mesma trajetória — e gasta a milésima parte do
-propelente. Uma queima de 1 704 m/s que custava 173 kg passa a custar 0,19 kg.
+IMPULSO é para sair de um planeta: 200 kN é 1 g numa nave de 20 t e as queimas
+duram minutos. CRUZEIRO é para ir a algum lugar: um terço de g caindo a nada,
+durante anos, em troca de um `Δv` que chega a `β = 0,9`.
 
-O preço aparece onde tem de aparecer: a fração da massa de repouso convertida sobe
-de um defeito de massa químico para 4,5·10⁻⁴, e a potência do jato de 0,61 GW para
-607 GW. Com `η = 1` nada disso vira calor residual; com `η = 0,5` seriam 607 GW no
-jato e ~10¹⁵ W a dissipar (§4.4). O modelo cobra a conta sozinho.
+**A invariante de potência é verificada, não suposta.** Dois pontos de operação
+que consomem potências diferentes não são um motor com chave — são dois motores,
+e o construtor de `MultiModeEngine` recusa dizendo isso. É o mesmo tipo de recusa
+do tensor de inércia que viola as desigualdades triangulares: a estrutura de dados
+não aceita descrever algo que não existe.
+
+### 4.6 Chegar a regime relativístico não é questão de motor maior
+
+`Δφ = (η w/c) ln(m₀/m₁)`. Os **dois** fatores têm de ser grandes:
+
+* `w = 0,5c` de exaustão — e a conta energética cobra por isso: 13,4 % da massa de
+  repouso do propelente é convertida, classe aniquilação;
+* razão de massa 20:1 — 19 toneladas de propelente para 1 de estrutura.
+
+E mesmo assim leva **oito anos de queima**, porque o empuxo é finito. Isso não é
+artefato de modelagem: é a equação do foguete mais `F = ma`. Verificado em
+`tests/scientific/test_relativistic_propulsion.cpp`:
+
+```
+19 anos de tempo coordenado  →  β = 0,904762 (previsto 0,904762)
+                                γ = 2,34787
+                                12,50 anos-luz percorridos
+                                relógio de bordo: 12,16 anos
+```
+
+O mesmo tanque em modo IMPULSO chega a `β = 0,0896`. Empuxo nenhum conserta uma
+velocidade de exaustão baixa.
 
 ## 5. Throttle e consumo
 

@@ -3,6 +3,7 @@
 #include "core/units/constants.hpp"
 
 #include <algorithm>
+#include <vector>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -123,6 +124,106 @@ std::string EngineSpec::describe() const {
        << "\n  power converted  = " << converted_power_at(1.0) << " W"
        << "\n    into the jet   = " << jet_kinetic_power_at(1.0) << " W"
        << "\n    wasted as heat = " << waste_power_at(1.0) << " W";
+    return os.str();
+}
+
+MultiModeEngine::MultiModeEngine(std::vector<Mode> modes, std::size_t initial)
+    : modes_(std::move(modes)), selected_(initial) {
+    validate();
+}
+
+MultiModeEngine::MultiModeEngine(EngineSpec spec) {
+    const std::string name = spec.name();
+    modes_.push_back(Mode{name, std::move(spec)});
+}
+
+void MultiModeEngine::validate() const {
+    if (modes_.empty()) {
+        throw std::invalid_argument("MultiModeEngine: no modes");
+    }
+    if (selected_ >= modes_.size()) {
+        throw std::invalid_argument("MultiModeEngine: selected mode is out of range");
+    }
+
+    for (std::size_t i = 0; i < modes_.size(); ++i) {
+        for (std::size_t j = i + 1; j < modes_.size(); ++j) {
+            if (modes_[i].name == modes_[j].name) {
+                throw std::invalid_argument("MultiModeEngine: duplicate mode name \"" +
+                                            modes_[i].name + "\"");
+            }
+        }
+    }
+
+    // One power plant. Modes that draw different power are different engines.
+    const double reference = modes_.front().spec.converted_power_at(1.0);
+    for (const auto& mode : modes_) {
+        const double power = mode.spec.converted_power_at(1.0);
+        const double difference = std::abs(power - reference) / reference;
+        if (difference > 0.01) {
+            std::ostringstream os;
+            os << "MultiModeEngine: mode \"" << mode.name << "\" converts " << power
+               << " W while \"" << modes_.front().name << "\" converts " << reference
+               << " W (" << difference * 100.0
+               << "% apart). Modes are operating points of ONE power plant: raising the exhaust "
+                  "velocity must lower the mass flow, not conjure extra power "
+                  "(docs/physics/propulsion-model.md section 4.6)";
+            throw std::invalid_argument(os.str());
+        }
+    }
+}
+
+MultiModeEngine MultiModeEngine::from_json(const config::json::Value& value,
+                                           const std::string& context) {
+    const config::json::Value* list = value.get("modes");
+    if (list == nullptr) {
+        return MultiModeEngine{EngineSpec::from_json(value, context)};
+    }
+
+    std::vector<Mode> modes;
+    for (const auto& entry : list->as_array(context + ".modes")) {
+        EngineSpec spec = EngineSpec::from_json(entry, context + ".modes[]");
+        const std::string name = spec.name();
+        modes.push_back(Mode{name, std::move(spec)});
+    }
+
+    MultiModeEngine engine{std::move(modes)};
+    const std::string initial = value.string_or("mode", "");
+    if (!initial.empty() && !engine.select(initial)) {
+        throw config::json::ParseError(context + ": unknown initial mode \"" + initial + "\"");
+    }
+    return engine;
+}
+
+void MultiModeEngine::select(std::size_t index) {
+    if (index >= modes_.size()) {
+        throw std::invalid_argument("MultiModeEngine::select: index out of range");
+    }
+    selected_ = index;
+}
+
+bool MultiModeEngine::select(const std::string& name) {
+    for (std::size_t i = 0; i < modes_.size(); ++i) {
+        if (modes_[i].name == name) {
+            selected_ = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+void MultiModeEngine::cycle() { selected_ = (selected_ + 1) % modes_.size(); }
+
+double MultiModeEngine::power() const { return modes_.front().spec.converted_power_at(1.0); }
+
+std::string MultiModeEngine::describe() const {
+    std::ostringstream os;
+    os << std::setprecision(6) << modes_.size() << " mode(s) sharing " << power() << " W:";
+    for (std::size_t i = 0; i < modes_.size(); ++i) {
+        const auto& spec = modes_[i].spec;
+        os << "\n  " << (i == selected_ ? "> " : "  ") << modes_[i].name << ": w = "
+           << spec.exhaust_velocity_fraction_c() << " c, thrust " << spec.max_thrust()
+           << " N, Isp " << spec.specific_impulse() << " s";
+    }
     return os.str();
 }
 

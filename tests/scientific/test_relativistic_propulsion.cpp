@@ -10,6 +10,7 @@
 #include "core/propulsion/main_engine_force.hpp"
 #include "core/relativity/kinematics.hpp"
 #include "core/spacecraft/spacecraft.hpp"
+#include "core/units/conversions.hpp"
 #include "core/units/constants.hpp"
 #include "tests/support/test_harness.hpp"
 
@@ -393,4 +394,94 @@ TEST(relativistic_kinematics_refuses_to_carry_a_gravity_field) {
                    "at these speeds the two kinematics agree to 1e-15, so the opted-in answer is "
                    "the Newtonian one -- which is the whole point: the approximation is fine HERE, "
                    "and the refusal exists because it stops being fine without warning");
+}
+
+
+TEST(burning_the_whole_tank_in_cruise_mode_reaches_the_predicted_beta) {
+    // The payoff. A 1-tonne hull with 19 tonnes of propellant and an exhaust
+    // velocity of 0.5c: the relativistic rocket equation says this reaches
+    //
+    //     phi = (eta w/c) ln(m0/m1) = 0.5 * ln(20) = 1.49787
+    //     beta = tanh(phi) = 0.904762
+    //
+    // and it takes 8 years of burning to get there, which is not an artefact of
+    // the model but the cost of finite thrust. Both are checked.
+    const propulsion::MultiModeEngine engine{
+        {{"IMPULSE", propulsion::EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
+         {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
+
+    spacecraft::Spacecraft ship{"torch", 1000.0, 19000.0, engine};
+    ship.select_mode("CRUISE");
+
+    propulsion::MainEngineForce main_engine{ship};
+    main_engine.set_throttle(1.0);
+
+    auto cfg = relativistic_config();
+    cfg.max_step = time::Duration::days(30.0);
+    propagation::DormandPrince54Propagator propagator{main_engine, cfg};
+
+    propagation::PropagationState initial{};
+    initial.mass = ship.initial_mass();
+
+    const auto t0 = time::CoordinateTime::j2000();
+    // Long enough for the tank to run dry: the burn lasts 2.54e8 s of PROPER
+    // time, and coordinate time runs longer as gamma climbs.
+    const auto result = propagator.propagate(initial, t0, t0 + time::Duration::seconds(6.0e8));
+    REQUIRE(result.ok());
+
+    const double year = 365.25 * 86400.0;
+    const double mass_ratio = ship.initial_mass() / result.state.mass;
+    const double predicted_phi = 0.5 * std::log(mass_ratio);
+    const double predicted_beta = std::tanh(predicted_phi);
+    const double beta = result.state.state.velocity.norm() / c;
+
+    std::ostringstream os;
+    os << "after " << 6.0e8 / year << " yr of coordinate time: mass " << result.state.mass
+       << " kg (ratio " << mass_ratio << "), beta = " << beta << " (predicted " << predicted_beta
+       << "), gamma = " << relativity::lorentz_factor(
+                                relativity::proper_velocity(result.state.state.velocity))
+       << ", proper time " << result.state.proper_time.seconds() / year << " yr, distance "
+       << result.state.state.position.x / 9.4607e15 << " light years";
+    INFO(os.str());
+
+    CHECK_NEAR_REL(result.state.mass, ship.dry_mass(), 1.0e-9,
+                   "the tank runs dry and thrust stops with no special case: q = 0 when there is "
+                   "nothing left to consume");
+    CHECK_NEAR_REL(beta, std::tanh(0.5 * std::log(20.0)), 1.0e-6,
+                   "the relativistic rocket equation with the full 20:1 mass ratio. The residual "
+                   "is the integrator plus the moment the tank empties mid-step");
+    CHECK(beta > 0.9);
+    CHECK(beta < 1.0);
+
+    // The ship's clock ran slow: this is the twin paradox with a real engine.
+    CHECK(result.state.proper_time.seconds() < 6.0e8);
+    const double dilation = result.state.proper_time.seconds() / 6.0e8;
+    std::ostringstream clock;
+    clock << "the ship's clock read " << dilation << " of the coordinate elapsed time";
+    INFO(clock.str());
+    CHECK(dilation < 0.95);
+    CHECK(dilation > 0.5);
+}
+
+TEST(impulse_mode_cannot_reach_relativistic_speed_and_says_so_in_the_arithmetic) {
+    // The other half of the trade: the high-thrust mode has the same tank and
+    // gets nowhere near, because delta-phi is (w/c) ln(ratio) and w is 16.7x
+    // smaller. No amount of thrust fixes an exhaust velocity.
+    const propulsion::EngineSpec impulse{"IMPULSE", 0.0222376, 0.03, 1.0};
+    const spacecraft::Spacecraft ship{"torch", 1000.0, 19000.0, impulse};
+
+    const double phi = 0.03 * std::log(20.0);
+    const double reachable = std::tanh(phi);
+
+    std::ostringstream os;
+    os << "impulse mode, same 20:1 tank: phi = " << phi << " -> beta = " << reachable
+       << " (cruise reaches " << std::tanh(0.5 * std::log(20.0)) << ")";
+    INFO(os.str());
+
+    CHECK_NEAR_REL(reachable, 0.089631, 1.0e-5,
+                   "tanh(0.0899). The two modes differ by a factor 16.7 in exhaust velocity and "
+                   "therefore in rapidity, which is a factor 10 in speed at these values");
+    CHECK_NEAR_REL(ship.delta_v_budget(ship.initial_mass()) / c, phi, 1.0e-12,
+                   "and the Newtonian budget divided by c IS the rapidity, which is why the two "
+                   "agree here and would not at 0.5c");
 }

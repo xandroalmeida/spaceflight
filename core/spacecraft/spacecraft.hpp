@@ -18,6 +18,8 @@ class Spacecraft {
 public:
     Spacecraft(std::string name, double dry_mass_kg, double initial_propellant_kg,
                propulsion::EngineSpec engine);
+    Spacecraft(std::string name, double dry_mass_kg, double initial_propellant_kg,
+               propulsion::MultiModeEngine engine);
 
     static Spacecraft from_json(const config::json::Value& value, const std::string& context);
     static Spacecraft from_file(const std::string& path);
@@ -26,7 +28,22 @@ public:
     [[nodiscard]] double dry_mass() const noexcept { return dry_mass_; }
     [[nodiscard]] double initial_propellant() const noexcept { return initial_propellant_; }
     [[nodiscard]] double initial_mass() const noexcept { return dry_mass_ + initial_propellant_; }
-    [[nodiscard]] const propulsion::EngineSpec& engine() const noexcept { return engine_; }
+    // The CURRENT operating point. Everything downstream -- thrust, mass flow,
+    // the rocket equation -- goes through here, so switching modes changes all of
+    // them at once and nothing needs to know the engine has modes.
+    [[nodiscard]] const propulsion::EngineSpec& engine() const noexcept {
+        return engine_.current();
+    }
+    [[nodiscard]] const propulsion::MultiModeEngine& engine_modes() const noexcept {
+        return engine_;
+    }
+
+    // Non-const: switching is a change to the ship, and it belongs between
+    // integration steps (see MultiModeEngine::select).
+    void select_mode(std::size_t index) { engine_.select(index); }
+    bool select_mode(const std::string& name) { return engine_.select(name); }
+    void cycle_mode() { engine_.cycle(); }
+    [[nodiscard]] const std::string& mode_name() const { return engine_.current_mode(); }
 
     // Propellant left when the integrated total mass is `total_mass`.  Clamped at
     // zero: a negative reading would mean the burn overran the tank, which the
@@ -43,7 +60,7 @@ private:
     std::string name_;
     double dry_mass_{0.0};
     double initial_propellant_{0.0};
-    propulsion::EngineSpec engine_;
+    propulsion::MultiModeEngine engine_;
 };
 
 }  // namespace sf::spacecraft

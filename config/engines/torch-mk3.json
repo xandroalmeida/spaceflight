@@ -1,0 +1,51 @@
+{
+  // Fusion Torch Mk III -- two operating points of ONE power plant.
+  //
+  // Fictional engine, real arithmetic. The two modes are not a switch between
+  // two engines: both convert 8.9958e11 W (900 GW) of the propellant's rest mass,
+  // and the trade is forced by
+  //
+  //     P = q c^2 (1 - eta/gamma_w)   held fixed
+  //
+  // so raising the exhaust velocity 16.7x drops the mass flow by 298x and the
+  // thrust with it. There is no setting that wins at both. The constructor
+  // CHECKS the equal-power invariant and refuses modes that violate it.
+  //
+  //                        IMPULSE            CRUISE
+  //   w                    0.03 c             0.5 c
+  //   q_max                2.2238e-2 kg/s     7.4710e-5 kg/s
+  //   thrust               200 000 N          11 199 N
+  //   Isp                  9.17e5 s           1.53e7 s
+  //   converted fraction   4.5e-4             0.134
+  //   budget at 20:1       0.0896 c           0.9048 c
+  //   burn to empty        9.9 days           8.06 years
+  //
+  // IMPULSE is for leaving a planet: 200 kN is one g on a 20-tonne ship, and the
+  // burns last minutes. CRUISE is for going somewhere: a third of a g falling to
+  // nothing, for years, in exchange for a delta-v that reaches beta = 0.9.
+  //
+  // Reaching relativistic speed is not a matter of a bigger engine. It is
+  // (eta w/c) ln(m0/m1), and both factors have to be large: 0.5 c of exhaust AND
+  // 19 tonnes of propellant on a 1-tonne hull. The years of burn are the honest
+  // consequence of finite thrust, not a modelling artefact.
+  "engine": {
+    "mode": "IMPULSE",
+    "modes": [
+      {
+        "name": "IMPULSE",
+        "max_mass_flow_kg_s": 0.0222376,
+        "exhaust_velocity_fraction_c": 0.03,
+        "efficiency": 1.0
+      },
+      {
+        "name": "CRUISE",
+        "max_mass_flow_kg_s": 7.470950e-05,
+        "exhaust_velocity_fraction_c": 0.5,
+        "efficiency": 1.0
+      }
+    ]
+  },
+
+  "propellant": { "initial_mass_kg": 19000.0 },
+  "spacecraft": { "dry_mass_kg": 1000.0 }
+}

@@ -13,7 +13,9 @@
 
 #include "core/config/json.hpp"
 
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace sf::propulsion {
 
@@ -83,6 +85,63 @@ private:
     double exhaust_velocity_{0.0};
     double efficiency_{0.0};
     double inverse_gamma_w_{1.0};
+};
+
+// One power plant, several operating points.
+//
+// A real variable-specific-impulse engine (VASIMR and its relatives) does not
+// choose thrust and exhaust velocity independently: it has a reactor of a given
+// power, and it trades one against the other. Holding the converted power fixed,
+//
+//     P = q c^2 (1 - eta/gamma_w)     is the same in every mode
+//
+// so raising w forces q down, and the thrust F = eta q w falls with it. That is
+// the whole physics of "two modes": there is no setting that is better at both.
+//
+// The equal-power invariant is CHECKED, not assumed. Two operating points that
+// draw different power are not one engine with a switch -- they are two engines,
+// and the constructor says so.
+// See docs/physics/propulsion-model.md section 4.6.
+class MultiModeEngine {
+public:
+    struct Mode {
+        std::string name;
+        EngineSpec spec;
+    };
+
+    // Throws std::invalid_argument if the modes draw different converted power,
+    // if there are none, or if two share a name.
+    explicit MultiModeEngine(std::vector<Mode> modes, std::size_t initial = 0);
+
+    // Convenience for the common case of an engine with a single setting.
+    explicit MultiModeEngine(EngineSpec spec);
+
+    static MultiModeEngine from_json(const config::json::Value& value, const std::string& context);
+
+    [[nodiscard]] const EngineSpec& current() const { return modes_.at(selected_).spec; }
+    [[nodiscard]] const std::string& current_mode() const { return modes_.at(selected_).name; }
+    [[nodiscard]] std::size_t selected() const noexcept { return selected_; }
+    [[nodiscard]] const std::vector<Mode>& modes() const noexcept { return modes_; }
+    [[nodiscard]] std::size_t size() const noexcept { return modes_.size(); }
+
+    // Switching is a step change in thrust and mass flow, so it belongs BETWEEN
+    // integration steps -- the same rule as an ignition
+    // (docs/architecture/navigation.md section 4). A cockpit changing it once per
+    // frame satisfies that naturally.
+    void select(std::size_t index);
+    bool select(const std::string& name);
+    void cycle();
+
+    // The converted power all modes share [W].
+    [[nodiscard]] double power() const;
+
+    [[nodiscard]] std::string describe() const;
+
+private:
+    void validate() const;
+
+    std::vector<Mode> modes_;
+    std::size_t selected_{0};
 };
 
 }  // namespace sf::propulsion

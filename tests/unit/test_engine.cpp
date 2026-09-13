@@ -216,3 +216,89 @@ TEST(engine_and_spacecraft_load_from_configuration) {
     const auto incomplete = sf::config::json::parse(R"({"dry_mass_kg": 100.0})");
     CHECK_THROWS_AS(Spacecraft::from_json(incomplete, "spacecraft"), sf::config::json::ParseError);
 }
+
+
+TEST(engine_modes_are_operating_points_of_one_power_plant) {
+    using sf::propulsion::MultiModeEngine;
+
+    // The two modes of the Mk III: 16.7x the exhaust velocity, 298x less mass
+    // flow, the SAME converted power. That is not a coincidence -- it is the
+    // constraint that makes them modes rather than two engines.
+    const EngineSpec impulse{"IMPULSE", 0.0222376, 0.03, 1.0};
+    const EngineSpec cruise{"CRUISE", 7.470950e-05, 0.5, 1.0};
+
+    std::ostringstream os;
+    os << "IMPULSE: " << impulse.max_thrust() << " N, Isp " << impulse.specific_impulse()
+       << " s, " << impulse.converted_power_at(1.0) << " W\n          CRUISE:  "
+       << cruise.max_thrust() << " N, Isp " << cruise.specific_impulse() << " s, "
+       << cruise.converted_power_at(1.0) << " W";
+    INFO(os.str());
+
+    CHECK_NEAR_REL(cruise.converted_power_at(1.0), impulse.converted_power_at(1.0), 1.0e-5,
+                   "P = q c^2 (1 - eta/gamma_w) is what the two modes share. The tolerance is the "
+                   "rounding of the tabulated mass flows, which are quoted to seven figures");
+
+    MultiModeEngine engine{{{"IMPULSE", impulse}, {"CRUISE", cruise}}};
+    CHECK_EQ(engine.size(), std::size_t{2});
+    CHECK_EQ(engine.current_mode(), std::string{"IMPULSE"});
+    CHECK_NEAR_REL(engine.current().max_thrust(), 2.0e5, 1.0e-4, "200 kN in impulse mode");
+
+    CHECK(engine.select("CRUISE"));
+    CHECK_EQ(engine.current_mode(), std::string{"CRUISE"});
+    CHECK_NEAR_REL(engine.current().max_thrust(), 11198.7, 1.0e-4,
+                   "and 18x less thrust in cruise, which is the price of 16.7x the exhaust "
+                   "velocity at fixed power");
+    CHECK(!engine.select("WARP"));
+
+    engine.cycle();
+    CHECK_EQ(engine.current_mode(), std::string{"IMPULSE"});
+    INFO(engine.describe());
+}
+
+TEST(modes_that_do_not_share_a_power_plant_are_refused) {
+    using sf::propulsion::MultiModeEngine;
+
+    // Same exhaust velocity, ten times the flow: ten times the power. That is a
+    // bigger engine, not another setting, and pretending otherwise is how a
+    // "mode" quietly becomes free energy.
+    const EngineSpec honest{"A", 0.01, 0.1, 1.0};
+    const EngineSpec cheating{"B", 0.1, 0.1, 1.0};
+
+    CHECK_THROWS_AS(MultiModeEngine({{"A", honest}, {"B", cheating}}), std::invalid_argument);
+    CHECK_THROWS_AS(MultiModeEngine({{"A", honest}, {"A", honest}}), std::invalid_argument);
+    CHECK_THROWS_AS(MultiModeEngine(std::vector<MultiModeEngine::Mode>{}), std::invalid_argument);
+
+    // A single-mode engine is the degenerate case and stays legal.
+    const MultiModeEngine one{honest};
+    CHECK_EQ(one.size(), std::size_t{1});
+    CHECK_EQ(one.current_mode(), std::string{"A"});
+}
+
+TEST(a_two_mode_ship_reports_a_different_budget_in_each_mode) {
+    using sf::propulsion::MultiModeEngine;
+
+    const MultiModeEngine engine{{{"IMPULSE", EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
+                                  {"CRUISE", EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
+    Spacecraft ship{"torch", 1000.0, 19000.0, engine};
+
+    const double ratio = std::log(20.0);
+    const double impulse_budget = ship.delta_v_budget(ship.initial_mass());
+    ship.select_mode("CRUISE");
+    const double cruise_budget = ship.delta_v_budget(ship.initial_mass());
+
+    std::ostringstream os;
+    os << "20:1 mass ratio: IMPULSE gives " << impulse_budget / sf::units::c << " c of budget, "
+       << "CRUISE gives " << cruise_budget / sf::units::c << " c";
+    INFO(os.str());
+
+    CHECK_NEAR_REL(impulse_budget, 0.03 * sf::units::c * ratio, 1.0e-12,
+                   "v_eff ln(m0/m1) with v_eff = 0.03c. Note this is the NEWTONIAN budget: at "
+                   "0.09c it is still a fair statement of what the propellant buys");
+    CHECK_NEAR_REL(cruise_budget, 0.5 * sf::units::c * ratio, 1.0e-12, "and the same in cruise");
+
+    // Read as rapidity, the cruise budget is what actually matters: beta = tanh.
+    CHECK_NEAR_REL(std::tanh(0.5 * ratio), 0.904762, 1.0e-5,
+                   "0.5 * ln(20) = 1.4979 of rapidity is beta = 0.9048. The Newtonian budget of "
+                   "1.5c is meaningless as a speed and perfectly meaningful as rapidity -- which "
+                   "is why the relativistic rocket equation is written in it");
+}

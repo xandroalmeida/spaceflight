@@ -91,6 +91,12 @@ void SpaceflightSimulation::_bind_methods() {
     godot::ClassDB::bind_method(D_METHOD("set_throttle", "throttle"),
                                 &SpaceflightSimulation::set_throttle);
     godot::ClassDB::bind_method(D_METHOD("get_throttle"), &SpaceflightSimulation::get_throttle);
+    godot::ClassDB::bind_method(D_METHOD("set_engine_mode", "mode"),
+                                &SpaceflightSimulation::set_engine_mode);
+    godot::ClassDB::bind_method(D_METHOD("cycle_engine_mode"),
+                                &SpaceflightSimulation::cycle_engine_mode);
+    godot::ClassDB::bind_method(D_METHOD("get_engine_mode"),
+                                &SpaceflightSimulation::get_engine_mode);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -131,14 +137,21 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         rcs_force_ = std::make_unique<sf::attitude::RcsForce>(*rcs_, *pointing_);
         forces_->add_reference(*rcs_force_);
 
-        // Main engine: fusion torch, v_eff = 8 993 800 m/s (0.03 c), still 135 kN
-        // at full throttle because the mass flow came down by the same factor the
-        // exhaust velocity went up. 600 kg dry + 400 kg of propellant is a budget
-        // of 4 594 km/s -- 0.0153 c -- which is enough to leave the Earth-Moon
-        // system and start caring about the relativistic kinematics of Milestone 4.
-        // See config/engines/torch-mk2.json for what the model charges for it.
-        const sf::propulsion::EngineSpec main{"Fusion Torch Mk II", 0.015, 3.0e-2, 1.0};
-        craft_ = std::make_unique<sf::spacecraft::Spacecraft>("Tug", 600.0, 400.0, main);
+        // Fusion Torch Mk III: two operating points of one 900 GW plant.
+        //
+        //   IMPULSE  w = 0.03 c, 200 kN  -- one g on this 20-tonne ship, burns in
+        //                                   minutes, budget 0.0899 c
+        //   CRUISE   w = 0.5 c,  11.2 kN -- a third of a g falling to nothing over
+        //                                   years, budget 0.9048 c
+        //
+        // 1 tonne of hull and 19 of propellant. Reaching beta = 0.9 needs BOTH the
+        // exhaust velocity and the mass ratio, and eight years of burning; that
+        // last part is the rocket equation, not the simulator
+        // (config/engines/torch-mk3.json).
+        const sf::propulsion::MultiModeEngine main{
+            {{"IMPULSE", sf::propulsion::EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
+             {"CRUISE", sf::propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
+        craft_ = std::make_unique<sf::spacecraft::Spacecraft>("Torch", 1000.0, 19000.0, main);
         main_engine_ = std::make_unique<sf::propulsion::MainEngineForce>(*craft_);
         forces_->add_reference(*main_engine_);
 
@@ -161,7 +174,8 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         // v_eff. Without this the propellant readout would sit at zero while the
         // thrusters fired, which is the sort of quiet lie this project exists to
         // avoid.
-        builder_->set_propulsion(craft_->dry_mass(), main.effective_exhaust_velocity());
+        builder_->set_propulsion(craft_->dry_mass(),
+                                 craft_->engine().effective_exhaust_velocity());
 
         state_ = sf::propagation::PropagationState{};
         state_.mass = craft_->initial_mass();
@@ -356,6 +370,23 @@ void SpaceflightSimulation::set_manual_torque(const godot::Vector3& torque_body)
         sf::math::Vec3{torque_body.x, torque_body.y, torque_body.z});
 }
 
+bool SpaceflightSimulation::set_engine_mode(const godot::String& mode) {
+    if (craft_ == nullptr) {
+        return false;
+    }
+    return craft_->select_mode(std::string{mode.utf8().get_data()});
+}
+
+void SpaceflightSimulation::cycle_engine_mode() {
+    if (craft_ != nullptr) {
+        craft_->cycle_mode();
+    }
+}
+
+godot::String SpaceflightSimulation::get_engine_mode() const {
+    return craft_ != nullptr ? godot::String{craft_->mode_name().c_str()} : godot::String{};
+}
+
 void SpaceflightSimulation::set_throttle(double throttle) {
     if (main_engine_ != nullptr) {
         main_engine_->set_throttle(throttle);
@@ -391,6 +422,9 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     out["delta_v_budget_ms"] = craft.delta_v_budget;
     out["thrust_n"] = main_engine_ != nullptr ? main_engine_->current_thrust() : 0.0;
     out["throttle"] = get_throttle();
+    out["engine_mode"] = get_engine_mode();
+    out["exhaust_velocity_c"] =
+        craft_ != nullptr ? craft_->engine().exhaust_velocity_fraction_c() : 0.0;
 
     out["apoapsis_m"] = craft.elements.apoapsis_radius;
     out["periapsis_m"] = craft.elements.periapsis_radius;

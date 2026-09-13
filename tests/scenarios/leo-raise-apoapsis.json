@@ -22,13 +22,16 @@
     "position_m":  [6778000.0, 0.0, 0.0],
     "velocity_ms": [0.0, 4763.3559898, 6009.8595578],
     "name": "Tug",
-    "dry_mass_kg": 2000.0,
-    "propellant_mass_kg": 3000.0,
+    "dry_mass_kg": 1000.0,
+    "propellant_mass_kg": 19000.0,
     "engine": {
-      "name": "Fusion Torch Mk II",
-      "max_mass_flow_kg_s": 0.015,
-      "exhaust_velocity_fraction_c": 0.03,
-      "efficiency": 1.0
+      "mode": "IMPULSE",
+      "modes": [
+        { "name": "IMPULSE", "max_mass_flow_kg_s": 0.0222376,
+          "exhaust_velocity_fraction_c": 0.03, "efficiency": 1.0 },
+        { "name": "CRUISE",  "max_mass_flow_kg_s": 7.470950e-05,
+          "exhaust_velocity_fraction_c": 0.5,  "efficiency": 1.0 }
+      ]
     }
   },
 

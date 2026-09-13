@@ -97,6 +97,12 @@ public:
     void set_throttle(double throttle);
     double get_throttle() const;
 
+    // Two operating points of one power plant: IMPULSE trades exhaust velocity
+    // for thrust, CRUISE the other way. See config/engines/torch-mk3.json.
+    bool set_engine_mode(const godot::String& mode);
+    void cycle_engine_mode();
+    godot::String get_engine_mode() const;
+
     // Everything else, as a Dictionary: the cockpit reads this once per frame
     // instead of making twenty calls.
     godot::Dictionary get_snapshot() const;

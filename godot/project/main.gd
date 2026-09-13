@@ -32,7 +32,11 @@ const CHASE_DISTANCE := 0.2
 ## 20 km: a deliberate lie, and the only one in the scene.
 const SHIP_SIZE := 0.02
 
-const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]
+## A cruise burn to relativistic speed lasts eight YEARS -- 2.5e8 s. The ladder
+## goes up to 1e8 so that a human can watch it happen; the propagator does not
+## care, because the warp only decides how much coordinate time is asked for per
+## frame and never the integration step (rule 21).
+const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1.0e6, 1.0e7, 1.0e8]
 
 var simulation: SpaceflightSimulation
 var camera: Camera3D
@@ -389,7 +393,9 @@ func _update_readout() -> void:
 		"",
 		"mass           %.1f kg" % s["mass_kg"],
 		"propellant     %.3f kg" % s["propellant_kg"],
+		"engine         %s   w = %.3f c" % [s["engine_mode"], s["exhaust_velocity_c"]],
 		"throttle       %.0f %%      thrust %.1f N" % [s["throttle"] * 100.0, s["thrust_n"]],
+		"delta-v left   %s m/s" % String.num_scientific(s["delta_v_budget_ms"]),
 		"",
 		"pointing       %s   error %.3f deg" % [s["pointing_mode"], s["pointing_error_deg"]],
 		"nose->prograde %.3f deg" % s["angle_to_prograde_deg"],
@@ -405,6 +411,7 @@ func _update_readout() -> void:
 		"(, . warp   F focus   B body scale   R restart)",
 		"(1 prograde  2 retrograde  3 normal  4 anti-normal  5 radial-out  0 hold)",
 		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
+		"(M: engine mode IMPULSE <-> CRUISE)",
 	]
 	readout.text = "\n".join(lines)
 
@@ -470,6 +477,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_5: simulation.set_pointing_mode("radial_out")
 		KEY_6: simulation.set_pointing_mode("radial_in")
 		KEY_0: simulation.set_pointing_mode("")
+		KEY_M: simulation.cycle_engine_mode()
 		KEY_Z: _set_throttle(1.0)
 		KEY_X: _set_throttle(0.0)
 		KEY_EQUAL: _set_throttle(throttle + 0.1)

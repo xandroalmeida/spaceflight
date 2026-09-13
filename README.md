@@ -163,6 +163,10 @@ Entre outras coisas:
   circular com `e = 4,9·10⁻⁶`;
 * Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
   diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**;
+* um casco de 1 t com 19 t de propelente e exaustão a `0,5 c` chega a
+  `β = 0,904762` — exatamente o que a equação do foguete prevê — depois de **oito
+  anos de queima**, cobrindo 12,5 anos-luz enquanto o relógio de bordo marca
+  12,16 anos contra 19 coordenados;
 * com aceleração própria de 1 g durante um ano, `β`, posição e tempo próprio
   batem com o movimento hiperbólico exato até os dígitos impressos, e a equação
   do foguete relativística vale partindo de `β = 0`, `0,5` ou `0,9` — porque é
