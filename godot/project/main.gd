@@ -44,6 +44,11 @@ const SHIP_SIZE := 0.02
 ## frame and never the integration step (rule 21).
 const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1.0e6, 1.0e7, 1.0e8]
 
+## Development-only optics ladder. Index 0 means the propagated velocity; the
+## remaining entries inject an observer beta into rendering without touching
+## position, velocity, clocks, fuel, or mission state.
+const VISUAL_TEST_BETAS := [-1.0, 0.0, 0.1, 0.5, 0.9, 0.99]
+
 ## The star sphere sits inside the camera's far plane (2e5) and beyond the Sun at
 ## 1.47e5, so the Sun still occludes it.
 const SKY_RADIUS := 1.9e5
@@ -140,7 +145,11 @@ var body_materials: Array[ShaderMaterial] = []
 var warp_index := 0
 var exaggeration_index := 0
 var exposure_index := 2
-var show_apparent := true
+var effect_retarded := true
+var effect_aberration := true
+var effect_doppler := true
+var effect_beaming := true
+var visual_test_index := 0
 var look_yaw := 0.0
 var look_pitch := 0.0
 ## Initialised to the "ship" preset, not to numbers that merely look like it: a
@@ -414,7 +423,8 @@ func _update_starfield() -> void:
 		return
 
 	# The only physics that passes through this script: a vector, carried.
-	sky.update_sky(simulation.get_beta_vector(), SKY_RADIUS)
+	sky.update_sky_effects(simulation.get_beta_vector(), SKY_RADIUS,
+		effect_aberration, effect_doppler, effect_beaming)
 
 	var surface := sky.get_surface_arrays()
 	if surface.is_empty():
@@ -460,18 +470,21 @@ func _process(delta: float) -> void:
 		var mesh_instance := body_meshes[i]
 		# Where it APPEARS, not where it is: light time against the real ephemeris,
 		# then aberration. Both done in core/ (relativistic-rendering.md section 2).
-		mesh_instance.position = simulation.get_body_apparent_position(i)
+		mesh_instance.position = simulation.get_body_observed_position(
+			i, effect_retarded, effect_aberration)
 		var radius: float = simulation.get_body_radius(i)
 		mesh_instance.visible = radius > 0.0
 		if radius > 0.0:
 			mesh_instance.scale = Vector3.ONE * radius
 
 		var material := body_materials[i]
-		material.set_shader_parameter("doppler", simulation.get_body_doppler(i))
+		var physical_doppler: float = simulation.get_body_doppler(i)
+		material.set_shader_parameter("doppler", physical_doppler if effect_doppler else 1.0)
+		material.set_shader_parameter("beaming_doppler", physical_doppler if effect_beaming else 1.0)
 		material.set_shader_parameter("relative_velocity_scene",
 			simulation.get_body_relative_velocity_scene(i))
 		material.set_shader_parameter("light_speed_scene", simulation.get_light_speed_scene())
-		material.set_shader_parameter("apply_light_time", show_apparent)
+		material.set_shader_parameter("apply_light_time", effect_retarded)
 		material.set_shader_parameter("half_saturation", EXPOSURE_LEVELS[exposure_index])
 
 	_update_starfield()
@@ -955,7 +968,11 @@ func _sky_lines() -> Array:
 			moon_light = simulation.get_body_light_time(i)
 
 	return [
-		"stars          %d  (%s)" % [d["star_count"], "apparent" if show_apparent else "GEOMETRIC"],
+		"stars          %d  visual beta %s" % [d["star_count"],
+			("flight" if visual_test_index == 0 else "%.2fc" % VISUAL_TEST_BETAS[visual_test_index])],
+		"effects        aberration %s  Doppler %s  beaming %s  retarded %s"
+			% ["ON" if effect_aberration else "OFF", "ON" if effect_doppler else "OFF",
+			   "ON" if effect_beaming else "OFF", "ON" if effect_retarded else "OFF"],
 		"forward cone   %.3f deg holds %d stars (%.2f %%)"
 			% [d["forward_cone_deg"], d["stars_in_forward_cone"],
 			   100.0 * float(d["fraction_in_forward_cone"])],
@@ -1163,7 +1180,8 @@ func _hud_lines(compact: bool) -> Array:
 		"(1 prograde  2 retrograde  3 normal  4 anti-normal  5 radial-out  0 hold)",
 		"(arrows/PgUp/PgDn RCS   Z full throttle   X cutoff   -/= trim throttle)",
 		"(M: engine mode IMPULSE <-> CRUISE)",
-		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
+		"(P: visual beta flight/0/.1/.5/.9/.99c   C: cruise burn)",
+		"(I aberration   O Doppler   U beaming   L retarded-time)",
 		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
 		"(V: ship/prograde/retrograde frame   H: recentre)",
 		"(J: plan a lunar transfer   K: abandon it)",
@@ -1266,10 +1284,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			exposure_index = maxi(exposure_index - 1, 0)
 			sky.set_half_saturation(EXPOSURE_LEVELS[exposure_index])
 		KEY_L:
-			# Turns the OPTICS off, not the physics. The state is bit-for-bit the
-			# same either way; what changes is which question the renderer asks.
-			show_apparent = not show_apparent
-			simulation.set_apparent_positions_enabled(show_apparent)
+			effect_retarded = not effect_retarded
+		KEY_I:
+			effect_aberration = not effect_aberration
+		KEY_O:
+			effect_doppler = not effect_doppler
+		KEY_U:
+			effect_beaming = not effect_beaming
+		KEY_P:
+			visual_test_index = (visual_test_index + 1) % VISUAL_TEST_BETAS.size()
+			simulation.set_visual_test_beta(VISUAL_TEST_BETAS[visual_test_index])
 		KEY_C:
 			# Everything needed to actually go fast, in one key: the effects of
 			# section 3 and section 10 are invisible below beta ~ 0.1, and the only

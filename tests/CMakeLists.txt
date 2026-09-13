@@ -55,5 +55,6 @@ spaceflight_add_test(scientific b_plane)
 spaceflight_add_test(scientific blackbody_colour)
 spaceflight_add_test(scientific terrell_rotation)
 spaceflight_add_test(scientific relativistic_sky)
+spaceflight_add_test(scientific verification_hardening)
 
 spaceflight_add_test(regression reference_states)

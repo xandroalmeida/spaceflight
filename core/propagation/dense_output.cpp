@@ -1,5 +1,6 @@
 #include "core/propagation/dense_output.hpp"
 
+#include "core/gravity/weak_field_metric.hpp"
 #include "core/relativity/kinematics.hpp"
 
 #include <algorithm>
@@ -10,18 +11,27 @@
 namespace sf::propagation {
 
 PropagationState state_from_array(const StateArray& y, Kinematics kinematics) {
+    return state_from_array(y, kinematics, nullptr, time::CoordinateTime{});
+}
+
+PropagationState state_from_array(const StateArray& y, Kinematics kinematics,
+                                  const gravity::WeakFieldMetric* metric,
+                                  time::CoordinateTime epoch) {
     PropagationState state{};
     state.state.position = math::Vec3{y[0], y[1], y[2]};
     const math::Vec3 velocity_slot{y[3], y[4], y[5]};
-    // Both relativistic modes store u. The flat-space relation v = u/gamma is
-    // used for the REPORTED velocity even under GeneralRelativistic, where the
-    // exact relation v = c u / u0 needs the metric: the difference is O(U/c^2),
-    // about 1e-9 in low Earth orbit, far below everything else that mode already
-    // approximates. The INTEGRATION uses the exact u0
-    // (docs/physics/relativistic-gravity.md section 4).
-    state.state.velocity = carries_proper_velocity(kinematics)
-                               ? relativity::coordinate_velocity(velocity_slot)
-                               : velocity_slot;
+    if (kinematics == Kinematics::WeakFieldStaticMetric) {
+        if (metric == nullptr) {
+            throw std::invalid_argument(
+                "state_from_array: WeakFieldStaticMetric requires a metric conversion context");
+        }
+        state.state.velocity = metric->sample(state.state.position, epoch)
+                                   .coordinate_velocity(velocity_slot);
+    } else {
+        state.state.velocity = carries_proper_velocity(kinematics)
+                                   ? relativity::coordinate_velocity(velocity_slot)
+                                   : velocity_slot;
+    }
     state.proper_time = time::Duration{y[6]};
     state.mass = y[7];
     // Normalised on read: integration takes q off the unit sphere by ~1e-13 per
@@ -32,11 +42,25 @@ PropagationState state_from_array(const StateArray& y, Kinematics kinematics) {
 }
 
 StateArray array_from_state(const PropagationState& state, Kinematics kinematics) {
+    return array_from_state(state, kinematics, nullptr, time::CoordinateTime{});
+}
+
+StateArray array_from_state(const PropagationState& state, Kinematics kinematics,
+                            const gravity::WeakFieldMetric* metric,
+                            time::CoordinateTime epoch) {
     const auto& q = state.attitude.orientation;
     const auto& w = state.attitude.angular_velocity;
-    const math::Vec3 velocity_slot = carries_proper_velocity(kinematics)
-                                         ? relativity::proper_velocity(state.state.velocity)
-                                         : state.state.velocity;
+    math::Vec3 velocity_slot = state.state.velocity;
+    if (kinematics == Kinematics::WeakFieldStaticMetric) {
+        if (metric == nullptr) {
+            throw std::invalid_argument(
+                "array_from_state: WeakFieldStaticMetric requires a metric conversion context");
+        }
+        velocity_slot = metric->sample(state.state.position, epoch)
+                            .proper_velocity(state.state.velocity);
+    } else if (carries_proper_velocity(kinematics)) {
+        velocity_slot = relativity::proper_velocity(state.state.velocity);
+    }
     return StateArray{state.state.position.x, state.state.position.y, state.state.position.z,
                       velocity_slot.x, velocity_slot.y, velocity_slot.z,
                       state.proper_time.seconds(), state.mass,
@@ -58,7 +82,8 @@ PropagationState DenseSegment::at_theta(double theta) const {
                      th1 * (coefficients[2][i] +
                             th * (coefficients[3][i] + th1 * coefficients[4][i])));
     }
-    return state_from_array(y, kinematics);
+    const auto epoch = begin + time::Duration::seconds(step_seconds * th);
+    return state_from_array(y, kinematics, metric, epoch);
 }
 
 bool DenseSegment::contains(time::CoordinateTime t) const {

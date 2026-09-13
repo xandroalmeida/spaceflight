@@ -27,7 +27,7 @@ enum class Kinematics {
     // Integrates u = dx/dtau along a geodesic of the weak-field metric. Gravity
     // is carried by the metric, not by a force, so the force model must contain
     // only thrust. See docs/physics/relativistic-gravity.md.
-    GeneralRelativistic
+    WeakFieldStaticMetric
 };
 
 // True for the modes whose velocity slot holds u rather than v.
@@ -42,6 +42,11 @@ struct IntegratorConfig {
     double relative_tolerance{1.0e-10};
     double absolute_tolerance_position{1.0e-3};   // [m]
     double absolute_tolerance_velocity{1.0e-6};   // [m/s]
+    // Proper time is not generally an exact linear state: in both relativistic
+    // modes dτ/dt varies with velocity, and in the metric mode with position.
+    // It therefore needs its own error floor instead of being omitted from the
+    // embedded estimate.
+    double absolute_tolerance_proper_time{1.0e-9}; // [s]
     // Mass is error-controlled too: its error feeds straight back into the
     // acceleration through a = F/m while an engine is burning.
     double absolute_tolerance_mass{1.0e-6};       // [kg]
@@ -50,6 +55,11 @@ struct IntegratorConfig {
     // differ by orders of magnitude and cannot share one number.
     double absolute_tolerance_orientation{1.0e-10};
     double absolute_tolerance_angular_velocity{1.0e-10};   // [rad/s]
+
+    // Runtime validity envelope. `minimum_mass` is normally the dry mass when
+    // the caller knows the vehicle; zero still guarantees positive total mass.
+    double minimum_mass{0.0};                 // [kg]
+    double quaternion_norm_tolerance{1.0e-6};
 
     time::Duration min_step{time::Duration::seconds(1.0e-6)};
     time::Duration max_step{time::Duration::days(1.0)};
@@ -69,7 +79,7 @@ struct IntegratorConfig {
     // is set deliberately -- at which point the caller owns the claim that the
     // field is weak and the speeds moderate.
     //
-    // GeneralRelativistic refuses too, and there the refusal is not negotiable in
+    // WeakFieldStaticMetric refuses too, and there the refusal is not negotiable in
     // the same way: gravity is already in the metric, so a gravitational
     // ForceModel would count it twice.
     bool allow_gravity_with_relativistic_kinematics{false};
@@ -111,6 +121,7 @@ enum class PropagationStatus {
     MinimumStepReached,   // error control demanded a step below min_step
     MaxStepsExceeded,
     NonFiniteState,       // NaN/Inf appeared: reported, never swept under a clamp
+    InvariantViolation,   // finite, but outside a physical/state invariant
     InsideBody,           // trajectory entered a body's radius
     UnsupportedRegime     // relativistic kinematics asked to carry a gravity field
 };

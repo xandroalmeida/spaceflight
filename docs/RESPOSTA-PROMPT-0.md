@@ -3,12 +3,12 @@
 O que foi construído, item por item do enunciado, o que foi além dele, e o que
 continua por fazer.
 
-Estado em 2026-09-13: **Milestones 0 a 5 completos**, 31 suítes de teste, 100 %
-passando (17 delas na categoria `scientific`). O núcleo compila e é testado **sem nenhum engine instalado** — que é
+Estado em 2026-09-13: **Milestones 0 a 5 completos; auditoria do Milestone 6 executada**, 32 suítes de teste, 100 %
+passando (18 delas na categoria `scientific`). O núcleo compila e é testado **sem nenhum engine instalado** — que é
 como se verifica que a separação do ADR-0002 continua real.
 
 ```
-31 suítes     17 "scientific" (a categoria que tests/CMakeLists.txt define como
+32 suítes     18 "scientific" (a categoria que tests/CMakeLists.txt define como
               "does the answer match nature / an external reference?")
               10 unit · 3 integration · 1 regression
 25 documentos 11 física · 5 arquitetura · 8 ADRs · 1 tolerâncias
@@ -254,7 +254,7 @@ imagem: para não ser descoberto como bug.
 
 * **Arrasto de referencial** (`g₀ᵢ ≠ 0`). A 0,9 c o termo que a métrica atual joga
   fora vale 3,6·10⁻⁴, **quatro ordens acima** dos termos 1PN estáticos que ela
-  mantém. O modo `GeneralRelativistic` é honesto para trajetórias lentas perto de
+  mantém. O modo `WeakFieldStaticMetric` é honesto para trajetórias lentas perto de
   corpos girando e para trajetórias rápidas longe deles — não para as duas ao
   mesmo tempo.
 * Sem lente gravitacional nem atraso de Shapiro.
@@ -291,7 +291,7 @@ imagem: para não ser descoberto como bug.
 ./scripts/fetch_kernels.sh          # 33 MB, SPICE DE440
 ./scripts/fetch_star_catalog.sh     # 560 kB, Yale BSC5
 cmake -S . -B build && cmake --build build -j
-ctest --test-dir build --output-on-failure        # 31/31, sem engine nenhum
+ctest --test-dir build --output-on-failure        # 32/32, sem engine nenhum
 ```
 
 A viagem à Lua, pela linha de comando:

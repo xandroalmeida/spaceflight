@@ -40,7 +40,7 @@ public:
     // components. `inertia` must outlive the propagator; nullptr disables.
     void set_inertia(const attitude::InertiaTensor* inertia) { inertia_ = inertia; }
 
-    // Required by Kinematics::GeneralRelativistic and ignored otherwise. The
+    // Required by Kinematics::WeakFieldStaticMetric and ignored otherwise. The
     // metric carries gravity, so the force model must carry only thrust.
     void set_metric(const gravity::WeakFieldMetric* metric) { metric_ = metric; }
     [[nodiscard]] const gravity::WeakFieldMetric* metric() const noexcept { return metric_; }
@@ -51,9 +51,10 @@ public:
     void set_config(IntegratorConfig config);
 
 private:
-    // State layout: [x y z vx vy vz tau].  Proper time rides along as component
-    // 6 and is not part of the error norm (its derivative is exact in the
-    // Newtonian regime).  Milestone 4 turns components 3..5 into u = gamma*v.
+    // State layout: [x y z vx vy vz tau mass q omega]. Proper time rides along
+    // as component 6 and has its own error floor because its derivative varies
+    // in the relativistic modes. Milestone 4 turns components 3..5 into
+    // u = gamma*v.
     static constexpr std::size_t kDim = kStateDimension;
     using Vector = StateArray;
 

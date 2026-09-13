@@ -26,7 +26,8 @@ namespace sf::render {
 // star, in the catalogue's order.
 struct SkyFrame {
     std::vector<math::Vec3> apparent_direction;  // unit, ship frame, aberrated
-    std::vector<float> doppler;                  // D = gamma (1 - beta.n)
+    std::vector<float> doppler;                  // colour-temperature multiplier
+    std::vector<float> beaming;                  // bolometric intensity multiplier base D
     std::size_t star_count{0};
 };
 
@@ -67,7 +68,8 @@ public:
     // `beta` is the observer's velocity over c, in the coordinate frame -- the
     // same convention as core/relativity/optics.hpp, and the reason that file
     // states it twice.
-    void update(const math::Vec3& beta);
+    void update(const math::Vec3& beta, bool apply_aberration = true,
+                bool apply_doppler = true, bool apply_beaming = true);
 
     [[nodiscard]] const SkyFrame& frame() const noexcept { return frame_; }
 
@@ -97,6 +99,9 @@ private:
     PlanckTable table_;
     SkyFrame frame_{};
     double half_saturation_{kDefaultHalfSaturation};
+    bool apply_aberration_{true};
+    bool apply_doppler_{true};
+    bool apply_beaming_{true};
 };
 
 }  // namespace sf::render

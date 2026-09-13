@@ -84,6 +84,40 @@ TEST(the_corrector_recovers_a_known_departure_velocity) {
     CHECK_EQ(result.evaluations, calls);
 }
 
+TEST(the_departure_corrector_is_bit_deterministic) {
+    const double a = 1.5e7;
+    const double e = 0.3;
+    const double rp = a * (1.0 - e);
+    const double vp = std::sqrt(kGm * (1.0 + e) / (a * (1.0 - e)));
+    const double dt = 0.4 * 2.0 * units::pi * std::sqrt(a * a * a / kGm);
+    const Vec3 departure{rp, 0.0, 0.0};
+    const Vec3 truth{0.0, vp * 0.8, vp * 0.6};
+    const Vec3 target = sft::kepler_propagate(StateVector{departure, truth}, kGm, dt).position;
+    const auto arrival = [&](const Vec3& velocity) {
+        return sft::kepler_propagate(StateVector{departure, velocity}, kGm, dt).position;
+    };
+
+    navigation::TargetingConfig config{};
+    config.position_tolerance = 1.0e-3;
+    config.velocity_step = 1.0e-4;
+    const Vec3 guess = truth + Vec3{30.0, -30.0, 30.0};
+    const auto reference = navigation::correct_departure(arrival, guess, target, config);
+    REQUIRE(reference.converged);
+
+    for (int run = 0; run < 20; ++run) {
+        const auto result = navigation::correct_departure(arrival, guess, target, config);
+        CHECK_EQ(result.departure_velocity.x, reference.departure_velocity.x);
+        CHECK_EQ(result.departure_velocity.y, reference.departure_velocity.y);
+        CHECK_EQ(result.departure_velocity.z, reference.departure_velocity.z);
+        CHECK_EQ(result.miss_distance, reference.miss_distance);
+        CHECK_EQ(result.initial_miss, reference.initial_miss);
+        CHECK_EQ(result.iterations, reference.iterations);
+        CHECK_EQ(result.evaluations, reference.evaluations);
+        CHECK_EQ(result.converged, reference.converged);
+        CHECK_EQ(result.message, reference.message);
+    }
+}
+
 TEST(the_corrector_reports_failure_instead_of_wandering) {
     const Vec3 target{1.0e7, 0.0, 0.0};
 

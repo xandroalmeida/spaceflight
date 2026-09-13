@@ -312,7 +312,7 @@ ordem.
 | o terceiro modo do integrador | `core/propagation/dormand_prince_54.cpp` |
 | os sete testes | `tests/scientific/test_relativistic_gravity.cpp` |
 
-O modo se seleciona por `IntegratorConfig::kinematics = Kinematics::GeneralRelativistic`
+O modo se seleciona por `IntegratorConfig::kinematics = Kinematics::WeakFieldStaticMetric`
 e exige `set_metric()`; sem métrica o propagador **recusa** (`UnsupportedRegime`)
 em vez de cair silenciosamente no newtoniano. Neste modo o `ForceModel` não
 recebe gravidade nenhuma: ela está na geometria, e somar as duas seria contá-la

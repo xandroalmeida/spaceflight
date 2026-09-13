@@ -45,9 +45,16 @@ TEST(tightening_the_tolerance_tightens_the_error) {
     const auto t0 = time::CoordinateTime::j2000();
 
     std::vector<double> errors;
+    std::vector<double> velocity_errors;
+    std::vector<double> energy_drifts;
+    std::vector<double> angular_momentum_drifts;
+    std::vector<double> proper_time_drifts;
     std::vector<std::size_t> step_counts;
 
-    for (const double rtol : {1.0e-6, 1.0e-8, 1.0e-10, 1.0e-12}) {
+    const double initial_energy = 0.5 * start.velocity.norm_squared() - kGm / start.position.norm();
+    const Vec3 initial_momentum = cross(start.position, start.velocity);
+
+    for (const double rtol : {1.0e-6, 1.0e-8, 1.0e-10, 1.0e-12, 1.0e-13}) {
         propagation::IntegratorConfig cfg{};
         cfg.relative_tolerance = rtol;
         cfg.absolute_tolerance_position = rtol * 1.0e7;   // same relative scale as the orbit
@@ -60,20 +67,42 @@ TEST(tightening_the_tolerance_tightens_the_error) {
         REQUIRE(result.ok());
 
         const double error = (result.state.state.position - exact.position).norm();
+        const double velocity_error = (result.state.state.velocity - exact.velocity).norm();
+        const double final_energy = 0.5 * result.state.state.velocity.norm_squared() -
+                                    kGm / result.state.state.position.norm();
+        const Vec3 final_momentum =
+            cross(result.state.state.position, result.state.state.velocity);
         errors.push_back(error);
+        velocity_errors.push_back(velocity_error);
+        energy_drifts.push_back(std::abs((final_energy - initial_energy) / initial_energy));
+        angular_momentum_drifts.push_back(
+            (final_momentum - initial_momentum).norm() / initial_momentum.norm());
+        proper_time_drifts.push_back(std::abs(result.state.proper_time.seconds() - period));
         step_counts.push_back(result.stats.accepted_steps);
 
         std::ostringstream os;
-        os << "rtol " << rtol << ": |dr| = " << error << " m after one orbit, "
+        os << "rtol " << rtol << ": |dr|=" << error << " m, |dv|=" << velocity_error
+           << " m/s, |dE/E|=" << energy_drifts.back() << ", |dL/L|="
+           << angular_momentum_drifts.back() << ", |dtau-dt|="
+           << proper_time_drifts.back() << " s after one orbit, "
            << result.stats.accepted_steps << " steps, " << result.stats.rejected_steps
            << " rejected, " << result.stats.force_evaluations << " force evaluations";
         INFO(os.str());
     }
 
-    for (std::size_t i = 1; i < errors.size(); ++i) {
+    for (std::size_t i = 1; i + 1 < errors.size(); ++i) {
         CHECK(errors[i] < errors[i - 1]);
+        CHECK(velocity_errors[i] < velocity_errors[i - 1]);
         CHECK(step_counts[i] >= step_counts[i - 1]);
     }
+
+    // At 1e-13 the global truncation error is approaching double-precision
+    // roundoff. Demand no regression, not an impossible extra decade.
+    CHECK(errors.back() < 2.0 * errors[errors.size() - 2]);
+    CHECK(velocity_errors.back() < 2.0 * velocity_errors[velocity_errors.size() - 2]);
+    CHECK(energy_drifts.back() < 1.0e-11);
+    CHECK(angular_momentum_drifts.back() < 1.0e-11);
+    CHECK(proper_time_drifts.back() < 1.0e-9);
 
     // Two decades of tolerance must buy at least one decade of accuracy.  The
     // relation is not exactly linear because the step size, and therefore the

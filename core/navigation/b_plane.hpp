@@ -22,6 +22,7 @@
 // See docs/physics/b-plane.md.
 
 #include "core/math/vec3.hpp"
+#include "core/units/angle.hpp"
 
 #include <string>
 
@@ -46,7 +47,7 @@ struct BPlane {
     // The angle of B in the plane, measured from T towards R.  This is the knob
     // that picks which side of the body the flyby passes, and it has no natural
     // default -- whoever plans the mission says which (section 4).
-    [[nodiscard]] double angle() const;
+    [[nodiscard]] units::Angle angle() const;
 
     [[nodiscard]] std::string describe() const;
 };
@@ -77,7 +78,7 @@ struct BPlaneTarget {
 };
 
 [[nodiscard]] BPlaneTarget aim_for_periapsis(double periapsis_radius, double gm,
-                                             double v_infinity, double plane_angle);
+                                             double v_infinity, units::Angle plane_angle);
 
 // Insertion at periapsis: retrograde, impulsive, into a circle or an ellipse.
 struct InsertionBurn {

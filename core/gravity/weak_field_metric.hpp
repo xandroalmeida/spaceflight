@@ -48,6 +48,11 @@ struct MetricSample {
 
     // v = c u / u0, and dtau/dt = c / u0.
     [[nodiscard]] math::Vec3 coordinate_velocity(const math::Vec3& proper_velocity) const;
+    // Exact inverse of coordinate_velocity() for this sampled metric. Throws
+    // when the requested coordinate velocity is null or spacelike with respect
+    // to the local coordinate light cone.
+    [[nodiscard]] math::Vec3 proper_velocity(const math::Vec3& coordinate_velocity) const;
+    [[nodiscard]] bool is_timelike(const math::Vec3& coordinate_velocity) const;
     [[nodiscard]] double proper_time_rate(const math::Vec3& proper_velocity) const;
 
     // The geodesic term:  du/dtau = -(1/2B)[ (u0)^2 grad_A + 2 u (grad_B . u)

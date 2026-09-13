@@ -222,7 +222,7 @@ cmake --build build-godot --target spaceflight_gdextension -j
 ./scripts/run_godot_headless.sh     # roda a cena sem tela e imprime o HUD
 ```
 
-A extensão é **desligada por padrão**, e isso é o teste: o core e as 26 suítes
+A extensão é **desligada por padrão**, e isso é o teste: o core e as 32 suítes
 compilam e passam sem nenhum engine instalado.
 
 A cena foi verificada **headless**: extensão carregada, kernels lidos, propagação
@@ -239,7 +239,7 @@ Três modos de cinemática, escolhidos em `IntegratorConfig::kinematics`:
 |---|---|---|
 | `Newtonian` | `v` | soma de acelerações (`ForceModel`) |
 | `SpecialRelativistic` | `u = γv` | nenhuma — o propagador recusa |
-| `GeneralRelativistic` | `u = dx/dτ` | a geometria (`WeakFieldMetric`) |
+| `WeakFieldStaticMetric` | `u = dx/dτ` | métrica estática fraca (`WeakFieldMetric`) |
 
 O teto de velocidade em nenhum dos dois últimos é uma comparação: é a forma de
 `γ = √(1 + |u|²/c²)` e de `u⁰`. Não há linha no código onde `if (v > c) v = c`
@@ -296,7 +296,7 @@ Leitura completa em [`tools/validation/README.md`](tools/validation/README.md).
 
 O arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica atual joga
 fora vale 3,6·10⁻⁴, quatro ordens **acima** dos termos 1PN estáticos que ela
-mantém. Enquanto isso não existir, o modo `GeneralRelativistic` é honesto para
+mantém. Enquanto isso não existir, o modo `WeakFieldStaticMetric` explicita que
 trajetórias lentas perto de corpos girando e para trajetórias rápidas longe
 deles — não para as duas ao mesmo tempo.
 

@@ -193,6 +193,34 @@ TEST(the_sky_at_rest_is_the_catalogue_untouched) {
     }
 }
 
+TEST(visual_effect_switches_are_independent_and_do_not_change_the_catalogue) {
+    auto sky = make_sky();
+    const Vec3 beta{0.9, 0.0, 0.0};
+    const std::size_t index = 0;
+    const auto rest_direction = sky.catalog().stars()[index].direction;
+
+    sky.update(beta, false, false, false);
+    CHECK_NEAR_ABS((sky.frame().apparent_direction[index] - rest_direction).norm(), 0.0, 0.0,
+                   "aberration OFF is an exact identity");
+    CHECK_EQ(sky.frame().doppler[index], 1.0F);
+    CHECK_EQ(sky.frame().beaming[index], 1.0F);
+
+    sky.update(beta, true, false, false);
+    CHECK((sky.frame().apparent_direction[index] - rest_direction).norm() > 1.0e-6);
+    CHECK_EQ(sky.frame().doppler[index], 1.0F);
+    CHECK_EQ(sky.frame().beaming[index], 1.0F);
+
+    sky.update(beta, false, true, false);
+    CHECK_NEAR_ABS((sky.frame().apparent_direction[index] - rest_direction).norm(), 0.0, 0.0,
+                   "Doppler does not move a source");
+    CHECK(sky.frame().doppler[index] != 1.0F);
+    CHECK_EQ(sky.frame().beaming[index], 1.0F);
+
+    sky.update(beta, false, false, true);
+    CHECK_EQ(sky.frame().doppler[index], 1.0F);
+    CHECK(sky.frame().beaming[index] != 1.0F);
+}
+
 TEST(the_diagnostics_agree_with_the_closed_forms) {
     auto sky = make_sky();
     const Vec3 beta_vector = Vec3{0.6, 0.0, 0.8} * 0.9048;

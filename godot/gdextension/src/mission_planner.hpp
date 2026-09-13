@@ -16,6 +16,7 @@
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/time/coordinate_time.hpp"
+#include "core/units/angle.hpp"
 
 #include <string>
 
@@ -43,7 +44,7 @@ struct TransferRequest {
 
     double time_of_flight_s{4.5 * 86400.0};
     double flyby_altitude_m{100.0e3};
-    double b_plane_angle{0.0};
+    sf::units::Angle b_plane_angle{sf::units::Angle::radians(0.0)};
 
     // How far ahead to look for a departure, and how finely. Most points in a
     // parking orbit are a bad place to leave from.

@@ -14,11 +14,16 @@ RelativisticSky::RelativisticSky(StarCatalog catalog, PlanckTable table)
     const std::size_t n = catalog_.size();
     frame_.apparent_direction.resize(n);
     frame_.doppler.assign(n, 1.0F);
+    frame_.beaming.assign(n, 1.0F);
     frame_.star_count = n;
     update(math::Vec3{});
 }
 
-void RelativisticSky::update(const math::Vec3& beta) {
+void RelativisticSky::update(const math::Vec3& beta, bool apply_aberration,
+                             bool apply_doppler, bool apply_beaming) {
+    apply_aberration_ = apply_aberration;
+    apply_doppler_ = apply_doppler;
+    apply_beaming_ = apply_beaming;
     const auto& stars = catalog_.stars();
     for (std::size_t i = 0; i < stars.size(); ++i) {
         const math::Vec3& to_source = stars[i].direction;
@@ -27,9 +32,13 @@ void RelativisticSky::update(const math::Vec3& beta) {
         // taken from the direction in the COORDINATE frame -- which is why the
         // second call takes `to_source` and not the aberrated result.  Feeding it
         // the aberrated direction would apply the boost twice.
-        frame_.apparent_direction[i] = relativity::aberrate_source_direction(to_source, beta);
-        frame_.doppler[i] =
+        frame_.apparent_direction[i] = apply_aberration
+                                           ? relativity::aberrate_source_direction(to_source, beta)
+                                           : to_source;
+        const auto factor =
             static_cast<float>(relativity::doppler_factor_to_source(to_source, beta));
+        frame_.doppler[i] = apply_doppler ? factor : 1.0F;
+        frame_.beaming[i] = apply_beaming ? factor : 1.0F;
     }
 }
 
@@ -46,20 +55,25 @@ double RelativisticSky::response_of(std::size_t index) const {
     }
     const auto& star = catalog_.stars()[index];
     const double doppler = static_cast<double>(frame_.doppler[index]);
+    const double beaming = static_cast<double>(frame_.beaming[index]);
 
     // Everything in log, all the way to the response curve: the aft sky at
     // beta = 0.99 is e^-52 of its rest flux, and forming the number would flush
     // it to zero before the curve ever saw it.
-    const double ln_luminance = std::log(star.rest_flux) +
-                                ln_band_limited_beaming(table_, star.temperature, doppler);
+    const double ln_luminance = std::log(star.rest_flux) + 4.0 * std::log(beaming) +
+                                table_.sample_ln_band_efficiency(star.temperature * doppler) -
+                                table_.sample_ln_band_efficiency(star.temperature);
     return detector_response_from_ln(ln_luminance, half_saturation_);
 }
 
 SkyDiagnostics RelativisticSky::diagnostics_at(const math::Vec3& beta,
                                                const math::Vec3& restore_to) {
+    const bool restore_aberration = apply_aberration_;
+    const bool restore_doppler = apply_doppler_;
+    const bool restore_beaming = apply_beaming_;
     update(beta);
     const auto result = diagnostics(beta);
-    update(restore_to);
+    update(restore_to, restore_aberration, restore_doppler, restore_beaming);
     return result;
 }
 

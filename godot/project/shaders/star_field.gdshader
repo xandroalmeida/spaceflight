@@ -45,6 +45,7 @@ void vertex() {
     float rest_temperature = CUSTOM0.x;
     float rest_flux = CUSTOM0.y;
     float doppler = CUSTOM0.z;
+    float beaming = CUSTOM0.w;
 
     float shifted_temperature = rest_temperature * doppler;
 
@@ -57,7 +58,7 @@ void vertex() {
     // reason the forward sky is 51x and not 400x at beta = 0.9048.
     float band = exp(shifted.a - rest.a);
 
-    float luminance = rest_flux * pow(doppler, 4.0) * band;
+    float luminance = rest_flux * pow(beaming, 4.0) * band;
 
     // The structural limit.  A bijection [0, inf) -> [0, 1): nothing is cut off,
     // the scale is compressed, and the ordering survives.  When `luminance`

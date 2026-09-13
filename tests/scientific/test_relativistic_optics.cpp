@@ -24,7 +24,7 @@ const auto kSsb = coordinates::ReferenceFrame::ssb_j2000();
 }
 
 TEST(the_light_time_solver_agrees_with_spice) {
-    // Our fixed-point iteration against the JPL toolkit's own correction. Both
+    // Our independently implemented retarded-time root against the JPL toolkit's own correction. Both
     // solve |x_obs(t) - x_body(t_r)| = c(t - t_r); neither was written from the
     // other.
     const auto fixture = sft::load_spice_or_skip();

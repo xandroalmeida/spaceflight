@@ -7,6 +7,7 @@
 #include "tests/support/kernel_fixture.hpp"
 #include "tests/support/test_harness.hpp"
 
+#include <cmath>
 #include <sstream>
 
 using namespace sf;
@@ -128,6 +129,71 @@ TEST(changing_the_origin_is_a_translation_and_nothing_else) {
                    0.0, 0.0,
                    "a body observed from itself is exactly at the origin: the provider "
                    "short-circuits this case rather than asking SPICE");
+}
+
+TEST(reference_frame_origin_round_trips_preserve_position_and_velocity) {
+    const auto fixture = sft::load_spice_or_skip();
+    const celestial::BodyId targets[] = {celestial::bodies::mercury_barycenter,
+                                         celestial::bodies::moon,
+                                         celestial::bodies::jupiter_barycenter};
+    const celestial::BodyId origins[] = {celestial::bodies::solar_system_barycenter,
+                                         celestial::bodies::sun,
+                                         celestial::bodies::earth,
+                                         celestial::bodies::moon};
+    const char* epochs[] = {"1900-02-17T03:00:00", "2026-09-13T12:34:56",
+                            "2099-11-05T18:00:00"};
+
+    for (const char* epoch : epochs) {
+        const auto t = fixture.time->parse(epoch);
+        const auto ssb = coordinates::ReferenceFrame::ssb_j2000();
+        for (const auto target : targets) {
+            const auto target_ssb = fixture.provider->state(target, t, ssb).state;
+            for (const auto origin : origins) {
+                const auto frame = coordinates::ReferenceFrame::centered_on(origin);
+                const auto target_in_origin = fixture.provider->state(target, t, frame).state;
+                const auto origin_ssb = fixture.provider->state(origin, t, ssb).state;
+                const auto reconstructed = target_in_origin + origin_ssb;
+
+                CHECK_NEAR_ABS((reconstructed.position - target_ssb.position).norm(), 0.0, 1.0e-3,
+                               "A -> B -> A position round-trip at planetary scale");
+                CHECK_NEAR_ABS((reconstructed.velocity - target_ssb.velocity).norm(), 0.0, 1.0e-8,
+                               "velocity must translate with the origin too; omitting it creates "
+                               "errors of orbital-speed magnitude");
+            }
+        }
+    }
+}
+
+TEST(j2000_and_ecliptic_axes_round_trip_with_an_independent_rotation) {
+    const auto fixture = sft::load_spice_or_skip();
+    const auto t = fixture.time->parse("2026-09-13T12:34:56");
+    const auto equatorial = fixture.provider->state(
+        celestial::bodies::earth, t, coordinates::ReferenceFrame::ssb_j2000()).state;
+    const auto ecliptic = fixture.provider->state(
+        celestial::bodies::earth, t,
+        coordinates::ReferenceFrame::centered_on(celestial::bodies::solar_system_barycenter,
+                                                  coordinates::FrameAxes::ECLIPJ2000)).state;
+
+    // IAU 1976 mean obliquity at J2000: 84381.448 arcsec. This constant and the
+    // rotation below do not use SPICE, so they can detect a wrong axis label.
+    const double epsilon = units::deg_to_rad(84381.448 / 3600.0);
+    const auto to_ecliptic = [epsilon](const math::Vec3& v) {
+        return math::Vec3{v.x, std::cos(epsilon) * v.y + std::sin(epsilon) * v.z,
+                          -std::sin(epsilon) * v.y + std::cos(epsilon) * v.z};
+    };
+    const auto to_equatorial = [epsilon](const math::Vec3& v) {
+        return math::Vec3{v.x, std::cos(epsilon) * v.y - std::sin(epsilon) * v.z,
+                          std::sin(epsilon) * v.y + std::cos(epsilon) * v.z};
+    };
+
+    CHECK_NEAR_ABS((to_ecliptic(equatorial.position) - ecliptic.position).norm(), 0.0, 0.02,
+                   "independent J2000 -> ECLIPJ2000 rotation at 1 AU");
+    CHECK_NEAR_ABS((to_ecliptic(equatorial.velocity) - ecliptic.velocity).norm(), 0.0, 1.0e-8,
+                   "the same axis rotation must be applied to velocity");
+    CHECK_NEAR_ABS((to_equatorial(ecliptic.position) - equatorial.position).norm(), 0.0, 0.02,
+                   "ECLIPJ2000 -> J2000 closes the round trip");
+    CHECK_NEAR_ABS((to_equatorial(ecliptic.velocity) - equatorial.velocity).norm(), 0.0, 1.0e-8,
+                   "velocity closes the reverse axis transform too");
 }
 
 TEST(the_default_catalogue_resolves_completely) {

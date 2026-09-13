@@ -29,7 +29,7 @@ using propagation::Kinematics;
 
 namespace {
 
-// Nothing acts on the particle: under GeneralRelativistic gravity lives in the
+// Nothing acts on the particle: under WeakFieldStaticMetric gravity lives in the
 // metric, and under Newtonian it comes from PointMassGravity.
 class NoForce final : public gravity::ForceModel {
 public:
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
     const NoForce nothing;
 
     propagation::IntegratorConfig config{};
-    config.kinematics = geodesic ? Kinematics::GeneralRelativistic : Kinematics::Newtonian;
+    config.kinematics = geodesic ? Kinematics::WeakFieldStaticMetric : Kinematics::Newtonian;
     config.relative_tolerance = rtol;
     config.absolute_tolerance_position = 1.0e-4;
     config.absolute_tolerance_velocity = 1.0e-8;

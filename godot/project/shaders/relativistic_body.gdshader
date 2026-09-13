@@ -30,6 +30,7 @@ uniform float table_reference_temperature = 6000.0;
 
 // Doppler factor of the body centre, from optics.hpp.
 uniform float doppler = 1.0;
+uniform float beaming_doppler = 1.0;
 
 // The body's velocity relative to the observer, and the speed of light, BOTH in
 // scene units per second.  The scale cancels out of the retarded time, which is
@@ -124,7 +125,7 @@ void vertex() {
         textureLod(planck_table, vec2(table_index(illuminant_temperature * doppler), 0.5), 0.0);
 
     float band = exp(shifted.a - rest.a);
-    float luminance = pow(doppler, 4.0) * band;
+    float luminance = pow(beaming_doppler, 4.0) * band;
     float response = luminance / (luminance + half_saturation);
 
     if (is_self_luminous) {

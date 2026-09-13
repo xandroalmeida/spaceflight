@@ -450,7 +450,10 @@ int command_intercept(const Args& args) {
         throw std::runtime_error("usage: orbit-cli intercept <scenario.json> --to <body> --tof <days>");
     }
     const Context ctx = make_context(args);
-    const orbitcli::Scenario scenario = orbitcli::Scenario::load(args.positional.front());
+    orbitcli::Scenario scenario = orbitcli::Scenario::load(args.positional.front());
+    if (const auto epoch = args.option("date"); epoch.has_value()) {
+        scenario.epoch_text = *epoch;
+    }
 
     if (!scenario.craft.has_value()) {
         throw std::runtime_error("intercept needs a scenario with spacecraft.engine configured");
@@ -640,8 +643,8 @@ int command_intercept(const Args& args) {
     const double target_gm = ctx.provider->gravitational_parameter(target);
     const double target_radius_for_aim = ctx.provider->mean_radius(target);
     const auto flyby_altitude = args.option("flyby-altitude-km");
-    const double b_plane_angle =
-        units::deg_to_rad(std::stod(args.option_or("b-plane-angle", "0")));
+    const auto b_plane_angle =
+        units::Angle::degrees(std::stod(args.option_or("b-plane-angle", "0")));
 
     Vec3 departure_velocity = solution.departure_velocity;
 
@@ -1020,6 +1023,9 @@ int command_propagate(const Args& args) {
     }
     const Context ctx = make_context(args);
     orbitcli::Scenario scenario = orbitcli::Scenario::load(args.positional.front());
+    if (const auto epoch = args.option("date"); epoch.has_value()) {
+        scenario.epoch_text = *epoch;
+    }
     if (const auto csv = args.option("csv"); csv.has_value()) {
         scenario.csv_path = *csv;
     }

@@ -64,6 +64,9 @@ void SpaceflightSky::_bind_methods() {
                                 &SpaceflightSky::get_planck_table_reference_temperature);
     godot::ClassDB::bind_method(D_METHOD("update_sky", "beta", "sky_radius"),
                                 &SpaceflightSky::update_sky);
+    godot::ClassDB::bind_method(
+        D_METHOD("update_sky_effects", "beta", "sky_radius", "aberration", "doppler", "beaming"),
+        &SpaceflightSky::update_sky_effects);
     godot::ClassDB::bind_method(D_METHOD("get_surface_arrays"),
                                 &SpaceflightSky::get_surface_arrays);
     godot::ClassDB::bind_method(D_METHOD("get_diagnostics"), &SpaceflightSky::get_diagnostics);
@@ -144,13 +147,18 @@ double SpaceflightSky::get_planck_table_reference_temperature() const {
 }
 
 void SpaceflightSky::update_sky(const godot::Vector3& beta, double sky_radius) {
+    update_sky_effects(beta, sky_radius, true, true, true);
+}
+
+void SpaceflightSky::update_sky_effects(const godot::Vector3& beta, double sky_radius,
+                                        bool aberration, bool doppler, bool beaming) {
     if (sky_ == nullptr) {
         return;
     }
     guarded(last_error_, "update_sky", [&] {
         beta_ = sf::math::Vec3{beta.x, beta.y, beta.z};
         sky_radius_ = sky_radius;
-        sky_->update(beta_);
+        sky_->update(beta_, aberration, doppler, beaming);
     });
 }
 
@@ -180,7 +188,7 @@ godot::Dictionary SpaceflightSky::get_surface_arrays() const {
         c[i * 4 + 0] = static_cast<float>(stars[index].temperature);
         c[i * 4 + 1] = static_cast<float>(stars[index].rest_flux);
         c[i * 4 + 2] = frame.doppler[index];
-        c[i * 4 + 3] = 0.0F;
+        c[i * 4 + 3] = frame.beaming[index];
     }
 
     godot::Array arrays;

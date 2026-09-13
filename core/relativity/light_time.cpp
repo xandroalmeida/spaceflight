@@ -18,9 +18,27 @@ ApparentPosition apparent_position(const ephemeris::EphemerisProvider& provider,
     double light_time = 0.0;
     for (int iteration = 0; iteration < max_iterations; ++iteration) {
         const auto retarded = t - time::Duration::seconds(light_time);
-        const math::Vec3 body = provider.position(target, retarded, frame);
-        const double distance = (body - observer_position).norm();
-        const double updated = distance / units::c;
+        const auto body = provider.state(target, retarded, frame).state;
+        const math::Vec3 relative = body.position - observer_position;
+        const double distance = relative.norm();
+        const double residual = light_time - distance / units::c;
+
+        // Newton derivative of F(L)=L-|x(t-L)-x_obs(t)|/c:
+        // F'(L)=1+r_hat.v_target/c. Unlike fixed-point iteration, whose
+        // contraction factor approaches one for a relativistic source moving
+        // toward the observer, this remains fast up to the light cone. If an
+        // invalid/superluminal ephemeris makes the derivative non-positive,
+        // retain the bounded fixed-point step and report non-convergence.
+        const double slope = distance > 0.0
+                                 ? 1.0 + dot(relative / distance, body.velocity) / units::c
+                                 : 1.0;
+        double updated = distance / units::c;
+        if (slope > 0.0 && std::isfinite(slope)) {
+            updated = light_time - residual / slope;
+        }
+        if (!(updated >= 0.0) || !std::isfinite(updated)) {
+            updated = distance / units::c;
+        }
 
         result.iterations = iteration + 1;
         if (std::abs(updated - light_time) <= tolerance_seconds) {

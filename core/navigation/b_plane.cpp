@@ -12,13 +12,15 @@ namespace sf::navigation {
 
 using math::Vec3;
 
-double BPlane::angle() const { return std::atan2(b_dot_r, b_dot_t); }
+units::Angle BPlane::angle() const {
+    return units::Angle::radians(std::atan2(b_dot_r, b_dot_t));
+}
 
 std::string BPlane::describe() const {
     std::ostringstream os;
     os << std::setprecision(9);
     os << "B.T " << b_dot_t / 1000.0 << " km, B.R " << b_dot_r / 1000.0 << " km, |B| "
-       << magnitude / 1000.0 << " km, angle " << units::rad_to_deg(angle())
+       << magnitude / 1000.0 << " km, angle " << angle().degrees()
        << " deg, v_inf " << v_infinity << " m/s, e " << eccentricity << ", r_p "
        << periapsis_radius / 1000.0 << " km";
     return os.str();
@@ -119,9 +121,10 @@ double periapsis_for_impact_parameter(double impact_parameter, double gm, double
 }
 
 BPlaneTarget aim_for_periapsis(double periapsis_radius, double gm, double v_infinity,
-                               double plane_angle) {
+                               units::Angle plane_angle) {
     const double b = impact_parameter_for_periapsis(periapsis_radius, gm, v_infinity);
-    return BPlaneTarget{b * std::cos(plane_angle), b * std::sin(plane_angle)};
+    return BPlaneTarget{b * std::cos(plane_angle.radians()),
+                        b * std::sin(plane_angle.radians())};
 }
 
 InsertionBurn plan_insertion(double periapsis_radius, double gm, double v_infinity,

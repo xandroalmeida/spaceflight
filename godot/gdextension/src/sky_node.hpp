@@ -11,7 +11,7 @@
 // What crosses into the engine, per frame:
 //
 //   ARRAY_VERTEX   aberrated direction x sky radius   <- core/relativity/optics.hpp
-//   ARRAY_CUSTOM0  (T_rest, F_rest, D, 0)             <- core/relativity/optics.hpp
+//   ARRAY_CUSTOM0  (T_rest, F_rest, D_colour, D_beam) <- core/relativity/optics.hpp
 //
 // and once, at load, the Planck table as an RGBAF image.  The shader turns D into
 // colour and brightness and never learns what beta is.
@@ -64,6 +64,8 @@ public:
     // One pass of optics.hpp over the whole catalogue.  `beta` is the observer's
     // velocity over c, in the coordinate frame.
     void update_sky(const godot::Vector3& beta, double sky_radius);
+    void update_sky_effects(const godot::Vector3& beta, double sky_radius,
+                            bool aberration, bool doppler, bool beaming);
 
     // The arrays for ArrayMesh::add_surface_from_arrays, plus the surface format
     // flags that make CUSTOM0 four floats instead of four bytes -- without which

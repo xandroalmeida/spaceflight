@@ -61,7 +61,10 @@ void DormandPrince54Propagator::set_config(IntegratorConfig config) {
     if (config.relative_tolerance <= 0.0) {
         throw std::invalid_argument("IntegratorConfig: relative_tolerance must be > 0");
     }
-    if (config.absolute_tolerance_position <= 0.0 || config.absolute_tolerance_velocity <= 0.0) {
+    if (config.absolute_tolerance_position <= 0.0 || config.absolute_tolerance_velocity <= 0.0 ||
+        config.absolute_tolerance_proper_time <= 0.0 || config.absolute_tolerance_mass <= 0.0 ||
+        config.absolute_tolerance_orientation <= 0.0 ||
+        config.absolute_tolerance_angular_velocity <= 0.0) {
         throw std::invalid_argument("IntegratorConfig: absolute tolerances must be > 0");
     }
     if (config.min_step.seconds() <= 0.0 || config.max_step.seconds() <= 0.0) {
@@ -70,12 +73,20 @@ void DormandPrince54Propagator::set_config(IntegratorConfig config) {
     if (config.min_step > config.max_step) {
         throw std::invalid_argument("IntegratorConfig: min_step > max_step");
     }
+    if (!std::isfinite(config.minimum_mass) || config.minimum_mass < 0.0) {
+        throw std::invalid_argument("IntegratorConfig: minimum_mass must be finite and >= 0");
+    }
+    if (!std::isfinite(config.quaternion_norm_tolerance) ||
+        config.quaternion_norm_tolerance <= 0.0) {
+        throw std::invalid_argument(
+            "IntegratorConfig: quaternion_norm_tolerance must be finite and > 0");
+    }
     config_ = config;
 }
 
 DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     const Vector& y, time::CoordinateTime t, gravity::ForceResult& out_force) const {
-    const PropagationState s = state_from_array(y, config_.kinematics);
+    const PropagationState s = state_from_array(y, config_.kinematics, metric_, t);
     out_force = forces_.evaluate(s, t);
 
     Vector dy{};
@@ -100,7 +111,7 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
         math::Vec3 geodesic{};
         math::Vec3 potential_gradient{};
         math::Vec3 thrust_velocity_derivative{};
-        if (config_.kinematics == Kinematics::GeneralRelativistic) {
+        if (config_.kinematics == Kinematics::WeakFieldStaticMetric) {
             const auto sample = metric_->sample(math::Vec3{y[0], y[1], y[2]}, t);
             potential_gradient = sample.potential_gradient;
             // u0/c plays the role gamma plays in flat space, and reduces to it
@@ -157,7 +168,7 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
 
         // Any non-thrust coordinate acceleration is a fiction in both relativistic
         // modes -- a flat-spacetime one under SpecialRelativistic, and a
-        // double-count of gravity under GeneralRelativistic. The propagate() loop
+        // double-count of gravity under WeakFieldStaticMetric. The propagate() loop
         // refuses it unless the caller opted in.
         velocity_derivative += out_force.acceleration;
     } else {
@@ -218,23 +229,27 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
 double DormandPrince54Propagator::error_norm(const Vector& y, const Vector& y_new,
                                              const Vector& err) const {
     // RMS of the componentwise error scaled by  atol + rtol*max(|y|,|y_new|),
-    // over position, velocity and mass.
+    // over position, velocity, proper time and mass.
     //
-    // Proper time (component 6) is excluded: its derivative is exact in this
-    // regime, so including it would dilute the norm for no reason.  Mass
-    // (component 7) IS included, because while an engine burns the acceleration
+    // Proper time is controlled because its derivative varies in relativistic
+    // modes. Mass (component 7) is included because while an engine burns the acceleration
     // is F/m and an error in m propagates straight into the trajectory.
-    constexpr std::size_t kControlled[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14};
+    constexpr std::size_t kControlled[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
     double sum = 0.0;
     std::size_t counted = 0;
     for (const std::size_t i : kControlled) {
         if (i >= 8 && inertia_ == nullptr) {
             continue;  // attitude is not being integrated
         }
+        if (i == 6 && config_.kinematics == Kinematics::Newtonian) {
+            continue;  // dτ/dt = 1 exactly; keep the established Newtonian controller unchanged
+        }
         ++counted;
         double atol = config_.absolute_tolerance_velocity;
         if (i < 3) {
             atol = config_.absolute_tolerance_position;
+        } else if (i == 6) {
+            atol = config_.absolute_tolerance_proper_time;
         } else if (i == 7) {
             atol = config_.absolute_tolerance_mass;
         } else if (i >= 8 && i < 12) {
@@ -270,11 +285,31 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         result.message = "initial state is not finite";
         return result;
     }
+    if (!from.is_finite() || !to.is_finite()) {
+        result.status = PropagationStatus::InvariantViolation;
+        result.message = "coordinate-time endpoints must be finite";
+        return result;
+    }
+    if (!(initial.mass > 0.0) || initial.mass < config_.minimum_mass) {
+        result.status = PropagationStatus::InvariantViolation;
+        result.message = "initial mass must be positive and at least the configured minimum mass (" +
+                         std::to_string(config_.minimum_mass) + " kg)";
+        return result;
+    }
+    const double initial_q_norm = initial.attitude.orientation.norm();
+    if (!(initial_q_norm > 0.0) ||
+        std::abs(initial_q_norm - 1.0) > config_.quaternion_norm_tolerance) {
+        result.status = PropagationStatus::InvariantViolation;
+        result.message = "initial quaternion norm is " + std::to_string(initial_q_norm) +
+                         ", outside 1 +/- " +
+                         std::to_string(config_.quaternion_norm_tolerance);
+        return result;
+    }
 
-    if (config_.kinematics == Kinematics::GeneralRelativistic && metric_ == nullptr) {
+    if (config_.kinematics == Kinematics::WeakFieldStaticMetric && metric_ == nullptr) {
         result.status = PropagationStatus::UnsupportedRegime;
         result.message =
-            "GeneralRelativistic kinematics needs a WeakFieldMetric: gravity is the shape of "
+            "WeakFieldStaticMetric kinematics needs a WeakFieldMetric: gravity is the shape of "
             "spacetime in this mode, and without the metric there is no gravity at all. Call "
             "set_metric() (docs/physics/relativistic-gravity.md)";
         return result;
@@ -286,7 +321,14 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     }
     const double direction = total > 0.0 ? 1.0 : -1.0;
 
-    Vector y = array_from_state(initial, config_.kinematics);
+    Vector y{};
+    try {
+        y = array_from_state(initial, config_.kinematics, metric_, from);
+    } catch (const std::domain_error& e) {
+        result.status = PropagationStatus::UnsupportedRegime;
+        result.message = e.what();
+        return result;
+    }
     time::CoordinateTime t = from;
 
     double h = direction * std::min({std::abs(config_.initial_step.seconds()),
@@ -301,7 +343,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     // it has nowhere to go. Refuse rather than let proper_velocity() return the
     // zero it documents (relativistic-propulsion.md section 7 -- scenarios at
     // these speeds should be written in rapidity).
-    if (carries_proper_velocity(config_.kinematics) &&
+    if (config_.kinematics == Kinematics::SpecialRelativistic &&
         initial.state.velocity.norm() >= units::c) {
         result.status = PropagationStatus::UnsupportedRegime;
         result.message =
@@ -404,11 +446,45 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         const bool accept = finite && error <= 1.0;
 
         if (accept) {
+            // Preserve the exact requested endpoint on a clipped step, but do
+            // not allow an accepted step to stall or reverse coordinate time.
+            // This is checked independently of the proper-time state below.
+            const time::CoordinateTime next_time =
+                clipped ? to : t + time::Duration{h_step};
+            if (!(direction * (next_time - t).seconds() > 0.0)) {
+                result.status = PropagationStatus::InvariantViolation;
+                result.message = "coordinate time failed to advance monotonically";
+                break;
+            }
+            if (!(y_new[7] > 0.0) || y_new[7] < config_.minimum_mass) {
+                result.status = PropagationStatus::InvariantViolation;
+                result.message = "mass crossed the configured minimum mass (" +
+                                 std::to_string(config_.minimum_mass) + " kg)";
+                break;
+            }
+            const double proper_time_increment = y_new[6] - y[6];
+            if (!(direction * proper_time_increment >= 0.0)) {
+                result.status = PropagationStatus::InvariantViolation;
+                result.message = "proper time reversed relative to coordinate time";
+                break;
+            }
+            if (inertia_ != nullptr) {
+                const math::Quaternion candidate{y_new[8], y_new[9], y_new[10], y_new[11]};
+                const double candidate_norm = candidate.norm();
+                const double drift = std::abs(candidate_norm - 1.0);
+                if (!(candidate_norm > 0.0) || drift > config_.quaternion_norm_tolerance) {
+                    result.status = PropagationStatus::InvariantViolation;
+                    result.message = "quaternion norm drift exceeded runtime tolerance: " +
+                                     std::to_string(drift);
+                    break;
+                }
+            }
             if (recorder_ != nullptr) {
                 DenseSegment segment{};
                 segment.begin = t;
                 segment.step_seconds = h_step;
                 segment.kinematics = config_.kinematics;
+                segment.metric = metric_;
                 for (std::size_t i = 0; i < kDim; ++i) {
                     const double difference = y_new[i] - y[i];
                     const double bspl = h_step * k1[i] - difference;
@@ -426,7 +502,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             // A clipped step was defined as "cover exactly what is left", so the
             // arrival time IS `to`.  Snapping avoids a residual of a fraction of
             // an ulp that would otherwise cost one extra, absurdly small step.
-            t = clipped ? to : t + time::Duration{h_step};
+            t = next_time;
             y = y_new;
 
             if (inertia_ != nullptr) {
@@ -449,7 +525,8 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             max_h = std::max(max_h, std::abs(h_step));
 
             if (observer_) {
-                observer_(StepInfo{t, state_from_array(y, config_.kinematics), h_step, error, true});
+                observer_(StepInfo{t, state_from_array(y, config_.kinematics, metric_, t),
+                                   h_step, error, true});
             }
 
             if (force_new.inside_body && config_.stop_inside_body) {
@@ -461,7 +538,9 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             ++result.stats.rejected_steps;
             if (observer_ && observe_rejected_) {
                 observer_(StepInfo{t + time::Duration{h_step},
-                                   state_from_array(y_new, config_.kinematics), h_step, error,
+                                   state_from_array(y_new, config_.kinematics, metric_,
+                                                    t + time::Duration{h_step}),
+                                   h_step, error,
                                    false});
             }
             if (!finite) {
@@ -511,7 +590,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         h = h_next;
     }
 
-    result.state = state_from_array(y, config_.kinematics);
+    result.state = state_from_array(y, config_.kinematics, metric_, t);
     result.time = t;
 
     result.stats.min_step_seconds = std::isfinite(min_h) ? min_h : 0.0;

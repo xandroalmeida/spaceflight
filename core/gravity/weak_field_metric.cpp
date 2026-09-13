@@ -17,6 +17,21 @@ Vec3 MetricSample::coordinate_velocity(const Vec3& proper_velocity) const {
     return proper_velocity * (units::c / time_component(proper_velocity));
 }
 
+bool MetricSample::is_timelike(const Vec3& coordinate_velocity) const {
+    return coordinate_velocity.is_finite() &&
+           b * coordinate_velocity.norm_squared() < a * units::c_squared;
+}
+
+Vec3 MetricSample::proper_velocity(const Vec3& coordinate_velocity) const {
+    const double denominator_squared =
+        a - b * coordinate_velocity.norm_squared() / units::c_squared;
+    if (!(denominator_squared > 0.0) || !std::isfinite(denominator_squared)) {
+        throw std::domain_error(
+            "MetricSample::proper_velocity: coordinate velocity is outside the local light cone");
+    }
+    return coordinate_velocity / std::sqrt(denominator_squared);
+}
+
 double MetricSample::proper_time_rate(const Vec3& proper_velocity) const {
     return units::c / time_component(proper_velocity);
 }

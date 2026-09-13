@@ -13,6 +13,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <cmath>
 #include <exception>
 
 namespace spaceflight_godot {
@@ -83,8 +84,14 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_spacecraft_velocity_direction);
     godot::ClassDB::bind_method(D_METHOD("get_beta_vector"),
                                 &SpaceflightSimulation::get_beta_vector);
+    godot::ClassDB::bind_method(D_METHOD("set_visual_test_beta", "beta"),
+                                &SpaceflightSimulation::set_visual_test_beta);
+    godot::ClassDB::bind_method(D_METHOD("get_visual_test_beta"),
+                                &SpaceflightSimulation::get_visual_test_beta);
     godot::ClassDB::bind_method(D_METHOD("get_body_apparent_position", "index"),
                                 &SpaceflightSimulation::get_body_apparent_position);
+    godot::ClassDB::bind_method(D_METHOD("get_body_observed_position", "index", "retarded", "aberration"),
+                                &SpaceflightSimulation::get_body_observed_position);
     godot::ClassDB::bind_method(D_METHOD("get_body_light_time", "index"),
                                 &SpaceflightSimulation::get_body_light_time);
     godot::ClassDB::bind_method(D_METHOD("get_body_doppler", "index"),
@@ -198,6 +205,8 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         config.relative_tolerance = 1.0e-11;
         config.absolute_tolerance_position = 1.0e-3;
         config.absolute_tolerance_velocity = 1.0e-6;
+        config.absolute_tolerance_proper_time = 1.0e-9;
+        config.minimum_mass = craft_->dry_mass();
         config.max_step = sf::time::Duration::seconds(3600.0);
         propagator_ = std::make_unique<sf::propagation::DormandPrince54Propagator>(*forces_, config);
         propagator_->set_inertia(inertia_.get());
@@ -370,33 +379,64 @@ Vector3 SpaceflightSimulation::get_spacecraft_velocity_direction() const {
 }
 
 Vector3 SpaceflightSimulation::get_beta_vector() const {
-    const auto beta = snapshot_.spacecraft.velocity / sf::units::c;
+    const auto beta = optics_observer_velocity() / sf::units::c;
     return Vector3{static_cast<float>(beta.x), static_cast<float>(beta.y),
                    static_cast<float>(beta.z)};
 }
 
+sf::math::Vec3 SpaceflightSimulation::optics_observer_velocity() const {
+    if (visual_test_beta_ < 0.0) {
+        return snapshot_.spacecraft.velocity;
+    }
+    auto direction = snapshot_.spacecraft.velocity.normalized();
+    if (direction.norm_squared() == 0.0) {
+        direction = sf::math::Vec3::unit_x();
+    }
+    return direction * (visual_test_beta_ * sf::units::c);
+}
+
+void SpaceflightSimulation::set_visual_test_beta(double beta) {
+    if (beta < 0.0) {
+        visual_test_beta_ = -1.0;
+    } else if (beta < 1.0 && std::isfinite(beta)) {
+        visual_test_beta_ = beta;
+    }
+}
+
+double SpaceflightSimulation::get_visual_test_beta() const { return visual_test_beta_; }
+
 godot::Vector3 SpaceflightSimulation::get_body_apparent_position(int index) const {
+    return get_body_observed_position(index, apparent_positions_, apparent_positions_);
+}
+
+godot::Vector3 SpaceflightSimulation::get_body_observed_position(int index, bool retarded,
+                                                                 bool aberration) const {
     if (index < 0 || index >= get_body_count() || builder_ == nullptr) {
         return Vector3{};
     }
-    if (!apparent_positions_) {
+    if (!retarded && !aberration) {
         return get_body_position(index);
     }
 
     const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
     const auto& observer = snapshot_.spacecraft;
 
-    const auto apparent = sf::relativity::apparent_position(
-        *provider_, body.id, observer.position, snapshot_.time,
-        sf::coordinates::ReferenceFrame::ssb_j2000());
+    sf::math::Vec3 relative = body.position - observer.position;
+    if (retarded) {
+        relative = sf::relativity::apparent_position(
+                       *provider_, body.id, observer.position, snapshot_.time,
+                       sf::coordinates::ReferenceFrame::ssb_j2000())
+                       .relative_position;
+    }
 
     // Aberration turns the DIRECTION; the distance is the retarded one.  Rebuilt
     // as direction x distance rather than transformed as a position, because
     // aberration is a map of the celestial sphere and nothing else.
-    const sf::math::Vec3 beta = observer.velocity / sf::units::c;
-    const double distance = apparent.relative_position.norm();
-    const sf::math::Vec3 direction =
-        sf::relativity::aberrate_source_direction(apparent.relative_position, beta);
+    const sf::math::Vec3 beta = optics_observer_velocity() / sf::units::c;
+    const double distance = relative.norm();
+    const sf::math::Vec3 direction = aberration
+                                         ? sf::relativity::aberrate_source_direction(relative, beta)
+                                         : relative.normalized();
 
     // Back to an absolute position so that the SAME RenderTransform -- the same
     // floating origin, the same scale -- handles it (rendering.md section 2).
@@ -424,7 +464,7 @@ double SpaceflightSimulation::get_body_doppler(int index) const {
     // The body moves too, so the Doppler factor is the one of the RELATIVE
     // motion: the observer's velocity minus the source's, over c.  Using the
     // observer's velocity alone would make a co-moving planet blue.
-    const sf::math::Vec3 beta = (observer.velocity - body.velocity) / sf::units::c;
+    const sf::math::Vec3 beta = (optics_observer_velocity() - body.velocity) / sf::units::c;
     const sf::math::Vec3 to_source = body.position - observer.position;
     if (to_source.norm_squared() <= 0.0) {
         return 1.0;
@@ -437,7 +477,7 @@ godot::Vector3 SpaceflightSimulation::get_body_relative_velocity_scene(int index
         return Vector3{};
     }
     const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
-    const auto relative = body.velocity - snapshot_.spacecraft.velocity;
+    const auto relative = body.velocity - optics_observer_velocity();
     // Scene units per second: vector_to_render scales without translating, which
     // is exactly right for a velocity and wrong for a position.
     return to_godot(transform_.vector_to_render(relative));

@@ -50,14 +50,17 @@ Um observador em `x_obs(t)` vê o corpo onde ele estava no **instante retardado*
 |x_obs(t) − x_corpo(t_r)| = c (t − t_r)
 ```
 
-Resolve-se por iteração de ponto fixo:
+Resolve-se como raiz de `F(L)=L-|x_corpo(t-L)-x_obs(t)|/c`, por Newton:
 
 ```
-t_r ← t − |x_obs(t) − x_corpo(t_r)| / c
+L ← L − F(L) / [1 + r_hat·v_corpo(t-L)/c]
+t_r = t-L
 ```
 
-A taxa de convergência é `v_corpo/c ≈ 10⁻⁴` por iteração, então três ou quatro
-passos chegam à precisão da máquina. Escalas envolvidas:
+Para planetas, a iteração anterior também convergia porque
+`v_corpo/c≈10⁻⁴`; ela falhava para a referência artificial a `0.99c`. Newton
+converge nesse caso e mantém a atualização de ponto fixo apenas como fallback
+diagnóstico para uma efeméride inválida. Escalas envolvidas:
 
 | Corpo | Tempo de luz |
 |---|---|
@@ -73,7 +76,7 @@ diâmetro. **O Sol que se vê nunca é o Sol que está lá.**
 O SPICE resolve exatamente esta equação quando se pede correção `"LT"` em
 `spkezr_c`. Como o Milestone 0 deliberadamente usa `"NONE"` (§`ADR-0003`), temos
 duas implementações da mesma coisa, e o teste compara uma com a outra para um
-observador que seja um corpo — a nossa iteração contra a do JPL. Para uma nave,
+observador que seja um corpo — a nossa raiz contra a do JPL. Para uma nave,
 que não é um corpo do SPICE, só a nossa serve, e é por isso que precisa estar
 certa.
 

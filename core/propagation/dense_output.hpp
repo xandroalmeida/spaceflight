@@ -19,6 +19,10 @@
 #include <utility>
 #include <vector>
 
+namespace sf::gravity {
+class WeakFieldMetric;
+}
+
 namespace sf::propagation {
 
 // [x y z vx vy vz tau m qw qx qy qz wx wy wz] -- what the propagator integrates.
@@ -41,8 +45,14 @@ using StateArray = std::array<double, kStateDimension>;
 // "velocity"; the conversion happens here and only here.
 PropagationState state_from_array(const StateArray& y,
                                   Kinematics kinematics = Kinematics::Newtonian);
+PropagationState state_from_array(const StateArray& y, Kinematics kinematics,
+                                  const gravity::WeakFieldMetric* metric,
+                                  time::CoordinateTime epoch);
 StateArray array_from_state(const PropagationState& state,
                             Kinematics kinematics = Kinematics::Newtonian);
+StateArray array_from_state(const PropagationState& state, Kinematics kinematics,
+                            const gravity::WeakFieldMetric* metric,
+                            time::CoordinateTime epoch);
 
 // One accepted step, stored as the five coefficient vectors of the Dormand-Prince
 // 4th order interpolant.  Costs no extra force evaluations: it is built from the
@@ -51,6 +61,10 @@ struct DenseSegment {
     time::CoordinateTime begin{};
     double step_seconds{0.0};  // signed: negative when propagating backwards
     Kinematics kinematics{Kinematics::Newtonian};
+    // Non-owning, like the propagator's metric. Required only by the static
+    // weak-field mode so interpolated coordinate velocities use the local
+    // metric rather than the flat-space approximation.
+    const gravity::WeakFieldMetric* metric{nullptr};
     std::array<StateArray, 5> coefficients{};
 
     [[nodiscard]] time::CoordinateTime end() const {

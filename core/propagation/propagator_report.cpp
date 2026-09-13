@@ -12,6 +12,7 @@ std::string to_string(PropagationStatus status) {
         case PropagationStatus::MinimumStepReached: return "minimum step reached";
         case PropagationStatus::MaxStepsExceeded:   return "maximum step count exceeded";
         case PropagationStatus::NonFiniteState:     return "non-finite state";
+        case PropagationStatus::InvariantViolation: return "runtime invariant violation";
         case PropagationStatus::InsideBody:         return "trajectory entered a body";
         case PropagationStatus::UnsupportedRegime:
             return "relativistic kinematics with a gravity field (see "

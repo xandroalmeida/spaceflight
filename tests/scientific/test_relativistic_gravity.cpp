@@ -31,7 +31,7 @@ constexpr double kGmSun = 1.32712440041e20;
 constexpr double kGmEarth = 3.9860043550702266e14;
 const auto kSsb = coordinates::ReferenceFrame::ssb_j2000();
 
-// Nothing but thrust -- and there is no thrust either. In GeneralRelativistic
+// Nothing but thrust -- and there is no thrust either. In WeakFieldStaticMetric
 // mode gravity lives in the metric, so the force model has nothing to do.
 class NoForce final : public gravity::ForceModel {
 public:
@@ -55,7 +55,7 @@ struct CentralBody {
 
 propagation::IntegratorConfig geodesic_config() {
     propagation::IntegratorConfig cfg{};
-    cfg.kinematics = Kinematics::GeneralRelativistic;
+    cfg.kinematics = Kinematics::WeakFieldStaticMetric;
     cfg.relative_tolerance = 1.0e-13;
     cfg.absolute_tolerance_position = 1.0e-4;
     cfg.absolute_tolerance_velocity = 1.0e-7;
@@ -227,26 +227,29 @@ TEST(the_geodesic_converges_on_newtonian_gravity_in_low_earth_orbit) {
     const double separation =
         (relativistic.state.state.position - classical.state.state.position).norm();
 
-    // The two models do not drift apart by some vague "order v^2/c^2". They drift
-    // apart by a number with a name: after one revolution the relativistic orbit
-    // has precessed by 6 pi GM / (c^2 a (1-e^2)), and on a circle that is an
-    // along-track displacement of r times that angle. Mercury's effect, measured
-    // in low Earth orbit over ninety minutes.
-    const double precession_per_orbit = 6.0 * units::pi * kGmEarth / (c2 * radius);
-    const double expected_separation = radius * precession_per_orbit;
+    // A circular orbit has no defined periapsis, so the familiar 6*pi*mu/(c^2 r)
+    // precession formula is NOT a valid oracle here. Both trajectories start at
+    // the Newtonian circular speed; that speed is not the circular-geodesic speed
+    // in isotropic coordinates. Expanding the circular-geodesic condition for
+    // this metric gives Omega = sqrt(mu/r^3) (1 - 3 mu/(2 r c^2)), and propagating
+    // the resulting radial/phase mismatch for one Newtonian period gives a
+    // leading separation 12*pi*mu/c^2. The old test expected half of this and
+    // passed only because the flat-space v->u conversion supplied a compensating
+    // O(U/c^2) input error.
+    const double expected_separation = 12.0 * units::pi * kGmEarth / c2;
 
     std::ostringstream os;
-    os << "after one orbit the two models differ by " << separation << " m; the precession is "
-       << precession_per_orbit << " rad/orbit, i.e. " << expected_separation << " m of arc";
+    os << "after one Newtonian period the two models differ by " << separation
+       << " m; the 1PN circular-frequency expansion predicts " << expected_separation << " m";
     INFO(os.str());
 
     CHECK(separation > 0.0);
-    CHECK_NEAR_REL(separation, expected_separation, 1.0e-4,
-                   "6 pi GM r / (c^2 a (1-e^2)) = 8.36 cm per revolution. The 1e-4 bound is the "
-                   "integrator plus the small-angle identification of chord with arc; the same "
-                   "closed form is checked against Mercury below, where it amounts to 43 arcsec "
-                   "per century instead of 8 cm per orbit. What this rejects is the metric doing "
-                   "nothing (separation 0) or a units error (separation off by 1e3)");
+    CHECK_NEAR_REL(separation, expected_separation, 1.0e-3,
+                   "12 pi GM/c^2 = 0.1671966 m for the phase/radial mismatch produced by using "
+                   "the Newtonian circular speed as the initial condition of the metric. The "
+                   "0.1% bound covers the finite-time radial oscillation omitted by the leading "
+                   "frequency estimate and integration error. "
+                   "Periapsis precession is tested only on the eccentric Mercury orbit below");
 
     // Proper time runs slow, by the amount the metric says.
     const double dilation = 1.0 - relativistic.state.proper_time.seconds() / period;

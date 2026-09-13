@@ -30,6 +30,8 @@ godot/project/.godot/
 # Outputs
 *.csv
 !tests/**/*.csv
+# Scientific audit evidence is intentionally versioned beside its report.
+!docs/validation/*.csv
 
 # Editors / OS
 .DS_Store

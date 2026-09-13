@@ -4,11 +4,25 @@ Comparações em lote que não cabem na suíte de testes. O que **é** feito em
 `tests/` é o que precisa passar em toda build. O que vive aqui é o que se roda
 deliberadamente, demora, e produz um relatório.
 
-* varredura de estados contra o JPL Horizons ao longo de anos, saída CSV
-  (pendente);
+* varredura de estados contra o JPL Horizons/DE441 ao longo de anos, saída CSV
+  — `horizons_cross_check.py`;
 * comparação contra REBOUND/REBOUNDx no mesmo problema (§29) — **feito**,
   `reboundx_cross_check.py`;
 * estudos de convergência (erro × tolerância × custo) (pendente).
+
+## `horizons_cross_check.py`
+
+Consulta sequencialmente Mercury–Neptune, Terra e Lua em três épocas (1900,
+presente e 2099), sempre como estado geométrico SSB/ICRF. Compara Horizons/DE441
+contra o `de440s` carregado pelo simulador e grava o resíduo por caso:
+
+```bash
+./tools/validation/horizons_cross_check.py
+```
+
+O script usa a API pública do Horizons e portanto requer rede. A diferença
+DE440–DE441 é sinal físico entre ajustes independentes, não tolerância do
+integrador.
 
 ---
 

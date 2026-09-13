@@ -85,11 +85,17 @@ public:
     // (docs/architecture/relativistic-shaders.md section 6).
     godot::Vector3 get_beta_vector() const;
 
+    // Development-only visual injection. It changes no propagated state; only
+    // the observer velocity seen by rendering. A negative beta disables it.
+    void set_visual_test_beta(double beta);
+    double get_visual_test_beta() const;
+
     // Where the body APPEARS: retarded by the light time against the real
     // ephemeris, then aberrated into the ship's frame.  Distinct from
     // get_body_position(), which is geometric, because they are different
     // questions (docs/physics/relativistic-rendering.md section 2).
     godot::Vector3 get_body_apparent_position(int index) const;
+    godot::Vector3 get_body_observed_position(int index, bool retarded, bool aberration) const;
     double get_body_light_time(int index) const;
 
     // D = gamma (1 - beta.n) for the body centre.  The shader turns this into
@@ -171,6 +177,7 @@ protected:
 
 private:
     void rebuild_snapshot();
+    [[nodiscard]] sf::math::Vec3 optics_observer_velocity() const;
 
     std::shared_ptr<const sf::ephemeris::SpiceKernelSet> kernels_;
     std::unique_ptr<sf::ephemeris::SpiceEphemerisProvider> provider_;
@@ -197,6 +204,7 @@ private:
 
     sf::propagation::PropagationState state_{};
     bool apparent_positions_{true};
+    double visual_test_beta_{-1.0};
     sf::simulation::SimulationSnapshot snapshot_{};
     sf::render::RenderTransform transform_{1.0e-6};
 

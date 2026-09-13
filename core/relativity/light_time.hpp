@@ -3,8 +3,9 @@
 // Where a body APPEARS, which is where it was when the light left.
 //
 // Solves  |x_obs(t) - x_body(t_r)| = c (t - t_r)  for the retarded epoch t_r.
-// Fixed-point iteration converges at the rate v_body/c ~ 1e-4 per step, so three
-// or four passes reach machine precision.
+// Newton iteration uses the target velocity from the ephemeris. For uniform
+// motion it reaches the closed form in one update; unlike fixed point, it does
+// not stall when a synthetic validation target approaches c.
 //
 // Deliberately a SEPARATE call from EphemerisProvider::state(): geometric and
 // apparent are different questions, and the dynamics wants the first

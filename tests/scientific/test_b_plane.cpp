@@ -206,7 +206,7 @@ TEST(the_focusing_is_what_makes_aiming_at_a_point_wrong) {
 TEST(the_aim_point_has_the_magnitude_asked_for_and_the_angle_asked_for) {
     const double periapsis = kMoonRadius + 100.0e3;
     for (const double angle_deg : {0.0, 45.0, 90.0, 180.0, -120.0}) {
-        const double angle = units::deg_to_rad(angle_deg);
+        const auto angle = units::Angle::degrees(angle_deg);
         const auto aim = navigation::aim_for_periapsis(periapsis, kMoonGm, 843.5, angle);
 
         const double magnitude = std::hypot(aim.b_dot_t, aim.b_dot_r);
@@ -214,7 +214,7 @@ TEST(the_aim_point_has_the_magnitude_asked_for_and_the_angle_asked_for) {
                                       periapsis, kMoonGm, 843.5),
                        1.0e-14,
                        "cos^2 + sin^2 = 1; ulp of a hypot");
-        CHECK_NEAR_ABS(std::atan2(aim.b_dot_r, aim.b_dot_t), angle, 1.0e-14,
+        CHECK_NEAR_ABS(std::atan2(aim.b_dot_r, aim.b_dot_t), angle.radians(), 1.0e-14,
                        "atan2 inverting cos and sin of the same angle; ulp");
     }
 }
