@@ -1,0 +1,26 @@
+{
+  // Fusion Torch Mk II -- fictional engine, real arithmetic.
+  //
+  // A thousand times the exhaust velocity of the chemical-class Orbital Tug, and
+  // a thousandth of the mass flow. The thrust is IDENTICAL (F = eta*q*w), so the
+  // ship flies exactly the same and burns a thousandth of the propellant:
+  //
+  //              chemical class          this
+  //   w              8 993.8 m/s     8 993 800 m/s  (0.03 c)
+  //   q_max             15 kg/s          0.015 kg/s
+  //   thrust        134 907 N         134 907 N     (unchanged, on purpose)
+  //   Isp               917 s           917 100 s
+  //   delta-v budget  4.59 km/s        4 594 km/s   (0.0153 c)
+  //
+  // What the model charges for it, without being asked: the converted fraction of
+  // the propellant's rest mass goes from 4.5e-10 (a chemical mass defect) to
+  // 4.5e-4, and the jet power from 0.6 GW to 607 GW. That is the honest price of
+  // a torch, and eta = 1 means none of it is wasted as heat -- see
+  // docs/physics/propulsion-model.md section 4.4 for what eta < 1 would cost.
+  "engine": {
+    "name": "Fusion Torch Mk II",
+    "max_mass_flow_kg_s": 0.015,
+    "exhaust_velocity_fraction_c": 0.03,
+    "efficiency": 1.0
+  }
+}

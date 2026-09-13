@@ -191,6 +191,30 @@ em `tests/scenarios/` usam `η ≈ 0,98` por essa razão, e não por gosto.
 
 Isto é exatamente o tipo de coisa que `thrust = throttle * maxThrust` esconde.
 
+### 4.5 Os dois motores dos cenários, lado a lado
+
+`config/engines/` traz os dois, e a comparação é o argumento inteiro:
+
+| | classe química | tocha (Mk II) |
+|---|---|---|
+| `w` | 8 993,8 m/s | 8 993 800 m/s (`0,03 c`) |
+| `q_max` | 15 kg/s | 0,015 kg/s |
+| **empuxo** | **134 907 N** | **134 907 N** |
+| `Isp` | 917 s | 917 100 s |
+| massa convertida | 4,5·10⁻¹⁰ | 4,5·10⁻⁴ |
+| potência no jato | 0,61 GW | 607 GW |
+| budget (600 kg secos + 400 de propelente) | 4,59 km/s | 4 594 km/s = 0,0153 c |
+
+O empuxo é **igual de propósito**: a velocidade de exaustão subiu mil vezes e o
+fluxo de massa desceu mil vezes. A nave voa exatamente igual — mesma aceleração,
+mesma duração de queima, mesma trajetória — e gasta a milésima parte do
+propelente. Uma queima de 1 704 m/s que custava 173 kg passa a custar 0,19 kg.
+
+O preço aparece onde tem de aparecer: a fração da massa de repouso convertida sobe
+de um defeito de massa químico para 4,5·10⁻⁴, e a potência do jato de 0,61 GW para
+607 GW. Com `η = 1` nada disso vira calor residual; com `η = 0,5` seriam 607 GW no
+jato e ~10¹⁵ W a dissipar (§4.4). O modelo cobra a conta sozinho.
+
 ## 5. Throttle e consumo
 
 ```

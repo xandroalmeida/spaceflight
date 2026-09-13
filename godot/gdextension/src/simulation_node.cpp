@@ -121,18 +121,23 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         // couples on a 2 m arm. Numbers chosen to be plausible, not fitted.
         inertia_ = std::make_unique<sf::attitude::InertiaTensor>(
             sf::attitude::InertiaTensor::solid_box(1000.0, sf::math::Vec3{8.0, 3.0, 3.0}));
-        const sf::propulsion::EngineSpec rcs_thruster{"RCS", 0.02, 3.0e-5, 1.0};
+        // RCS on the same torch technology as the main engine: a thousand times
+        // the exhaust velocity and a thousandth of the flow, so each thruster
+        // still pushes with 180 N and a slew costs a thousandth of the propellant.
+        const sf::propulsion::EngineSpec rcs_thruster{"RCS", 2.0e-5, 3.0e-2, 1.0};
         rcs_ = std::make_unique<sf::attitude::RcsSystem>(
             sf::attitude::RcsSystem::couples(2.0, rcs_thruster));
         pointing_ = std::make_unique<sf::attitude::PointingController>(*provider_, *inertia_, frame);
         rcs_force_ = std::make_unique<sf::attitude::RcsForce>(*rcs_, *pointing_);
         forces_->add_reference(*rcs_force_);
 
-        // Main engine: chemical class, v_eff = 8993.8 m/s, 135 kN at full
-        // throttle. 600 kg dry + 400 kg of propellant gives a budget of 4.6 km/s,
-        // which is enough to do something interesting from low orbit and not
-        // enough to be boring about it.
-        const sf::propulsion::EngineSpec main{"Orbital Tug", 15.0, 3.0e-5, 1.0};
+        // Main engine: fusion torch, v_eff = 8 993 800 m/s (0.03 c), still 135 kN
+        // at full throttle because the mass flow came down by the same factor the
+        // exhaust velocity went up. 600 kg dry + 400 kg of propellant is a budget
+        // of 4 594 km/s -- 0.0153 c -- which is enough to leave the Earth-Moon
+        // system and start caring about the relativistic kinematics of Milestone 4.
+        // See config/engines/torch-mk2.json for what the model charges for it.
+        const sf::propulsion::EngineSpec main{"Fusion Torch Mk II", 0.015, 3.0e-2, 1.0};
         craft_ = std::make_unique<sf::spacecraft::Spacecraft>("Tug", 600.0, 400.0, main);
         main_engine_ = std::make_unique<sf::propulsion::MainEngineForce>(*craft_);
         forces_->add_reference(*main_engine_);

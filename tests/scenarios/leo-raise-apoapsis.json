@@ -6,6 +6,10 @@
   // 1703.94 m/s is the vis-viva delta-v to raise the apoapsis to 20 000 km; the
   // achieved apoapsis comes out slightly lower, and the difference is the gravity
   // loss printed in the burn report (docs/architecture/navigation.md section 2).
+  //
+  // With the torch engine that delta-v costs 0.19 kg instead of 173: the thrust
+  // is the same, so the burn lasts about as long and the trajectory is the same
+  // shape -- only the tank barely notices (config/engines/torch-mk2.json).
   "name": "LEO burn: raise apoapsis to 20 000 km",
   "epoch": "2026-01-01 00:00:00 TDB",
   "duration_s": 20000.0,
@@ -21,9 +25,9 @@
     "dry_mass_kg": 2000.0,
     "propellant_mass_kg": 3000.0,
     "engine": {
-      "name": "Orbital Tug",
-      "max_mass_flow_kg_s": 15.0,
-      "exhaust_velocity_fraction_c": 0.00003,
+      "name": "Fusion Torch Mk II",
+      "max_mass_flow_kg_s": 0.015,
+      "exhaust_velocity_fraction_c": 0.03,
       "efficiency": 1.0
     }
   },

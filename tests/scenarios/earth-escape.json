@@ -20,9 +20,9 @@
     "dry_mass_kg": 2000.0,
     "propellant_mass_kg": 3000.0,
     "engine": {
-      "name": "Orbital Tug",
-      "max_mass_flow_kg_s": 15.0,
-      "exhaust_velocity_fraction_c": 0.00003,
+      "name": "Fusion Torch Mk II",
+      "max_mass_flow_kg_s": 0.015,
+      "exhaust_velocity_fraction_c": 0.03,
       "efficiency": 1.0
     }
   },
