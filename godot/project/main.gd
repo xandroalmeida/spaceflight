@@ -530,12 +530,22 @@ func _place_camera() -> void:
 	right = right.normalized()
 	up = right.cross(forward).normalized()
 
-	var offset := (forward * (cos(orbit_elevation) * cos(orbit_azimuth))
-		+ right * (cos(orbit_elevation) * sin(orbit_azimuth))
-		+ up * sin(orbit_elevation))
+	var ce := cos(orbit_elevation)
+	var se := sin(orbit_elevation)
+	var ca := cos(orbit_azimuth)
+	var sa := sin(orbit_azimuth)
+
+	var offset := forward * (ce * ca) + right * (ce * sa) + up * se
+	# The meridian tangent: the derivative of `offset` with respect to elevation.
+	# It is a unit vector and it is EXACTLY perpendicular to `offset` for every
+	# (azimuth, elevation) -- offset . meridian = -ce.se + se.ce = 0, algebraically
+	# and not approximately. That is what makes it a safe up vector everywhere,
+	# including at the poles of the orbit, and it is why the branch that used to
+	# pick a replacement up vector is gone rather than retuned.
+	var meridian := forward * (-se * ca) + right * (-se * sa) + up * ce
 
 	camera.position = target + offset * (natural * orbit_zoom)
-	_aim_camera(target - camera.position, up)
+	_aim_camera(-offset, meridian)
 
 
 func _orbit_frame(target: Vector3) -> Array:
@@ -548,14 +558,37 @@ func _orbit_frame(target: Vector3) -> Array:
 		var hull := simulation.get_spacecraft_basis()
 		return [hull.x.normalized(), hull.y.normalized()]
 
-	# The velocity frame: `forward` is the axis the sky is aberrated about and `up`
-	# is outward from the reference body, so elevation is "climb away from the
-	# planet" and the horizon stays where the eye expects it.
+	# The velocity frame: `forward` is the axis the sky is aberrated about.
 	var forward := Vector3(simulation.get_beta_vector()).normalized()
 	if forward.length() < 0.5:
 		forward = Vector3.FORWARD
-	var nadir := _reference_body_position() - target
-	var up := (-nadir).normalized() if nadir.length() > 0.0 else Vector3.UP
+
+	# `up` is the J2000 pole, and that is a choice with two justifications.
+	#
+	# The principled one: these two modes exist to look at the SKY, and the sky
+	# does not turn. An inertially fixed roll reference keeps the star field still
+	# while the ship goes round its orbit, which is what a sky view should do.
+	#
+	# The measured one: the obvious alternative -- outward from the reference body,
+	# which is what this used -- is nearly PARALLEL to the barycentric velocity in
+	# low Earth orbit. Measured |beta.outward| = 0.99 at this epoch, so the cross
+	# product that sets the azimuth reference had length 0.13 and swung wildly for
+	# tiny changes in the radial; as it passes through 1.0 the reference flips
+	# outright. Against the pole, |beta.zhat| = 0.128, so the cross product is
+	# 0.992 and steady.
+	#
+	# The bound is geometric, not a coincidence: the Earth's heliocentric velocity
+	# lies in the ecliptic, 23.4 degrees from the equator, so its component along
+	# the pole cannot exceed sin(23.4) = 0.397; the ship's own 7.7 km/s out of
+	# 30.7 can add at most another 0.25. Around 0.64 worst case, and a cross
+	# product no shorter than 0.77.
+	var up := Vector3(0.0, 0.0, 1.0)
+	if absf(forward.dot(up)) > 0.99:
+		# A trajectory climbing out along the celestial pole. Nothing in the Solar
+		# System does this, and switching here IS a discontinuity -- it is left
+		# visible rather than smoothed over, because pretending it is continuous
+		# would be the same mistake the 0.999 guard made one function below.
+		up = Vector3(0.0, 1.0, 0.0)
 	return [forward, up]
 
 
@@ -564,22 +597,20 @@ func _aim_camera(to_target: Vector3, up: Vector3) -> void:
 	## in the camera's own axes. Because the base orientation is rebuilt from
 	## scratch every frame the offsets never accumulate drift, and "recentre" is
 	## just setting two numbers back to zero.
+	##
+	## `up` must be perpendicular to `to_target`, and the caller guarantees it by
+	## construction rather than by checking. The previous version guarded instead:
+	## if the two came within 0.999 of parallel it swapped in a different up
+	## vector. That guard WAS the bug -- crossing the threshold rolled the camera
+	## by up to 88 degrees in one frame while the view direction moved 0.2, which
+	## is the "jump" that this camera was reported to have. Measured at elevation
+	## +-87.4 degrees, exactly where acos(0.999) puts it.
 	var forward := to_target
 	if forward.length() < 1.0e-9:
 		return
 	forward = forward.normalized()
 
-	# look_at fails outright when the forward direction and the up hint are
-	# parallel -- which happens the moment the camera climbs to the pole of its
-	# own orbit. Any perpendicular will do as a replacement.
-	var hint := up.normalized() if up.length() > 0.0 else Vector3.UP
-	if absf(forward.dot(hint)) > 0.999:
-		hint = forward.cross(Vector3.RIGHT)
-		if hint.length() < 1.0e-6:
-			hint = forward.cross(Vector3.UP)
-		hint = hint.normalized()
-
-	camera.look_at(camera.position + forward, hint)
+	camera.look_at(camera.position + forward, up.normalized())
 	camera.rotate_object_local(Vector3.UP, look_yaw)
 	camera.rotate_object_local(Vector3.RIGHT, look_pitch)
 

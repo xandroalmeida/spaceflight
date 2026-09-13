@@ -238,6 +238,39 @@ vale `1 + 5·10⁻⁹` e arredonda para 1 no mostrador — o Doppler transverso 
 falharia se o vetor "para cima" não fosse trocado; é por isso que ele está na
 lista.
 
+### Continuidade: dois saltos que existiam e onde estavam
+
+A câmera dava saltos, e os dois culpados eram `if`s que trocavam um eixo de
+referência de repente. Achados medindo a rotação dos próprios eixos da câmera
+entre quadros consecutivos, varrendo elevação e azimute:
+
+```
+JUMP  el=  87.90  d_up=  88.53  d_forward=   0.24
+JUMP  el= -87.90  d_up=  73.29  d_forward=   0.36
+```
+
+O `up` girava até **88 graus num quadro** enquanto a direção de visão mudava
+0,2 — um salto puro de *roll*, em `el = ±87,4°`, que é exatamente onde
+`acos(0,999)` cai: o limiar do guard que trocava o vetor "para cima" quando ele
+chegava perto de paralelo à visão. **O guard era o bug.**
+
+A correção não é ajustar o limiar, é não precisar dele. O vetor "para cima" passa
+a ser a **tangente do meridiano**, `∂(posição)/∂(elevação)`, que é unitária e
+perpendicular à direção de visão **exatamente**, para todo par (azimute,
+elevação): `offset·meridiano = −cos·sen + sen·cos = 0`, algebricamente. Sem ramo,
+sem limiar, sem polo.
+
+O segundo era o referencial da velocidade, cujo "para cima" era o radial para
+fora — e em órbita baixa `|β̂ · radial| = 0,99`, medido. O produto vetorial que
+define o azimute tinha comprimento 0,13 e balançava; ao passar por 1,0 o
+referencial inverte. Agora o "para cima" é o **polo J2000**, com
+`|β̂ · ẑ| = 0,128`, e isso tem justificativa própria: estes modos existem para
+olhar o **céu**, e o céu não gira — uma referência inercial mantém o campo de
+estrelas parado enquanto a nave dá a volta.
+
+Verificado depois: **0 saltos** nos três modos, varrendo elevação pelos dois polos
+e azimute inteiro.
+
 ### Olhar em volta é uma medição
 
 O `V` alterna entre as duas vistas em que a ótica mais difere, e o HUD diz o que
