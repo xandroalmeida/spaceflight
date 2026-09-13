@@ -112,6 +112,16 @@ const HUD_FONT_MIN := 10.0
 const HUD_FONT_MAX := 22.0
 const HUD_MODES := ["full", "compact", "off"]
 
+## A lunar mission, as the scene offers it. The altitude is what the B-plane
+## targeting aims the flyby at; the flight time is a starting guess that the
+## planner varies around (docs/physics/b-plane.md).
+const MISSION_TARGET := "Moon"
+const MISSION_FLYBY_ALTITUDE_KM := 100.0
+const MISSION_TIME_OF_FLIGHT_DAYS := 4.5
+## How far ahead to look for a departure. Most points in a parking orbit are a bad
+## place to leave from, and one full revolution is enough to find a good one.
+const MISSION_SEARCH_HOURS := 2.0
+
 const LOOK_MODES := ["ship", "prograde", "retrograde"]
 const LOOK_MODE_AZIMUTH := [PI, PI, 0.0]
 const LOOK_MODE_ELEVATION := [0.3491, 0.0, 0.0]   ## 20 deg above the hull, 0 for the locks
@@ -153,6 +163,13 @@ var _headless_frames := 0
 var _headless_slew_commanded := false
 var _headless_burn_commanded := false
 var _headless_cruise_commanded := false
+var _headless_mission_commanded := false
+var _headless_mission_reported := false
+## Set SPACEFLIGHT_HEADLESS_MISSION=1 to make the headless run fly to the Moon
+## instead of demonstrating the torch drive. They want opposite time warps -- a
+## lunar transfer is four days and a cruise burn is eight years -- so it is one or
+## the other, chosen deliberately rather than by whichever check runs first.
+var _headless_mission_mode := OS.get_environment("SPACEFLIGHT_HEADLESS_MISSION") == "1"
 var throttle := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
@@ -775,6 +792,33 @@ func _unhandled_input(event: InputEvent) -> void:
 		_settle_camera()
 
 
+func _headless_fly_to_the_moon(s: Dictionary, text: String) -> void:
+	## The whole mission, without a keyboard: plan it, then let the warp carry the
+	## four and a half days. run_mission splits every frame at the ignition and
+	## cutoff epochs, so a frame that spans an entire burn still integrates the
+	## burn properly -- which is why warping through one is safe here and would not
+	## be if advance() just called propagate().
+	if not _headless_mission_commanded and s["elapsed_s"] > 1.0:
+		_headless_mission_commanded = true
+		_plan_mission()
+		if simulation.has_plan():
+			# 1e5: a 4.5-day transfer in about 800 frames at this frame rate.
+			warp_index = 5
+			simulation.set_time_warp(WARP_LEVELS[warp_index])
+
+	_headless_frames += 1
+	if _headless_frames % HEADLESS_PRINT_EVERY_FRAMES == 0:
+		print("\n" + text)
+
+	if simulation.has_plan():
+		var p := simulation.get_plan()
+		if p.get("done", false) and not _headless_mission_reported:
+			_headless_mission_reported = true
+			print("\n===== ARRIVED =====")
+			print("\n".join(_hud_lines(false)))
+			print("===== end =====")
+
+
 func _headless_warp_schedule(snapshot: Dictionary) -> void:
 	var elapsed: float = snapshot["elapsed_s"]
 	var wanted := warp_index
@@ -809,6 +853,93 @@ func _headless_warp_schedule(snapshot: Dictionary) -> void:
 		_headless_cruise_commanded = true
 		simulation.set_engine_mode("CRUISE")
 		print("\n[headless] CRUISE -- exhaust 0.5 c, budget 0.9048 c")
+
+
+func _plan_mission() -> void:
+	## One keypress, and then the frame stops for about a second.
+	##
+	## That is not a bug to hide: planning searches departure opportunities and
+	## then inverts the full model twice, which is tens of trajectory
+	## propagations. It is a mission operation, not a frame operation, and
+	## pretending otherwise by threading it would buy a smoother second and cost
+	## the ability to say what the simulation state was when the plan was made.
+	if simulation == null or not simulation.is_ready():
+		return
+	print("[mission] planning a transfer to %s -- this blocks for a moment" % MISSION_TARGET)
+	var plan := simulation.plan_transfer(MISSION_TARGET, MISSION_FLYBY_ALTITUDE_KM,
+		MISSION_TIME_OF_FLIGHT_DAYS, MISSION_SEARCH_HOURS)
+	if plan.is_empty() or not plan.get("valid", false):
+		push_warning("could not plan the transfer: %s" % simulation.get_last_error())
+		return
+	# The throttle is the pilot's and the plan is the computer's; both pushing at
+	# once is how a corrected trajectory stops being corrected.
+	_set_throttle(0.0)
+	print("[mission] %d burns: injection %.1f m/s in %s, insertion %.1f m/s, flyby %.1f km"
+		% [plan["burns"], plan["injection_delta_v"],
+		   _format_duration(plan["seconds_to_ignition"]), plan["insertion_delta_v"],
+		   float(plan["flyby_altitude_m"]) / 1000.0])
+	print("[mission] transfer angle %.1f deg, tof %.2f d, lambert %.1f m/s"
+		% [plan.get("transfer_angle_deg", 0.0), plan.get("time_of_flight_days", 0.0),
+		   plan.get("lambert_delta_v", 0.0)])
+	print("[mission] stage 1 %s (%d iter)   stage 2 %s"
+		% [plan.get("reach_message", "?"), plan.get("reach_iterations", 0),
+		   plan.get("shape_message", "?")])
+
+
+func _abandon_mission() -> void:
+	if simulation != null:
+		simulation.clear_plan()
+		print("[mission] plan abandoned")
+
+
+func _mission_lines() -> Array:
+	var lines: Array = []
+	# The orbit about the target, when there is one. This is the line that says
+	# whether the mission worked, and it belongs above the plan rather than below
+	# it: once you are in lunar orbit the plan is history.
+	var o := simulation.get_orbit_about_target() if simulation != null else {}
+	if not o.is_empty():
+		var radius: float = o["radius_m"]
+		lines.append("about %-9s %s   %.1f km at %.1f m/s"
+			% [o["body"], ("CAPTURED" if o["captured"] else "hyperbolic"),
+			   float(o["distance_m"]) / 1000.0, o["speed_ms"]])
+		if o["captured"]:
+			lines.append("  orbit        %.1f x %.1f km altitude, e %.4f, i %.2f deg, %s"
+				% [(float(o["periapsis_m"]) - radius) / 1000.0,
+				   (float(o["apoapsis_m"]) - radius) / 1000.0,
+				   o["eccentricity"], o["inclination_deg"],
+				   _format_duration(o["period_s"])])
+		lines.append("")
+
+	if simulation == null or not simulation.has_plan():
+		lines.append_array(["mission        none   (J: plan a transfer to the Moon)", ""])
+		return lines
+	var p := simulation.get_plan()
+	if p.is_empty():
+		return lines
+	var phase := "coasting"
+	if p.get("burning", false):
+		phase = "BURNING"
+	elif p.get("done", false):
+		phase = "arrived"
+	var to_ignition: float = p["seconds_to_ignition"]
+	var to_insertion: float = p["seconds_to_insertion"]
+	lines.append_array([
+		"mission        %s to %s   (K: abandon)" % [phase, p["target"]],
+		"injection      %.1f m/s   %s" % [p["injection_delta_v"],
+			("in " + _format_duration(to_ignition)) if to_ignition > 0.0 else "done"],
+		"insertion      %.1f m/s   %s" % [p["insertion_delta_v"],
+			("in " + _format_duration(to_insertion)) if to_insertion > 0.0 else "done"],
+		"planned flyby  %.2f km altitude, v_inf %.1f m/s, orbit %s"
+			% [float(p["flyby_altitude_m"]) / 1000.0, p["v_infinity"],
+			   _format_duration(p["orbit_period_s"])],
+		"targeting      %s km -> %s km, then %s km in the B-plane"
+			% [_sci(float(p["reach_miss_initial_m"]) / 1000.0),
+			   _sci(float(p["reach_miss_final_m"]) / 1000.0),
+			   _sci(float(p["b_plane_miss_m"]) / 1000.0)],
+		"",
+	])
+	return lines
 
 
 func _sky_lines() -> Array:
@@ -1024,6 +1155,7 @@ func _hud_lines(compact: bool) -> Array:
 		"render res.    %s m per float ulp at %s" % [_sci(s["render_resolution_m"]), s["reference"]],
 		"",
 	]
+	lines.append_array(_mission_lines())
 	lines.append_array(_sky_lines())
 	lines.append_array([
 		"focus: %s   body scale %.0fx" % [("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)), EXAGGERATION_LEVELS[exaggeration_index]],
@@ -1034,6 +1166,7 @@ func _hud_lines(compact: bool) -> Array:
 		"(E/Q exposure   L: light time + aberration on/off   C: cruise burn)",
 		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
 		"(V: ship/prograde/retrograde frame   H: recentre)",
+		"(J: plan a lunar transfer   K: abandon it)",
 		"(TAB: compact HUD / off)",
 	])
 	return lines
@@ -1047,6 +1180,11 @@ func _headless_drive(text: String) -> void:
 	var s := simulation.get_snapshot()
 	if s.is_empty():
 		return
+
+	if _headless_mission_mode:
+		_headless_fly_to_the_moon(s, text)
+		return
+
 	# Nobody can press a key without a display, so command a slew on the way
 	# past: the printed pointing error then exercises the whole attitude
 	# chain -- controller, RCS, torque, Euler's equations -- end to end.
@@ -1146,6 +1284,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			look_mode = (look_mode + 1) % LOOK_MODES.size()
 			_apply_look_preset()
 		KEY_H: _recentre_camera()
+		KEY_J: _plan_mission()
+		KEY_K: _abandon_mission()
 		KEY_TAB:
 			hud_mode = (hud_mode + 1) % HUD_MODES.size()
 			_hud_last_shape = Vector2i.ZERO

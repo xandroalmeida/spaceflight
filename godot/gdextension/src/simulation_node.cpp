@@ -1,7 +1,10 @@
 #include "simulation_node.hpp"
 
+#include "mission_planner.hpp"
+
 #include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
+#include "core/navigation/mission.hpp"
 #include "core/relativity/light_time.hpp"
 #include "core/relativity/optics.hpp"
 #include "core/trajectory/orbital_elements.hpp"
@@ -115,6 +118,15 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::cycle_engine_mode);
     godot::ClassDB::bind_method(D_METHOD("get_engine_mode"),
                                 &SpaceflightSimulation::get_engine_mode);
+    godot::ClassDB::bind_method(
+        D_METHOD("plan_transfer", "target_body", "flyby_altitude_km", "time_of_flight_days",
+                 "search_hours"),
+        &SpaceflightSimulation::plan_transfer);
+    godot::ClassDB::bind_method(D_METHOD("get_orbit_about_target"),
+                                &SpaceflightSimulation::get_orbit_about_target);
+    godot::ClassDB::bind_method(D_METHOD("has_plan"), &SpaceflightSimulation::has_plan);
+    godot::ClassDB::bind_method(D_METHOD("clear_plan"), &SpaceflightSimulation::clear_plan);
+    godot::ClassDB::bind_method(D_METHOD("get_plan"), &SpaceflightSimulation::get_plan);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -172,6 +184,13 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
         craft_ = std::make_unique<sf::spacecraft::Spacecraft>("Torch", 1000.0, 19000.0, main);
         main_engine_ = std::make_unique<sf::propulsion::MainEngineForce>(*craft_);
         forces_->add_reference(*main_engine_);
+
+        // The maneuver executor is built EMPTY and wired in now, once. It is what
+        // flies a planned mission; with no plan it contributes nothing.
+        plan_ = std::make_unique<sf::navigation::ManeuverPlan>();
+        executor_ = std::make_unique<sf::navigation::ManeuverExecutor>(*provider_, *craft_,
+                                                                       *plan_, frame);
+        forces_->add_reference(*executor_);
 
         const auto epoch_time = time_converter_->parse(epoch);
 
@@ -253,7 +272,24 @@ void SpaceflightSimulation::advance(double wall_seconds) {
 
         // The frame rate decides how far to go, never how to get there: the
         // propagator picks its own steps (rule 21, ADR-0005).
-        const auto result = propagator_->propagate(state_, clock_->coordinate_time(), target);
+        //
+        // With a plan armed the frame goes through run_mission instead, because
+        // the executor has to be ARMED per leg: at an ignition or a cutoff the
+        // thrust is genuinely two-valued, and only the runner knows which leg it
+        // is integrating. Without arming the switch becomes a discontinuity inside
+        // a step and the error controller grinds the step size to the floor
+        // (core/navigation/maneuver_executor.hpp).
+        sf::propagation::PropagationResult result{};
+        if (executor_ != nullptr && plan_ != nullptr && !plan_->empty()) {
+            const auto mission = sf::navigation::run_mission(*propagator_, *executor_, state_,
+                                                             clock_->coordinate_time(), target);
+            result.state = mission.state;
+            result.time = mission.time;
+            result.status = mission.status;
+            result.message = mission.message;
+        } else {
+            result = propagator_->propagate(state_, clock_->coordinate_time(), target);
+        }
         state_ = result.state;
         clock_->commit(result.time, state_.proper_time - clock_->proper_time(), wall);
 
@@ -502,6 +538,145 @@ void SpaceflightSimulation::set_throttle(double throttle) {
 
 double SpaceflightSimulation::get_throttle() const {
     return main_engine_ != nullptr ? main_engine_->throttle() : 0.0;
+}
+
+godot::Dictionary SpaceflightSimulation::plan_transfer(const godot::String& target_body,
+                                                       double flyby_altitude_km,
+                                                       double time_of_flight_days,
+                                                       double search_hours) {
+    plan_summary_ = godot::Dictionary{};
+    if (builder_ == nullptr) {
+        last_error_ = "plan_transfer: configure() first";
+        return plan_summary_;
+    }
+
+    guarded(last_error_, "plan_transfer", [&] {
+        const std::string name{target_body.utf8().get_data()};
+        const auto lookup = sf::celestial::body_from_name(name);
+        if (!lookup.ok) {
+            throw std::invalid_argument("no body named \"" + name + "\"");
+        }
+
+        TransferRequest request{};
+        request.provider = provider_.get();
+        request.propagator = propagator_.get();
+        request.craft = craft_.get();
+        request.plan = plan_.get();
+        request.executor = executor_.get();
+        request.initial = state_;
+        request.epoch = clock_->coordinate_time();
+        request.center = sf::celestial::bodies::earth;
+        request.target = lookup.id;
+        request.flyby_altitude_m = flyby_altitude_km * 1000.0;
+        request.time_of_flight_s = time_of_flight_days * 86400.0;
+        request.search_window_s = search_hours * 3600.0;
+
+        const TransferPlan planned = spaceflight_godot::plan_transfer(request);
+        if (!planned.valid) {
+            // The planner writes trial burns into the shared plan as it searches.
+            // A failure must not leave one of them armed: the ship would fly a
+            // burn nobody planned, four simulated days from a target it was never
+            // going to reach.
+            *plan_ = sf::navigation::ManeuverPlan{};
+            throw std::runtime_error(planned.message);
+        }
+
+        // Install it by replacing the CONTENTS of the plan the executor already
+        // points at. Swapping the objects would dangle the reference the force
+        // model holds.
+        *plan_ = planned.maneuvers;
+
+        const auto now = clock_->coordinate_time();
+        plan_summary_["target"] = godot::String{lookup.id.name().data()};
+        plan_summary_["valid"] = true;
+        plan_summary_["seconds_to_ignition"] =
+            (planned.departure - now).seconds();
+        plan_summary_["time_of_flight_s"] = planned.time_of_flight_s;
+        plan_summary_["lambert_delta_v"] = planned.lambert_delta_v;
+        plan_summary_["injection_delta_v"] = planned.injection_delta_v;
+        plan_summary_["insertion_delta_v"] = planned.insertion_delta_v;
+        plan_summary_["seconds_to_insertion"] = (planned.insertion - now).seconds();
+        plan_summary_["reach_miss_initial_m"] = planned.reach_miss_initial;
+        plan_summary_["reach_miss_final_m"] = planned.reach_miss_final;
+        plan_summary_["b_plane_miss_m"] = planned.b_plane_miss;
+        plan_summary_["passes"] = planned.passes;
+        plan_summary_["reach_message"] = godot::String{planned.reach_message.c_str()};
+        plan_summary_["shape_message"] = godot::String{planned.shape_message.c_str()};
+        plan_summary_["reach_iterations"] = planned.reach_iterations;
+        plan_summary_["transfer_angle_deg"] = planned.transfer_angle * 180.0 / sf::units::pi;
+        plan_summary_["time_of_flight_days"] = planned.time_of_flight_s / 86400.0;
+        plan_summary_["v_infinity"] = planned.v_infinity;
+        plan_summary_["flyby_altitude_m"] = planned.flyby_altitude_m;
+        plan_summary_["orbit_period_s"] = planned.orbit_period_s;
+        plan_summary_["burns"] = static_cast<int64_t>(plan_->size());
+    });
+    return plan_summary_;
+}
+
+godot::Dictionary SpaceflightSimulation::get_orbit_about_target() const {
+    godot::Dictionary out;
+    const auto& craft = snapshot_.spacecraft;
+    if (builder_ == nullptr || !craft.target.has_value()) {
+        return out;
+    }
+    const auto* body = snapshot_.find(*craft.target);
+    if (body == nullptr || !(body->gm > 0.0)) {
+        return out;
+    }
+
+    // The Moon's Hill sphere is 61 500 km; outside it the Earth dominates and an
+    // osculating orbit about the Moon is a number, not a description. The cut is
+    // stated rather than tuned: it is the radius at which the two-body picture
+    // about the target stops being the right picture at all.
+    constexpr double kHillRadius = 6.15e7;   // [m]
+    const double distance = (craft.position - body->position).norm();
+    if (distance > kHillRadius) {
+        return out;
+    }
+
+    sf::coordinates::StateVector relative{};
+    relative.position = craft.position - body->position;
+    relative.velocity = craft.velocity - body->velocity;
+    const auto elements = sf::trajectory::elements_from_state(relative, body->gm);
+
+    out["body"] = godot::String{body->name.c_str()};
+    out["radius_m"] = body->radius;
+    out["periapsis_m"] = elements.periapsis_radius;
+    out["apoapsis_m"] = elements.apoapsis_radius;
+    out["eccentricity"] = elements.eccentricity;
+    out["inclination_deg"] = sf::units::rad_to_deg(elements.inclination);
+    out["period_s"] = elements.period;
+    out["distance_m"] = distance;
+    out["speed_ms"] = relative.velocity.norm();
+    out["captured"] = elements.eccentricity < 1.0;
+    return out;
+}
+
+bool SpaceflightSimulation::has_plan() const {
+    return plan_ != nullptr && !plan_->empty();
+}
+
+void SpaceflightSimulation::clear_plan() {
+    if (plan_ != nullptr) {
+        *plan_ = sf::navigation::ManeuverPlan{};
+    }
+    plan_summary_ = godot::Dictionary{};
+}
+
+godot::Dictionary SpaceflightSimulation::get_plan() const {
+    godot::Dictionary out = plan_summary_.duplicate();
+    if (plan_ != nullptr && !plan_->empty() && clock_ != nullptr) {
+        // Countdowns, refreshed: the summary was written when the plan was made
+        // and the clock has moved since.
+        const auto now = clock_->coordinate_time();
+        const auto& first = plan_->maneuvers().front();
+        const auto& last = plan_->maneuvers().back();
+        out["seconds_to_ignition"] = (first.ignition - now).seconds();
+        out["seconds_to_insertion"] = (last.ignition - now).seconds();
+        out["burning"] = first.active_at(now) || last.active_at(now);
+        out["done"] = now >= last.cutoff();
+    }
+    return out;
 }
 
 godot::Dictionary SpaceflightSimulation::get_snapshot() const {

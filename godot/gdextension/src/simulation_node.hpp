@@ -17,6 +17,9 @@
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
 #include "core/ephemeris/spice_time_converter.hpp"
 #include "core/gravity/composite_force_model.hpp"
+#include "core/navigation/b_plane.hpp"
+#include "core/navigation/maneuver.hpp"
+#include "core/navigation/maneuver_executor.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/propulsion/main_engine_force.hpp"
 #include "core/render/render_transform.hpp"
@@ -133,6 +136,29 @@ public:
     void cycle_engine_mode();
     godot::String get_engine_mode() const;
 
+    // --- missions ----------------------------------------------------------
+    // Plans a transfer to a body and arms it: a finite injection burn now-ish,
+    // and an insertion burn at the flyby periapsis.
+    //
+    // BLOCKING, and deliberately so: it searches departure opportunities and then
+    // inverts the full model twice, which is tens of trajectory propagations and
+    // takes of the order of a second. It is a one-off command, not something a
+    // frame does. Returns a summary Dictionary; empty on failure, with the reason
+    // in get_last_error().
+    godot::Dictionary plan_transfer(const godot::String& target_body, double flyby_altitude_km,
+                                    double time_of_flight_days, double search_hours);
+    // The osculating orbit about the mission target, when the ship is close
+    // enough to it for that to mean anything. Empty otherwise.
+    //
+    // The cockpit's own elements are about the REFERENCE body, which stays the
+    // Earth: after a lunar insertion it correctly reports a hyperbolic escape from
+    // the Earth, which is true and useless. What a pilot in lunar orbit wants is
+    // the orbit they are in.
+    godot::Dictionary get_orbit_about_target() const;
+    bool has_plan() const;
+    void clear_plan();
+    godot::Dictionary get_plan() const;
+
     // Everything else, as a Dictionary: the cockpit reads this once per frame
     // instead of making twenty calls.
     godot::Dictionary get_snapshot() const;
@@ -160,6 +186,14 @@ private:
     std::unique_ptr<sf::attitude::RcsForce> rcs_force_;
     std::unique_ptr<sf::spacecraft::Spacecraft> craft_;
     std::unique_ptr<sf::propulsion::MainEngineForce> main_engine_;
+    // Both live for the life of the node, and that is load-bearing: the force
+    // model holds a REFERENCE to the executor and the executor holds one to the
+    // plan (gravity::CompositeForceModel::add_reference). Rebuilding either when
+    // a plan is made would leave the force model pointing at freed memory.
+    // Planning replaces the plan's CONTENTS instead.
+    std::unique_ptr<sf::navigation::ManeuverPlan> plan_;
+    std::unique_ptr<sf::navigation::ManeuverExecutor> executor_;
+    godot::Dictionary plan_summary_;
 
     sf::propagation::PropagationState state_{};
     bool apparent_positions_{true};

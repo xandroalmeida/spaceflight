@@ -132,6 +132,50 @@ kepleriano dá 5544,87 s; a resolução de renderização é `6771 km · ε_floa
 brilho muda 0,05 % — o efeito **existe** e é desprezível, que é o que tem de ser
 nessa velocidade.
 
+### Ir à Lua, na cena
+
+`J` planeja e arma a viagem inteira; o warp faz o resto.
+
+```
+[mission] 2 burns: injection 4548.5 m/s in 94.5 min, insertion 856.4 m/s, flyby 99.8 km
+[mission] transfer angle 156.6 deg, tof 6.75 d, lambert 4745.6 m/s
+[mission] stage 1 stalled ... (12 iter)   stage 2 converged
+```
+
+e seis dias e três quartos depois, no HUD:
+
+```
+about Moon      CAPTURED   1838.2 km at 1632.7 m/s
+  orbit        96.4 x 103.2 km altitude, e 0.0019, i 19.86 deg, 117.8 min
+```
+
+A física é toda do `core/`: Lambert, o corretor diferencial, o plano B
+(`docs/physics/b-plane.md`), a inserção. O `.gd` carrega números e mostra-os.
+
+⚠️ **`J` bloqueia o quadro por cerca de um segundo**, e isso está assim de
+propósito: planear é procurar oportunidades de partida e depois inverter o modelo
+completo duas vezes, dezenas de propagações. É uma operação de missão, não de
+quadro. Threadá-lo compraria um segundo mais suave e custaria poder dizer qual era
+o estado da simulação quando o plano foi feito.
+
+Três coisas que esta parte obrigou a medir, e que estão comentadas onde acontecem:
+
+* a correção tem de mirar a **queima finita**, não um impulso. Uma injeção
+  translunar perde ~600 m/s para a gravidade enquanto o motor está ligado, e
+  corrigir um impulso para depois voar uma queima erra por centenas de milhares de
+  quilómetros — medido, fazendo exatamente isso;
+* escolher a partida pelo **Δv mais barato é o critério errado**. O mais barato é
+  sempre o mais longo (aproxima-se da elipse de energia mínima) e também o mais
+  sensível: a busca foi buscar 6,75 dias, poupou 150 m/s que uma nave com
+  26 942 km/s não precisa, e deixou o corretor empacado. Agora os candidatos mais
+  baratos são **voados** uma vez cada, e escolhe-se o que de facto chega mais
+  perto;
+* **uma tentativa é cara ou coroa.** Se o corretor fecha depende da geometria de
+  partida, e execuções que diferiam só no quadro em que a tecla foi premida davam
+  resultados diferentes. Tenta-se até três candidatos e fica-se com o primeiro que
+  fecha. Um plano que não atinge o alvo é **recusado com o motivo**, em vez de
+  devolvido.
+
 ### O HUD cabe por construção, e não por palpite
 
 A fonte era `altura_da_viewport / 38`, limitada a `[15, 28]` px. Um palpite não
