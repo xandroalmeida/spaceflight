@@ -396,6 +396,7 @@ func _update_readout() -> void:
 		"engine         %s   w = %.3f c" % [s["engine_mode"], s["exhaust_velocity_c"]],
 		"throttle       %.0f %%      thrust %.1f N" % [s["throttle"] * 100.0, s["thrust_n"]],
 		"delta-v left   %s m/s" % String.num_scientific(s["delta_v_budget_ms"]),
+		"along track    %+.3f   orbit energy %+.1f J/kg/s" % [s["thrust_along_track"], s["specific_energy_rate"]],
 		"",
 		"pointing       %s   error %.3f deg" % [s["pointing_mode"], s["pointing_error_deg"]],
 		"nose->prograde %.3f deg" % s["angle_to_prograde_deg"],

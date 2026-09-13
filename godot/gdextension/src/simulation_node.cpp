@@ -423,6 +423,8 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     out["thrust_n"] = main_engine_ != nullptr ? main_engine_->current_thrust() : 0.0;
     out["throttle"] = get_throttle();
     out["engine_mode"] = get_engine_mode();
+    out["thrust_along_track"] = craft.thrust_along_track;
+    out["specific_energy_rate"] = craft.specific_energy_rate;
     out["exhaust_velocity_c"] =
         craft_ != nullptr ? craft_->engine().exhaust_velocity_fraction_c() : 0.0;
 

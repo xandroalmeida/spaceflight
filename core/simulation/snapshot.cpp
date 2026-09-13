@@ -86,9 +86,7 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     const auto force = forces_.evaluate(state, t);
     craft.acceleration = force.acceleration;
     // mass_flow_rate is -q; thrust = q * v_eff in the Newtonian limit.
-    craft.thrust = effective_exhaust_velocity_ > 0.0
-                       ? -force.mass_flow_rate * effective_exhaust_velocity_
-                       : 0.0;
+    craft.thrust = force.proper_thrust.norm();
 
     if (dry_mass_ > 0.0) {
         craft.propellant = std::max(0.0, state.mass - dry_mass_);
@@ -114,6 +112,17 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     if (craft.distance_to_reference > 0.0 && gm > 0.0) {
         craft.elements = trajectory::elements_from_state(
             coordinates::StateVector{craft.relative_position, craft.relative_velocity}, gm);
+    }
+
+    // Thrust bookkeeping, against the velocity RELATIVE to the reference body --
+    // "prograde" around the Earth and around the Sun are 30 km/s apart.
+    const double thrust_magnitude = force.proper_thrust.norm();
+    if (thrust_magnitude > 0.0 && craft.relative_velocity.norm() > 0.0 && state.mass > 0.0) {
+        const math::Vec3 direction = force.proper_thrust / thrust_magnitude;
+        const math::Vec3 along = craft.relative_velocity.normalized();
+        craft.thrust_along_track = dot(direction, along);
+        craft.specific_energy_rate =
+            dot(force.proper_thrust / state.mass, craft.relative_velocity);
     }
 
     craft.orientation = state.attitude.orientation;

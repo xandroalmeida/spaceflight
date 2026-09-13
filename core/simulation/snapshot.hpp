@@ -47,6 +47,18 @@ struct SpacecraftSnapshot {
     double thrust{0.0};         // [N], current
     double throttle{0.0};
 
+    // Where the thrust is actually going, which is the question a pilot has when
+    // the speed moves the wrong way.
+    //
+    // `thrust_along_track` is cos(angle between thrust and velocity): +1 is a
+    // pure prograde burn, 0 does nothing to the orbital energy, -1 is braking.
+    // `specific_energy_rate` is the rate at which the burn is adding orbital
+    // energy, a . v [W/kg] -- positive raises the orbit, negative lowers it.
+    // Speed alone answers neither question, because speed also trades against
+    // altitude on every ellipse.
+    double thrust_along_track{0.0};
+    double specific_energy_rate{0.0};
+
     // Relative to the body the display is centred on.
     celestial::BodyId reference{};
     math::Vec3 relative_position{};
