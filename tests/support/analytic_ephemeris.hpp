@@ -7,6 +7,7 @@
 // exact Kepler orbit, and any deviation is integration error -- not ephemeris
 // error, not third bodies.  That separation is what makes a tolerance defensible.
 
+#include "core/celestial/body_orientation.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/ephemeris/errors.hpp"
 
@@ -66,6 +67,24 @@ private:
     double gm_;
     double radius_;
     sf::math::Vec3 position_;
+};
+
+// A body whose pole points wherever the test says it does, so that the J2 field
+// has an exactly known geometry.  The real pole comes from SPICE
+// (docs/physics/geopotential.md section 3.1); this is for the analytic cases.
+class FixedPoleOrientation final : public sf::celestial::BodyOrientationProvider {
+public:
+    explicit FixedPoleOrientation(sf::math::Vec3 pole = sf::math::Vec3{0.0, 0.0, 1.0})
+        : pole_(pole.normalized()) {}
+
+    [[nodiscard]] sf::math::Vec3 pole_direction(sf::celestial::BodyId,
+                                                sf::time::CoordinateTime,
+                                                sf::coordinates::FrameAxes) const override {
+        return pole_;
+    }
+
+private:
+    sf::math::Vec3 pole_;
 };
 
 }  // namespace sft

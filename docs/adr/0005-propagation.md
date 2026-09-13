@@ -49,9 +49,9 @@ relatividade (troca da lei de movimento).
 * Como DP5(4) não é simplético, testes de conservação de energia/momento angular
   são feitos **com tolerância derivada da tolerância do integrador**, não com
   números mágicos (ver `docs/validation/tolerances.md`).
-* Dense output (interpolação de 4ª/5ª ordem dentro do passo) fica previsto para o
-  Milestone 2, quando o renderizador precisar de estados em instantes arbitrários
-  sem forçar o passo do integrador.
+* Dense output (interpolação dentro do passo) foi implementado logo em seguida,
+  em **ADR-0006**: é o que permite ao renderizador e à CLI pedir estados em
+  instantes arbitrários sem forçar o passo do integrador.
 * Eventos (periapsis, entrada em raio de corpo, fim de queima) serão detectados
   por mudança de sinal + refinamento, no futuro; no Milestone 0 apenas a
   sinalização de aproximação extrema existe.

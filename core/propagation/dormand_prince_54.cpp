@@ -34,6 +34,16 @@ constexpr double e5 = b5 - (-92097.0 / 339200.0);
 constexpr double e6 = b6 - 187.0 / 2100.0;
 constexpr double e7 = -1.0 / 40.0;
 
+// Coefficients of the 4th order continuous extension (Hairer's contd5).  They
+// reuse the seven stages the step already computed, which is why dense output
+// costs nothing.  See ADR-0006.
+constexpr double d1 = -12715105075.0 / 11282082432.0;
+constexpr double d3 = 87487479700.0 / 32700410799.0;
+constexpr double d4 = -10690763975.0 / 1880347072.0;
+constexpr double d5 = 701980252875.0 / 199316789632.0;
+constexpr double d6 = -1453857185.0 / 822651844.0;
+constexpr double d7 = 69997945.0 / 29380423.0;
+
 }  // namespace
 
 DormandPrince54Propagator::DormandPrince54Propagator(const gravity::ForceModel& forces,
@@ -60,12 +70,7 @@ void DormandPrince54Propagator::set_config(IntegratorConfig config) {
 
 DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     const Vector& y, time::CoordinateTime t, double mass, gravity::ForceResult& out_force) const {
-    PropagationState s{};
-    s.state.position = math::Vec3{y[0], y[1], y[2]};
-    s.state.velocity = math::Vec3{y[3], y[4], y[5]};
-    s.mass = mass;
-    s.proper_time = time::Duration{y[6]};
-
+    const PropagationState s = state_from_array(y, mass);
     out_force = forces_.evaluate(s, t);
 
     Vector dy{};
@@ -109,6 +114,10 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     result.state = initial;
     result.time = from;
     result.status = PropagationStatus::Success;
+
+    if (recorder_ != nullptr) {
+        recorder_->clear();
+    }
 
     if (!initial.is_finite()) {
         result.status = PropagationStatus::NonFiniteState;
@@ -213,6 +222,25 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         const bool accept = finite && error <= 1.0;
 
         if (accept) {
+            if (recorder_ != nullptr) {
+                DenseSegment segment{};
+                segment.begin = t;
+                segment.step_seconds = h_step;
+                segment.mass = mass;
+                for (std::size_t i = 0; i < kDim; ++i) {
+                    const double difference = y_new[i] - y[i];
+                    const double bspl = h_step * k1[i] - difference;
+                    segment.coefficients[0][i] = y[i];
+                    segment.coefficients[1][i] = difference;
+                    segment.coefficients[2][i] = bspl;
+                    segment.coefficients[3][i] = difference - h_step * k7[i] - bspl;
+                    segment.coefficients[4][i] =
+                        h_step * (d1 * k1[i] + d3 * k3[i] + d4 * k4[i] + d5 * k5[i] +
+                                  d6 * k6[i] + d7 * k7[i]);
+                }
+                recorder_->append(std::move(segment));
+            }
+
             // A clipped step was defined as "cover exactly what is left", so the
             // arrival time IS `to`.  Snapping avoids a residual of a fraction of
             // an ulp that would otherwise cost one extra, absurdly small step.
@@ -227,12 +255,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             max_h = std::max(max_h, std::abs(h_step));
 
             if (observer_) {
-                PropagationState s{};
-                s.state.position = math::Vec3{y[0], y[1], y[2]};
-                s.state.velocity = math::Vec3{y[3], y[4], y[5]};
-                s.mass = mass;
-                s.proper_time = time::Duration{y[6]};
-                observer_(StepInfo{t, s, h_step, error, true});
+                observer_(StepInfo{t, state_from_array(y, mass), h_step, error, true});
             }
 
             if (force_new.inside_body) {
@@ -243,12 +266,8 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         } else {
             ++result.stats.rejected_steps;
             if (observer_ && observe_rejected_) {
-                PropagationState s{};
-                s.state.position = math::Vec3{y_new[0], y_new[1], y_new[2]};
-                s.state.velocity = math::Vec3{y_new[3], y_new[4], y_new[5]};
-                s.mass = mass;
-                s.proper_time = time::Duration{y_new[6]};
-                observer_(StepInfo{t + time::Duration{h_step}, s, h_step, error, false});
+                observer_(StepInfo{t + time::Duration{h_step}, state_from_array(y_new, mass),
+                                   h_step, error, false});
             }
             if (!finite) {
                 result.status = PropagationStatus::NonFiniteState;

@@ -80,7 +80,7 @@ Ordens de grandeza para uma nave em LEO (`r = 6778 km`, `h ≈ 400 km`):
 | Termo | Aceleração (m/s²) | Relativo ao termo principal | Status |
 |---|---|---|---|
 | Terra, massa pontual | 8,7·10⁰ | 1 | **implementado** |
-| Achatamento da Terra (J₂) | 1,2·10⁻² | 1,4·10⁻³ | não implementado |
+| Achatamento da Terra (J₂) | 1,2476·10⁻² | 1,438·10⁻³ | **implementado** — `docs/physics/geopotential.md` |
 | Lua (termo diferencial) | ~1,1·10⁻⁶ | 1,3·10⁻⁷ | **implementado** |
 | Sol (termo diferencial) | ~5,6·10⁻⁷ | 6,4·10⁻⁸ | **implementado** |
 | Arrasto atmosférico (400 km) | 10⁻⁷ … 10⁻⁵ | até 10⁻⁶ | não implementado |
@@ -88,19 +88,25 @@ Ordens de grandeza para uma nave em LEO (`r = 6778 km`, `h ≈ 400 km`):
 | Correção relativística (Schwarzschild) | ~2·10⁻⁸ | 3·10⁻⁹ | Milestone 4 |
 | Harmônicos de grau > 2 | ~10⁻⁵ | 10⁻⁶ | não implementado |
 
-**Conclusão honesta e explícita:** em órbita baixa da Terra, o modelo do
-Milestone 0 é dominado pelo erro de J₂, que é ~10⁴ vezes maior que o maior termo
-de terceiro corpo que já implementamos. Uma órbita de LEO propagada por este
-modelo deriva em relação à realidade principalmente por causa da precessão nodal
-ausente (`dΩ/dt ≈ −7°/dia` para uma órbita a 400 km e 51,6° de inclinação).
+**Histórico, mantido porque explica a ordem do trabalho:** no Milestone 0 este
+modelo tinha apenas massas pontuais, e em LEO era dominado pelo erro de J₂ — ~10⁴
+vezes maior que o maior termo de terceiro corpo implementado. Uma órbita baixa
+derivava da realidade sobretudo pela regressão nodal ausente. Por isso J₂ foi a
+primeira dívida paga depois do Milestone 0, antes de qualquer propulsão:
+`docs/physics/geopotential.md`.
 
-Isso **não invalida** o Milestone 0, cujo objetivo é a infraestrutura e os
-corpos pontuais, mas define claramente o que os testes podem e não podem exigir:
+Com J₂ presente, o maior termo omitido em LEO passa a ser o **arrasto
+atmosférico** (10⁻⁸ a 10⁻⁶ relativo, conforme a atividade solar), que depende de
+área, atitude e clima espacial e terá documento próprio quando for implementado.
 
-* teste de conservação de energia/momento angular de dois corpos: **válido**, o
-  modelo é exatamente kepleriano nesse caso;
-* teste contra efemérides reais de um satélite terrestre: **inválido** até J₂
-  existir.
+O que os testes podem e não podem exigir hoje:
+
+* conservação de energia/momento angular de dois corpos: **válido**, o modelo é
+  exatamente kepleriano nesse caso (sem J₂ no catálogo);
+* regressão nodal e precessão apsidal de um satélite terrestre: **válido**, e
+  testado contra as fórmulas seculares de primeira ordem;
+* comparação contra a efeméride real de um satélite específico: **inválido** até
+  existirem arrasto e harmônicos de grau superior.
 
 Em espaço interplanetário (longe de qualquer planeta), o modelo de massas
 pontuais é excelente: os termos omitidos (J₂ do Sol, ~10⁻¹¹ da aceleração
@@ -110,7 +116,8 @@ principal a 1 UA) estão abaixo do erro numérico da integração.
 
 ```
 PointMassGravity        implementado
-SphericalHarmonics      J2, depois EGM-truncado           (Milestone 1+)
+OblatenessGravity       J2 zonal                          implementado
+SphericalHarmonics      grau/ordem arbitrários            (quando necessário)
 RelativisticGravity     1PN / geodésica                   (Milestone 4)
 SolarRadiationPressure                                    (opcional)
 AtmosphericDrag                                           (opcional)

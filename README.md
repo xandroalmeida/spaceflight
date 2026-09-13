@@ -6,8 +6,9 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 0 concluído.** Sem gráficos, sem gameplay, sem relatividade.
-O que existe é uma base verificável: 11 suítes de teste, das quais 4 comparam
+**Estado: Milestone 0 concluído, mais as duas dívidas que ele deixou em aberto**
+(achatamento J₂ e dense output). Sem gráficos, sem gameplay, sem relatividade.
+O que existe é uma base verificável: 13 suítes de teste, das quais 6 comparam
 resultados contra o JPL Horizons ou contra soluções analíticas fechadas.
 
 ---
@@ -46,9 +47,10 @@ spaceflight/
 │   │   └── coordinate-system.md       SSB/J2000, TDB, orçamento de erro do double
 │   ├── physics/
 │   │   ├── gravity-model.md           N corpos pontuais, domínio de validade, o que falta
+│   │   ├── geopotential.md            J2: forma sem referencial girante, constantes, testes
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
-│   ├── adr/                           0001 linguagem .. 0005 propagação
+│   ├── adr/                           0001 linguagem .. 0006 dense output
 │   └── validation/
 │       └── tolerances.md              toda tolerância, medida e justificada
 │
@@ -62,8 +64,8 @@ spaceflight/
 │   ├── coordinates/            ReferenceFrame (origem + eixos), StateVector
 │   ├── celestial/              BodyId (NAIF), CelestialBody, BodyCatalog
 │   ├── ephemeris/              EphemerisProvider, SpiceEphemerisProvider, kernels, erros
-│   ├── gravity/                ForceModel, PointMassGravity, CompositeForceModel
-│   ├── propagation/            SpacecraftPropagator, Dormand-Prince 5(4), estatísticas
+│   ├── gravity/                ForceModel, PointMassGravity, OblatenessGravity (J2), Composite
+│   ├── propagation/            SpacecraftPropagator, Dormand-Prince 5(4), dense output, estatísticas
 │   ├── trajectory/             elementos orbitais osculadores (diagnóstico)
 │   ├── spacecraft/             SpacecraftState
 │   ├── simulation/             SimulationClock (wall / coordinate / proper / render)
@@ -98,6 +100,7 @@ Registradas em `docs/adr/`:
 | 0003 | CSPICE + DE440 como fonte autoritativa; nave é partícula-teste |
 | 0004 | Estado em SSB / J2000 (ICRF), SI, TDB em representação de duas partes |
 | 0005 | Dormand–Prince 5(4) adaptativo, desacoplado de frame e de time warp |
+| 0006 | Dense output de 4ª ordem: estado em qualquer instante, sem forçar o passo |
 
 E três regras que valem para tudo o que vier:
 
@@ -112,7 +115,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 11
+100% tests passed, 0 tests failed out of 13
 ```
 
 Entre outras coisas:
@@ -127,11 +130,17 @@ Entre outras coisas:
   de cinco órbitas;
 * a aceleração de maré da Lua em LEO reproduz `2GMr/d³` dentro do truncamento
   esperado de 5 %;
-* uma época fora da cobertura do kernel produz **erro**, nunca extrapolação.
+* uma época fora da cobertura do kernel produz **erro**, nunca extrapolação;
+* com J₂ ligado, a regressão nodal de uma órbita a 400 km e 51,6° sai em
+  **−5,002 °/dia** — o valor da ISS — e `L·n̂` (invariante exato de um campo
+  axialmente simétrico) se conserva a 4·10⁻¹² enquanto `|L|` deriva 3·10⁻⁴;
+* gravar dense output não altera a trajetória em **um único bit**, e amostrar
+  100 000 estados de uma órbita não custa nenhuma avaliação de força.
 
 Toda tolerância acima tem origem declarada em `docs/validation/tolerances.md`.
 
 ## Próximo
 
-Milestone 1: propulsão newtoniana, queimas pela CLI, alteração de apoastro,
-escape da Terra, interceptação da região lunar.
+Milestone 1: propulsão newtoniana (`docs/physics/propulsion-model.md` já fixa o
+modelo), queimas pela CLI, alteração de apoastro, escape da Terra, interceptação
+da região lunar com um solver de Lambert.

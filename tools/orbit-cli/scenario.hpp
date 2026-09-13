@@ -32,6 +32,10 @@ struct Scenario {
     sf::math::Vec3 velocity{};   // [m/s]
     double mass{1000.0};         // [kg]
 
+    // Bodies whose J2 oblateness term is included, on top of their point mass.
+    // See docs/physics/geopotential.md.
+    std::vector<sf::celestial::BodyId> j2_bodies;
+
     sf::propagation::IntegratorConfig integrator{};
 
     int samples{10};

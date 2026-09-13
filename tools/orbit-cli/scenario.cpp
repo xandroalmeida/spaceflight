@@ -59,6 +59,16 @@ Scenario Scenario::load(const std::string& path) {
         throw json::ParseError("spacecraft.mass_kg must be > 0");
     }
 
+    if (const json::Value* perturbations = root.get("perturbations"); perturbations != nullptr) {
+        if (const json::Value* j2 = perturbations->get("j2_bodies"); j2 != nullptr) {
+            for (const auto& entry : j2->as_array("perturbations.j2_bodies")) {
+                s.j2_bodies.push_back(
+                    read_body(entry.as_string("perturbations.j2_bodies[]"),
+                              "perturbations.j2_bodies[]"));
+            }
+        }
+    }
+
     if (const json::Value* integ = root.get("integrator"); integ != nullptr) {
         auto& cfg = s.integrator;
         cfg.relative_tolerance = integ->number_or("rtol", cfg.relative_tolerance);
@@ -93,6 +103,15 @@ std::string Scenario::describe() const {
        << "bodies     : ";
     for (std::size_t i = 0; i < bodies.size(); ++i) {
         os << (i > 0 ? ", " : "") << bodies[i].name();
+    }
+    os << "\n";
+    os << "J2         : ";
+    if (j2_bodies.empty()) {
+        os << "(none -- point masses only)";
+    } else {
+        for (std::size_t i = 0; i < j2_bodies.size(); ++i) {
+            os << (i > 0 ? ", " : "") << j2_bodies[i].name();
+        }
     }
     os << "\n"
        << "initial    : relative to " << relative_to.name() << " (J2000 axes)\n"

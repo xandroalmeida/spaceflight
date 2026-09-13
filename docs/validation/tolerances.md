@@ -103,7 +103,43 @@ usava 10⁻¹² com essa justificativa errada e falhou — corretamente.
 | maré solar vs `2GMr/d³` | — | 10 % | `3r/d` = 1,4·10⁻⁴ |
 | remover o Sol do catálogo | 0,53·(½aT²) | ±25 % | cota de queda livre `½aT²`, reduzida pela resposta orbital |
 
-### 3.5 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.5 Achatamento J₂ (`tests/scientific/test_j2_oblateness.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| `\|a\|` no equador vs `(3/2)J₂GM R²/r⁴` | — | 10⁻¹⁴ rel | forma fechada recalculada das mesmas constantes |
+| `\|a\|` no polo vs o dobro do equatorial | — | 10⁻¹⁴ rel | identidade algébrica |
+| razão J₂/pontual em LEO | 1,4380·10⁻³ | 10⁻³ rel | valor citado em `gravity-model.md` §4, 4 algarismos |
+| deriva de `L·n̂` em 6 h | 4,04·10⁻¹² rel | 10⁻¹¹ rel | invariante exato; resíduo = erro do integrador |
+| deriva de `\|L\|` na mesma corrida | 3,16·10⁻⁴ rel | > 100× `L·n̂` | se fosse conservado, J₂ não estaria agindo |
+| regressão nodal, 30 órbitas | −5,0149 °/dia (previsto −5,0027) | 1,5 % | termos de curto período omitidos pela teoria secular de 1ª ordem, amplitude `J₂(R/p)² = 0,055°` contra 9,65° de sinal |
+| precessão apsidal, i = 30/51,6/80° | erro 0,7 % / 0,3 % / 0,2 % | 3 % | idem, amplitude `J₂(R/p)²/e` |
+| obliquidade da Terra via polo do SPICE | 23,439292° | ±0,02° | valor de referência 23,4393° + nutação (até 9″) |
+
+A escolha de `e = 0,1` no teste apsidal **é** parte da tolerância: com `e = 2·10⁻³`
+a oscilação de excentricidade induzida por J₂ (`~J₂(R/p)² ≈ 10⁻³`) é da ordem da
+própria excentricidade, a direção do periastro passeia mais do que precessa, e a
+medida não significa nada. A primeira versão do teste usava `e = 2·10⁻³` e errava
+por um fator 3 — o defeito estava no experimento, não no código.
+
+### 3.6 Dense output (`tests/scientific/test_dense_output.cpp`)
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| gravar muda a trajetória? | 0 | **0** exato | gravar lê os estágios já calculados; qualquer diferença é acoplamento indevido |
+| passos / avaliações de força com e sem gravação | idênticos | igualdade exata | idem |
+| `y(θ=0)` vs estado inicial do passo | 0 | **0** exato | `c₁ = y₀` é identidade algébrica |
+| `y(θ=1)` vs estado final do passo | — | 10⁻⁹ m | `c₁+c₂ = y₁`; só a divisão por `h` arredonda |
+| erro interpolado vs Kepler, 2000 amostras | 3,07·10⁻⁴ m | 10⁻² m | é o erro **global do integrador** em uma órbita, não da interpolação |
+| erro interpolado vs erro nos extremos | iguais até o último dígito | ≤ 2× | a extensão contínua de 4ª ordem não acrescenta nada mensurável |
+
+Um achado colateral: o solver de Kepler dos testes usava critério de convergência
+**absoluto** (`|ΔE| < 10⁻¹⁵`), que trava para `E ≈ 2π`, onde um ulp já vale
+8,9·10⁻¹⁶ — a iteração oscilava entre dois doubles vizinhos até estourar o limite
+de iterações. Só apareceu ao amostrar 2000 pontos ao longo da órbita. O critério
+agora é relativo.
+
+### 3.7 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|

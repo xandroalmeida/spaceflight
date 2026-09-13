@@ -9,12 +9,15 @@ add_library(spaceflight_core STATIC
     time/coordinate_time.cpp
     celestial/body_id.cpp
     celestial/body_catalog.cpp
+    celestial/oblateness.cpp
     ephemeris/spice_internal.cpp
     ephemeris/spice_kernel_set.cpp
     ephemeris/spice_ephemeris_provider.cpp
     ephemeris/spice_time_converter.cpp
     gravity/point_mass_gravity.cpp
     gravity/composite_force_model.cpp
+    gravity/oblateness_gravity.cpp
+    propagation/dense_output.cpp
     propagation/dormand_prince_54.cpp
     propagation/propagator_report.cpp
     trajectory/orbital_elements.cpp

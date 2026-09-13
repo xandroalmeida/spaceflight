@@ -198,6 +198,54 @@ CoverageWindow SpiceEphemerisProvider::coverage(celestial::BodyId body) const {
     return window;
 }
 
+math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
+                                                  time::CoordinateTime t,
+                                                  coordinates::FrameAxes axes) const {
+    // Name of the body-fixed frame (IAU_EARTH, IAU_MOON, ...).  Asking SPICE
+    // rather than keeping a table means a body with a high-precision frame
+    // loaded gets it for free.
+    std::string body_frame;
+    {
+        const std::lock_guard lock{cache_mutex_};
+        if (const auto it = body_frame_cache_.find(body.naif_id()); it != body_frame_cache_.end()) {
+            body_frame = it->second;
+        }
+    }
+
+    if (body_frame.empty()) {
+        std::array<SpiceChar, 64> name{};
+        SpiceInt frame_code = 0;
+        SpiceBoolean found = SPICEFALSE;
+        {
+            const std::lock_guard lock{detail::spice_mutex()};
+            cidfrm_c(static_cast<SpiceInt>(body.naif_id()), static_cast<SpiceInt>(name.size()),
+                     &frame_code, name.data(), &found);
+            detail::throw_if_spice_failed("cidfrm(" + body.name() + ")");
+        }
+        if (!found) {
+            throw EphemerisUnavailable("no body-fixed frame for " + body.name() +
+                                       "; cannot determine its pole");
+        }
+        body_frame = name.data();
+        const std::lock_guard lock{cache_mutex_};
+        body_frame_cache_[body.naif_id()] = body_frame;
+    }
+
+    const std::string target{coordinates::spice_frame_name(axes)};
+
+    // pxform_c gives the rotation taking vectors FROM the body-fixed frame TO the
+    // target axes; the pole is that matrix applied to the body-fixed +z, i.e. its
+    // third column.
+    SpiceDouble rotation[3][3];
+    {
+        const std::lock_guard lock{detail::spice_mutex()};
+        pxform_c(body_frame.c_str(), target.c_str(), t.seconds_since_j2000(), rotation);
+        detail::throw_if_spice_failed("pxform(" + body_frame + " -> " + target + ")");
+    }
+
+    return math::Vec3{rotation[0][2], rotation[1][2], rotation[2][2]};
+}
+
 bool SpiceEphemerisProvider::has_body(celestial::BodyId body) const {
     if (body == celestial::bodies::solar_system_barycenter) {
         return true;

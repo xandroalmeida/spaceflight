@@ -8,12 +8,18 @@
 #include "core/math/vec3.hpp"
 #include "core/units/constants.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 namespace sft {
 
 // Solves M = E - e sin E by Newton's method to machine precision.
+//
+// The convergence test is RELATIVE: an absolute threshold of 1e-15 stalls for
+// E near 2*pi, where a single ulp is already 8.9e-16, and the iteration then
+// bounces between two adjacent doubles forever.  That is a real trap, not a
+// hypothetical one -- it was found by this suite.
 inline double solve_kepler_elliptic(double mean_anomaly, double eccentricity) {
     double e_anomaly = eccentricity < 0.8 ? mean_anomaly : sf::units::pi;
     for (int i = 0; i < 100; ++i) {
@@ -21,7 +27,7 @@ inline double solve_kepler_elliptic(double mean_anomaly, double eccentricity) {
         const double fp = 1.0 - eccentricity * std::cos(e_anomaly);
         const double delta = f / fp;
         e_anomaly -= delta;
-        if (std::abs(delta) < 1.0e-15) {
+        if (std::abs(delta) <= 1.0e-14 * std::max(1.0, std::abs(e_anomaly))) {
             return e_anomaly;
         }
     }

@@ -35,5 +35,7 @@ spaceflight_add_test(scientific spice_positions)
 spaceflight_add_test(scientific two_body)
 spaceflight_add_test(scientific integrator_convergence)
 spaceflight_add_test(scientific solar_system_gravity)
+spaceflight_add_test(scientific j2_oblateness)
+spaceflight_add_test(scientific dense_output)
 
 spaceflight_add_test(regression reference_states)

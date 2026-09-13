@@ -8,6 +8,8 @@
 #include "core/ephemeris/errors.hpp"
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
 #include "core/ephemeris/spice_time_converter.hpp"
+#include "core/gravity/composite_force_model.hpp"
+#include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/trajectory/orbital_elements.hpp"
@@ -41,13 +43,14 @@ Usage:
   orbit-cli body <name> [--date <epoch>] [--origin <body>] [--frame j2000|eclipj2000]
   orbit-cli elements <name> [--center <body>] [--date <epoch>]
   orbit-cli gravity [--center <body>] [--position x,y,z] [--date <epoch>]
-  orbit-cli propagate <scenario.json> [--csv <file>] [--samples <n>]
+  orbit-cli propagate <scenario.json> [--csv <file>] [--samples <n>] [--j2]
 
 Options:
   --date <epoch>    Any format SPICE accepts: "2026-01-01", "2026-01-01T12:00:00",
                     "2026 JAN 01 12:00 TDB".  A bare timestamp is UTC.  Default: J2000.
   --origin <body>   Origin of the reference frame.  Default: SSB.
   --center <body>   Central body for orbital elements / gravity queries.
+  --j2              Add the central body's J2 oblateness term (docs/physics/geopotential.md).
   --kernels <dir>   Kernel directory.  Default: $SPACEFLIGHT_KERNEL_DIR or the build-time path.
 
 All output is SI: metres, metres per second, seconds, kilograms.
@@ -343,13 +346,21 @@ int command_propagate(const Args& args) {
     if (const auto samples = args.option("samples"); samples.has_value()) {
         scenario.samples = std::max(1, std::stoi(*samples));
     }
+    if (args.has_flag("j2") && scenario.j2_bodies.empty()) {
+        scenario.j2_bodies.push_back(scenario.relative_to);
+    }
 
     const auto t0 = ctx.time->parse(scenario.epoch_text);
     const auto t1 = t0 + time::Duration::seconds(scenario.duration_seconds);
 
     const auto catalog = celestial::BodyCatalog::resolve(*ctx.provider, scenario.bodies);
     const coordinates::ReferenceFrame ssb = coordinates::ReferenceFrame::ssb_j2000();
-    const gravity::PointMassGravity gravity_model{*ctx.provider, catalog, ssb};
+
+    gravity::CompositeForceModel forces;
+    forces.add(std::make_unique<gravity::PointMassGravity>(*ctx.provider, catalog, ssb));
+    for (const auto body : scenario.j2_bodies) {
+        forces.add(gravity::OblatenessGravity::for_body(*ctx.provider, *ctx.provider, body, ssb));
+    }
 
     // Initial state: given relative to a body, integrated in the barycentric frame.
     const auto center_state = ctx.provider->state(scenario.relative_to, t0, ssb);
@@ -358,17 +369,30 @@ int command_propagate(const Args& args) {
     initial.state.velocity = center_state.state.velocity + scenario.velocity;
     initial.mass = scenario.mass;
 
-    propagation::DormandPrince54Propagator propagator{gravity_model, scenario.integrator};
-
     const double gm_center = ctx.provider->gravitational_parameter(scenario.relative_to);
     const coordinates::StateVector initial_relative{scenario.position, scenario.velocity};
     const auto elements0 = trajectory::elements_from_state(initial_relative, gm_center);
 
     std::cout << scenario.describe() << "\n\n"
+              << "force model    : " << forces.describe() << "\n"
               << "epoch UTC      : " << ctx.time->to_utc_string(t0, 6) << "\n"
               << "end UTC        : " << ctx.time->to_utc_string(t1, 6) << "\n\n"
               << "initial osculating elements about " << scenario.relative_to.name() << ":\n"
               << elements0.to_string() << "\n\n";
+
+    // One continuous integration, then sampled through the dense output.  Not
+    // segment-by-segment: restarting the propagator at every sample restarts the
+    // step controller too, which makes the trajectory depend on how many rows the
+    // user asked to see.  See ADR-0006.
+    propagation::Trajectory arc;
+    propagation::DormandPrince54Propagator propagator{forces, scenario.integrator};
+    propagator.set_trajectory_recorder(&arc);
+
+    const auto result = propagator.propagate(initial, t0, t1);
+    if (!result.ok()) {
+        std::cout << "propagation stopped: " << propagation::to_string(result.status) << " -- "
+                  << result.message << "\n\n";
+    }
 
     std::ofstream csv;
     if (!scenario.csv_path.empty()) {
@@ -379,45 +403,24 @@ int command_propagate(const Args& args) {
         csv << std::setprecision(17)
             << "t_tdb_s,x_m,y_m,z_m,vx_ms,vy_ms,vz_ms,rel_x_m,rel_y_m,rel_z_m,"
                "rel_vx_ms,rel_vy_ms,rel_vz_ms,"
-               "radius_m,speed_ms,sma_m,ecc,energy_j_kg,angular_momentum_m2_s\n";
+               "radius_m,speed_ms,sma_m,ecc,inc_deg,raan_deg,argp_deg,"
+               "energy_j_kg,angular_momentum_m2_s\n";
     }
 
-    // Sampling is done by propagating segment by segment, so every printed row
-    // is an exact requested epoch rather than whatever step the integrator took.
-    propagation::PropagationState state = initial;
-    time::CoordinateTime t = t0;
+    std::cout << std::left << std::setw(16) << "t [s]" << std::setw(22) << "radius [m]"
+              << std::setw(22) << "speed [m/s]" << std::setw(22) << "energy [J/kg]"
+              << "h [m^2/s]\n";
 
-    propagation::IntegratorStats totals{};
+    const auto rows = arc.sample(static_cast<std::size_t>(scenario.samples) + 1);
+    const std::size_t print_every =
+        rows.size() > 24 ? (rows.size() + 23) / 24 : 1;  // keep the table readable
+
     double specific_energy_initial = 0.0;
     double angular_momentum_initial = 0.0;
+    trajectory::OrbitalElements elements_final{};
 
-    std::cout << std::left << std::setw(16) << "t [s]" << std::setw(22) << "radius [m]"
-              << std::setw(22) << "speed [m/s]" << std::setw(22) << "energy [J/kg]" << "h [m^2/s]\n";
-
-    for (int i = 0; i <= scenario.samples; ++i) {
-        const double fraction = static_cast<double>(i) / static_cast<double>(scenario.samples);
-        const auto target = t0 + time::Duration::seconds(scenario.duration_seconds * fraction);
-
-        if (i > 0) {
-            const auto result = propagator.propagate(state, t, target);
-            totals.accepted_steps += result.stats.accepted_steps;
-            totals.rejected_steps += result.stats.rejected_steps;
-            totals.force_evaluations += result.stats.force_evaluations;
-            totals.max_error_estimate = std::max(totals.max_error_estimate, result.stats.max_error_estimate);
-            totals.wall_time_seconds += result.stats.wall_time_seconds;
-            totals.max_step_seconds = std::max(totals.max_step_seconds, result.stats.max_step_seconds);
-            totals.min_step_seconds = totals.min_step_seconds == 0.0
-                                          ? result.stats.min_step_seconds
-                                          : std::min(totals.min_step_seconds, result.stats.min_step_seconds);
-            state = result.state;
-            t = result.time;
-            if (!result.ok()) {
-                std::cout << "\npropagation stopped: " << propagation::to_string(result.status) << " -- "
-                          << result.message << "\n";
-                break;
-            }
-        }
-
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const auto& [t, state] = rows[i];
         const auto body_state = ctx.provider->state(scenario.relative_to, t, ssb);
         const coordinates::StateVector relative{state.state.position - body_state.state.position,
                                                 state.state.velocity - body_state.state.velocity};
@@ -427,51 +430,50 @@ int command_propagate(const Args& args) {
             specific_energy_initial = el.specific_energy;
             angular_momentum_initial = el.specific_angular_momentum;
         }
+        elements_final = el;
 
-        std::cout << std::left << std::setw(16) << fmt((t - t0).seconds(), 10) << std::setw(22)
-                  << fmt(relative.radius(), 15) << std::setw(22) << fmt(relative.speed(), 15)
-                  << std::setw(22) << fmt(el.specific_energy, 15)
-                  << fmt(el.specific_angular_momentum, 15) << "\n";
+        if (i % print_every == 0 || i + 1 == rows.size()) {
+            std::cout << std::left << std::setw(16) << fmt((t - t0).seconds(), 10) << std::setw(22)
+                      << fmt(relative.radius(), 15) << std::setw(22) << fmt(relative.speed(), 15)
+                      << std::setw(22) << fmt(el.specific_energy, 15)
+                      << fmt(el.specific_angular_momentum, 15) << "\n";
+        }
 
         if (csv.is_open()) {
             csv << t.seconds_since_j2000() << "," << state.state.position.x << ","
                 << state.state.position.y << "," << state.state.position.z << ","
                 << state.state.velocity.x << "," << state.state.velocity.y << ","
-                << state.state.velocity.z << "," << relative.position.x << "," << relative.position.y
-                << "," << relative.position.z << "," << relative.velocity.x << ","
-                << relative.velocity.y << "," << relative.velocity.z << ","
-                << relative.radius() << "," << relative.speed()
-                << "," << el.semi_major_axis << "," << el.eccentricity << "," << el.specific_energy
-                << "," << el.specific_angular_momentum << "\n";
+                << state.state.velocity.z << "," << relative.position.x << ","
+                << relative.position.y << "," << relative.position.z << ","
+                << relative.velocity.x << "," << relative.velocity.y << ","
+                << relative.velocity.z << "," << relative.radius() << "," << relative.speed()
+                << "," << el.semi_major_axis << "," << el.eccentricity << ","
+                << units::rad_to_deg(el.inclination) << "," << units::rad_to_deg(el.raan) << ","
+                << units::rad_to_deg(el.argument_of_periapsis) << "," << el.specific_energy << ","
+                << el.specific_angular_momentum << "\n";
         }
     }
 
-    const auto body_state = ctx.provider->state(scenario.relative_to, t, ssb);
-    const coordinates::StateVector relative{state.state.position - body_state.state.position,
-                                            state.state.velocity - body_state.state.velocity};
-    const auto el_final = trajectory::elements_from_state(relative, gm_center);
-
-    totals.mean_step_seconds =
-        totals.accepted_steps > 0
-            ? (t - t0).seconds() / static_cast<double>(totals.accepted_steps)
-            : 0.0;
-
     std::cout << "\nfinal osculating elements about " << scenario.relative_to.name() << ":\n"
-              << el_final.to_string() << "\n\n"
+              << elements_final.to_string() << "\n\n"
               << "conservation over the run (two-body reference quantities):\n"
               << "  specific energy drift   : "
-              << fmt(std::abs(el_final.specific_energy - specific_energy_initial) /
+              << fmt(std::abs(elements_final.specific_energy - specific_energy_initial) /
                          std::abs(specific_energy_initial), 6)
               << " relative\n"
               << "  angular momentum drift  : "
-              << fmt(std::abs(el_final.specific_angular_momentum - angular_momentum_initial) /
+              << fmt(std::abs(elements_final.specific_angular_momentum - angular_momentum_initial) /
                          angular_momentum_initial, 6)
               << " relative\n"
-              << "  (non-zero drift here is physics -- third bodies -- plus integration error;\n"
+              << "  (non-zero drift here is physics -- third bodies, J2 -- plus integration error;\n"
               << "   see tests/scientific for the isolated two-body check)\n\n"
-              << "integrator: " << totals.to_string() << "\n"
-              << "proper time elapsed: " << fmt(state.proper_time.seconds(), 17) << " s"
-              << "  (coordinate " << fmt((t - t0).seconds(), 17) << " s; equal while Newtonian)\n";
+              << "integrator: " << result.stats.to_string() << "\n"
+              << "dense output: " << arc.size() << " segments, "
+              << fmt(static_cast<double>(arc.size() * sizeof(propagation::DenseSegment)) / 1024.0, 4)
+              << " kB; sampled " << rows.size() << " states at no extra force evaluation\n"
+              << "proper time elapsed: " << fmt(result.state.proper_time.seconds(), 17) << " s"
+              << "  (coordinate " << fmt((result.time - t0).seconds(), 17)
+              << " s; equal while Newtonian)\n";
 
     if (csv.is_open()) {
         std::cout << "csv written: " << scenario.csv_path << "\n";

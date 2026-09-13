@@ -5,16 +5,22 @@
 // This is the only class in the project that knows SPICE exists.  Everything it
 // returns is SI: the km/km-per-second convention of the toolkit stops here.
 
+#include "core/celestial/body_orientation.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/ephemeris/spice_kernel_set.hpp"
 
 #include <map>
+#include <string>
 #include <memory>
 #include <mutex>
 
 namespace sf::ephemeris {
 
-class SpiceEphemerisProvider final : public EphemerisProvider {
+// Implements BodyOrientationProvider as well: the pole direction comes from the
+// same kernels as the trajectories, via cidfrm_c + pxform_c.  Nothing in this
+// project writes its own precession model.
+class SpiceEphemerisProvider final : public EphemerisProvider,
+                                     public celestial::BodyOrientationProvider {
 public:
     // Loads every kernel under `kernel_dir` (default: SPACEFLIGHT_KERNEL_DIR or
     // the build-time path) and owns them for the provider's lifetime.
@@ -37,6 +43,10 @@ public:
     [[nodiscard]] CoverageWindow coverage(celestial::BodyId body) const override;
     [[nodiscard]] bool has_body(celestial::BodyId body) const override;
 
+    [[nodiscard]] math::Vec3 pole_direction(celestial::BodyId body,
+                                            time::CoordinateTime t,
+                                            coordinates::FrameAxes axes) const override;
+
     [[nodiscard]] const SpiceKernelSet& kernels() const { return *kernels_; }
 
 private:
@@ -49,6 +59,7 @@ private:
     mutable std::map<int, double> gm_cache_;
     mutable std::map<int, double> radius_cache_;
     mutable std::map<int, CoverageWindow> coverage_cache_;
+    mutable std::map<int, std::string> body_frame_cache_;
 };
 
 }  // namespace sf::ephemeris

@@ -1,0 +1,35 @@
+{
+  // The same 400 km / 51.6 deg orbit as leo-circular.json, run for a full day
+  // with the Earth's oblateness included.
+  //
+  // What to look for: RAAN drifts about -5 deg/day.  That is the dominant reason
+  // a real low orbit does not stay where a point-mass model puts it, and the
+  // whole reason J2 exists in this project (docs/physics/geopotential.md).
+  // Run it once with "j2_bodies" emptied to see the difference.
+  "name": "LEO 400 km, nodal regression under J2",
+  "epoch": "2026-01-01 00:00:00 TDB",
+  "duration_s": 86400.0,
+
+  "bodies": ["Sun", "Earth", "Moon"],
+
+  "perturbations": {
+    "j2_bodies": ["Earth"]
+  },
+
+  "spacecraft": {
+    "relative_to": "Earth",
+    "position_m":  [6778000.0, 0.0, 0.0],
+    "velocity_ms": [0.0, 4763.3559898, 6009.8595578],
+    "mass_kg": 1000.0
+  },
+
+  "integrator": {
+    "rtol": 1e-11,
+    "atol_position_m": 1e-4,
+    "atol_velocity_ms": 1e-7,
+    "initial_step_s": 10.0,
+    "max_step_s": 120.0
+  },
+
+  "output": { "samples": 24 }
+}

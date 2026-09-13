@@ -4,6 +4,7 @@
 // See ADR-0005 for why this integrator and not a symplectic one.
 
 #include "core/gravity/force_model.hpp"
+#include "core/propagation/dense_output.hpp"
 #include "core/propagation/spacecraft_propagator.hpp"
 
 #include <array>
@@ -24,6 +25,14 @@ public:
     void set_step_observer(StepObserver observer) { observer_ = std::move(observer); }
     void observe_rejected_steps(bool yes) { observe_rejected_ = yes; }
 
+    // Records a dense segment per accepted step into `sink` (cleared first), so
+    // the arc can be queried at arbitrary epochs afterwards.  Pass nullptr to
+    // stop recording.  Recording costs no force evaluations and does not change
+    // the trajectory by a single bit -- tests/scientific/test_dense_output.cpp
+    // asserts exactly that.  See ADR-0006.
+    void set_trajectory_recorder(Trajectory* sink) { recorder_ = sink; }
+    [[nodiscard]] Trajectory* trajectory_recorder() const noexcept { return recorder_; }
+
     [[nodiscard]] const IntegratorConfig& config() const noexcept { return config_; }
     void set_config(IntegratorConfig config);
 
@@ -31,8 +40,8 @@ private:
     // State layout: [x y z vx vy vz tau].  Proper time rides along as component
     // 6 and is not part of the error norm (its derivative is exact in the
     // Newtonian regime).  Milestone 4 turns components 3..5 into u = gamma*v.
-    static constexpr std::size_t kDim = 7;
-    using Vector = std::array<double, kDim>;
+    static constexpr std::size_t kDim = kStateDimension;
+    using Vector = StateArray;
 
     [[nodiscard]] Vector derivative(const Vector& y, time::CoordinateTime t,
                                     double mass, gravity::ForceResult& out_force) const;
@@ -42,6 +51,7 @@ private:
     const gravity::ForceModel& forces_;
     IntegratorConfig config_;
     StepObserver observer_;
+    Trajectory* recorder_{nullptr};
     bool observe_rejected_{false};
 };
 
