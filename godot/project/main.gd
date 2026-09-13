@@ -14,10 +14,23 @@ const EPOCH_UTC := "2026-01-01T00:00:00"
 
 ## Scene units per metre.  Not a precision knob -- see
 ## docs/architecture/rendering.md section 3.
+## At 1e-6: Earth radius 6.371 units, ship at 6.771, Moon at 358, Sun at 147 000.
 const RENDER_SCALE := 1.0e-6
-## Bodies at true scale are invisible dots.  This is a presentation choice, and
-## it is named so that nobody mistakes it for geometry.
-const BODY_EXAGGERATION := 8.0
+
+## Bodies drawn larger than life.  1.0 means honest geometry, and that is the
+## right default HERE: from a 400 km orbit the Earth already fills the sky, and
+## any exaggeration puts the camera INSIDE the planet -- at 8x its drawn radius
+## is 50.97 units while the ship sits 6.77 units from the centre. The knob exists
+## for a Solar-System-wide view, where true-scale planets are invisible dots, and
+## `B` cycles it at runtime.
+const BODY_EXAGGERATION := 1.0
+const EXAGGERATION_LEVELS := [1.0, 10.0, 100.0, 1000.0]
+
+## Chase camera distance behind the ship, in scene units (0.2 = 200 km).
+const CHASE_DISTANCE := 0.2
+## The ship drawn at true scale would be 1e-5 units across -- invisible. 0.02 is
+## 20 km: a deliberate lie, and the only one in the scene.
+const SHIP_SIZE := 0.02
 
 const WARP_LEVELS := [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]
 
@@ -27,6 +40,7 @@ var readout: Label
 var body_meshes: Array[MeshInstance3D] = []
 var ship_mesh: MeshInstance3D
 var warp_index := 0
+var exaggeration_index := 0
 var _headless_seconds := 0.0
 var focus_index := -1  ## -1 = the spacecraft
 
@@ -89,7 +103,7 @@ func _build_scene() -> void:
 
 	ship_mesh = MeshInstance3D.new()
 	var ship_shape := BoxMesh.new()
-	ship_shape.size = Vector3.ONE * 0.6
+	ship_shape.size = Vector3.ONE * SHIP_SIZE
 	ship_mesh.mesh = ship_shape
 	var ship_material := StandardMaterial3D.new()
 	ship_material.albedo_color = Color(1.0, 0.85, 0.3)
@@ -100,8 +114,11 @@ func _build_scene() -> void:
 	add_child(ship_mesh)
 
 	camera = Camera3D.new()
-	camera.near = 0.05
-	camera.far = 1.0e6
+	# near 0.01 = 10 km; far 2e5 = 2e11 m = 1.3 au, which reaches past the Sun at
+	# 147 000 units. Godot 4 uses a reverse-Z depth buffer, which survives this
+	# ratio far better than the classic one would.
+	camera.near = 0.01
+	camera.far = 2.0e5
 	camera.current = true
 	add_child(camera)
 
@@ -178,14 +195,31 @@ func _process(delta: float) -> void:
 	_update_readout()
 
 
+func _warn_if_camera_is_inside_a_body() -> void:
+	## A drawn radius larger than the distance to the body means the camera is
+	## inside it, and the view becomes a wall of flat colour with no hint as to
+	## why. Cheap to check, and it is exactly the bug that BODY_EXAGGERATION = 8
+	## produced in the first version of this scene.
+	for i in range(body_meshes.size()):
+		var radius: float = simulation.get_body_radius(i)
+		if radius <= 0.0:
+			continue
+		var distance: float = (body_meshes[i].position - camera.position).length()
+		if radius > distance:
+			push_warning("camera is inside %s: drawn radius %.2f > distance %.2f units (body scale %.0fx)"
+				% [simulation.get_body_name(i), radius, distance, EXAGGERATION_LEVELS[exaggeration_index]])
+
+
 func _place_camera() -> void:
 	## Chase camera, positioned relative to the focus in scene units. The origin
 	## of the projection is the focus itself, so the camera sits a few units from
 	## the origin and the float precision stays microscopic.
 	var target := ship_mesh.position if focus_index < 0 else body_meshes[focus_index].position
-	var distance := 12.0
+	var distance := CHASE_DISTANCE
 	if focus_index >= 0:
-		distance = maxf(simulation.get_body_radius(focus_index) * 4.0, 12.0)
+		# Far enough out to see the whole body, with a floor for the barycentres,
+		# which have no radius at all.
+		distance = maxf(simulation.get_body_radius(focus_index) * 3.0, 1.0)
 
 	var back := -simulation.get_spacecraft_velocity_direction()
 	if back.length() < 0.5:
@@ -226,7 +260,8 @@ func _update_readout() -> void:
 		"gamma - 1      %s" % String.num_scientific(s["lorentz_factor_minus_one"]),
 		"render res.    %s m per float ulp at %s" % [String.num_scientific(s["render_resolution_m"]), s["reference"]],
 		"",
-		"focus: %s   (, . warp   F focus   R restart)" % ("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)),
+		"focus: %s   body scale %.0fx" % [("spacecraft" if focus_index < 0 else simulation.get_body_name(focus_index)), EXAGGERATION_LEVELS[exaggeration_index]],
+		"(, . warp   F focus   B body scale   R restart)",
 	]
 	readout.text = "\n".join(lines)
 
@@ -255,5 +290,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			focus_index += 1
 			if focus_index >= simulation.get_body_count():
 				focus_index = -1
+		KEY_B:
+			exaggeration_index = (exaggeration_index + 1) % EXAGGERATION_LEVELS.size()
+			simulation.set_body_scale_exaggeration(EXAGGERATION_LEVELS[exaggeration_index])
+			_warn_if_camera_is_inside_a_body()
 		KEY_R:
 			simulation.start_circular_orbit(ALTITUDE_M, INCLINATION_DEG)
