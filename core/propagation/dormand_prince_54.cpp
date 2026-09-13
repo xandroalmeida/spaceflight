@@ -1,5 +1,7 @@
 #include "core/propagation/dormand_prince_54.hpp"
 
+#include "core/relativity/kinematics.hpp"
+
 #include <algorithm>
 #include <iterator>
 #include <chrono>
@@ -71,31 +73,77 @@ void DormandPrince54Propagator::set_config(IntegratorConfig config) {
 
 DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
     const Vector& y, time::CoordinateTime t, gravity::ForceResult& out_force) const {
-    const PropagationState s = state_from_array(y);
+    const PropagationState s = state_from_array(y, config_.kinematics);
     out_force = forces_.evaluate(s, t);
 
     Vector dy{};
-    dy[0] = y[3];
-    dy[1] = y[4];
-    dy[2] = y[5];
-    dy[3] = out_force.acceleration.x;
-    dy[4] = out_force.acceleration.y;
-    dy[5] = out_force.acceleration.z;
-    // dtau/dt.  Exactly 1 in the Newtonian regime; Milestone 4 replaces this
-    // with 1/gamma (special relativity) and later with the weak-field form.
-    // See docs/physics/relativity-roadmap.md section 3.2.
-    dy[6] = 1.0;
-    // dm/dt: negative while an engine burns, zero otherwise.
-    dy[7] = out_force.mass_flow_rate;
+
+    // Thrust is reported in the rest frame; what it does to the trajectory is
+    // decided here, by the kinematics.
+    math::Vec3 velocity_derivative{};
+    double inverse_gamma = 1.0;
+
+    if (config_.kinematics == Kinematics::SpecialRelativistic) {
+        const math::Vec3 u{y[3], y[4], y[5]};
+        const double gamma = relativity::lorentz_factor(u);
+        inverse_gamma = 1.0 / gamma;
+        const math::Vec3 v = u * inverse_gamma;
+
+        dy[0] = v.x;
+        dy[1] = v.y;
+        dy[2] = v.z;
+
+        // du/dt = F * e_spatial / (m0 gamma), with e_spatial the boost of the
+        // rest-frame unit vector:  e = n + (gamma - 1)(n.beta_hat) beta_hat.
+        // Parallel to the motion this collapses to du/dt = F/m0 -- the proper
+        // acceleration, with no gamma at all -- and perpendicular to it the
+        // response is smaller by gamma. See relativistic-propulsion.md 2.3.
+        const double thrust = out_force.proper_thrust.norm();
+        if (thrust > 0.0 && s.mass > 0.0) {
+            const math::Vec3 n = out_force.proper_thrust / thrust;
+            const double speed = v.norm();
+            math::Vec3 e_spatial = n;
+            if (speed > 0.0) {
+                const math::Vec3 beta_hat = v / speed;
+                e_spatial += beta_hat * ((gamma - 1.0) * dot(n, beta_hat));
+            }
+            velocity_derivative = e_spatial * (thrust * inverse_gamma / s.mass);
+        }
+        // Any non-thrust coordinate acceleration is a flat-spacetime fiction
+        // here; the propagate() loop refuses it unless the caller opted in.
+        velocity_derivative += out_force.acceleration;
+    } else {
+        dy[0] = y[3];
+        dy[1] = y[4];
+        dy[2] = y[5];
+        velocity_derivative = out_force.acceleration;
+        if (s.mass > 0.0) {
+            velocity_derivative += out_force.proper_thrust / s.mass;
+        }
+    }
+
+    dy[3] = velocity_derivative.x;
+    dy[4] = velocity_derivative.y;
+    dy[5] = velocity_derivative.z;
+
+    // dtau/dt = 1/gamma, which is exactly 1 in the Newtonian regime.
+    dy[6] = inverse_gamma;
+    // dm0/dt = (dm0/dtau)/gamma: the force models report consumption in the
+    // rest frame, which is where it is measured.
+    dy[7] = out_force.mass_flow_rate * inverse_gamma;
 
     if (inertia_ != nullptr) {
         // qdot = 1/2 q (x) (0, omega_body)
         const math::Quaternion q_dot =
             math::attitude_derivative(s.attitude.orientation, s.attitude.angular_velocity);
-        dy[8] = q_dot.w();
-        dy[9] = q_dot.x();
-        dy[10] = q_dot.y();
-        dy[11] = q_dot.z();
+        // Body dynamics runs on the ship's own clock, so the coordinate-time
+        // derivatives carry a factor 1/gamma. Thomas precession -- the rotation a
+        // non-collinearly accelerated frame picks up -- is NOT included; it needs
+        // its own derivation and belongs with the geodesic work.
+        dy[8] = q_dot.w() * inverse_gamma;
+        dy[9] = q_dot.x() * inverse_gamma;
+        dy[10] = q_dot.y() * inverse_gamma;
+        dy[11] = q_dot.z() * inverse_gamma;
 
         // Euler: omega_dot = I^-1 (tau - omega x (I omega)). The gyroscopic term
         // does no work but is responsible for precession, nutation and the
@@ -103,9 +151,9 @@ DormandPrince54Propagator::Vector DormandPrince54Propagator::derivative(
         const math::Vec3 momentum = inertia_->angular_momentum(s.attitude.angular_velocity);
         const math::Vec3 gyroscopic = cross(s.attitude.angular_velocity, momentum);
         const math::Vec3 alpha = inertia_->angular_acceleration(out_force.torque - gyroscopic);
-        dy[12] = alpha.x;
-        dy[13] = alpha.y;
-        dy[14] = alpha.z;
+        dy[12] = alpha.x * inverse_gamma;
+        dy[13] = alpha.y * inverse_gamma;
+        dy[14] = alpha.z * inverse_gamma;
     }
     return dy;
 }
@@ -172,7 +220,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
     }
     const double direction = total > 0.0 ? 1.0 : -1.0;
 
-    Vector y = array_from_state(initial);
+    Vector y = array_from_state(initial, config_.kinematics);
     time::CoordinateTime t = from;
 
     double h = direction * std::min({std::abs(config_.initial_step.seconds()),
@@ -184,6 +232,21 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
 
     gravity::ForceResult force{};
     Vector k1 = derivative(y, t, force);
+
+    // The refusal promised by relativistic-propulsion.md section 8, checked once
+    // on the first force evaluation rather than in the inner loop.
+    if (config_.kinematics == Kinematics::SpecialRelativistic &&
+        !config_.allow_gravity_with_relativistic_kinematics &&
+        force.acceleration.norm_squared() > 0.0) {
+        result.status = PropagationStatus::UnsupportedRegime;
+        result.message =
+            "special-relativistic kinematics was given a non-thrust acceleration of " +
+            std::to_string(force.acceleration.norm()) +
+            " m/s^2. That mixes flat-spacetime dynamics with a Newtonian field, and the error is "
+            "silent. Set allow_gravity_with_relativistic_kinematics if the field really is weak "
+            "and the speeds moderate";
+        return result;
+    }
     result.stats.force_evaluations = 1;
 
     double error_previous = 1.0e-4;  // seeds the PI controller
@@ -263,6 +326,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
                 DenseSegment segment{};
                 segment.begin = t;
                 segment.step_seconds = h_step;
+                segment.kinematics = config_.kinematics;
                 for (std::size_t i = 0; i < kDim; ++i) {
                     const double difference = y_new[i] - y[i];
                     const double bspl = h_step * k1[i] - difference;
@@ -303,7 +367,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
             max_h = std::max(max_h, std::abs(h_step));
 
             if (observer_) {
-                observer_(StepInfo{t, state_from_array(y), h_step, error, true});
+                observer_(StepInfo{t, state_from_array(y, config_.kinematics), h_step, error, true});
             }
 
             if (force_new.inside_body && config_.stop_inside_body) {
@@ -314,8 +378,9 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         } else {
             ++result.stats.rejected_steps;
             if (observer_ && observe_rejected_) {
-                observer_(StepInfo{t + time::Duration{h_step}, state_from_array(y_new),
-                                   h_step, error, false});
+                observer_(StepInfo{t + time::Duration{h_step},
+                                   state_from_array(y_new, config_.kinematics), h_step, error,
+                                   false});
             }
             if (!finite) {
                 result.status = PropagationStatus::NonFiniteState;
@@ -364,7 +429,7 @@ PropagationResult DormandPrince54Propagator::propagate(const PropagationState& i
         h = h_next;
     }
 
-    result.state = state_from_array(y);
+    result.state = state_from_array(y, config_.kinematics);
     result.time = t;
 
     result.stats.min_step_seconds = std::isfinite(min_h) ? min_h : 0.0;

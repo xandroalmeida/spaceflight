@@ -19,10 +19,26 @@
 namespace sf::gravity {
 
 struct ForceResult {
-    math::Vec3 acceleration{};  // [m/s^2], in the integration frame
+    // Coordinate-frame acceleration from forces that are NOT thrust: gravity,
+    // and later drag and radiation pressure [m/s^2].
+    math::Vec3 acceleration{};
 
-    // Rate of change of the spacecraft's rest mass [kg/s].  Negative while an
-    // engine is burning, zero for every conservative force.  It is part of the
+    // Thrust as a vector in the ship's instantaneous rest frame (MCRF), written
+    // in the coordinate frame's axes [N].
+    //
+    // Thrust is reported as force rather than as acceleration because the rest
+    // frame is where it is DEFINED -- the nozzle pushes on the ship, and both
+    // are at rest in that frame. Turning it into an acceleration requires the
+    // kinematics, which is the integrator's business: in the Newtonian regime
+    // a = F/m, and in the relativistic one the same force gives a longitudinal
+    // and a transverse response differing by gamma
+    // (docs/physics/relativistic-propulsion.md section 2.3).
+    math::Vec3 proper_thrust{};
+
+    // dm0/dtau: rate of change of the REST mass with respect to PROPER time
+    // [kg/s]. Negative while an engine is burning, zero for every conservative
+    // force. Proper time because that is the frame the consumption is measured
+    // in; the integrator divides by gamma when it needs dm0/dt.  It is part of the
     // force result because thrust and consumption are one physical process:
     // F = eta * q * w with q = -dm/dt (docs/physics/propulsion-model.md section 3).
     // Reporting them separately would allow them to drift apart, which is exactly

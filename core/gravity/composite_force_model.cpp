@@ -24,6 +24,7 @@ ForceResult CompositeForceModel::evaluate(const propagation::PropagationState& s
     for (const ForceModel* model : models_) {
         const ForceResult r = model->evaluate(spacecraft, t);
         total.acceleration += r.acceleration;
+        total.proper_thrust += r.proper_thrust;
         total.mass_flow_rate += r.mass_flow_rate;
         total.torque += r.torque;
         if (r.inside_body) {

@@ -243,7 +243,37 @@ O teste de apontamento exigia erro final `< 1°` e obtinha 2,59°. Um PD é
 controlador **tipo 0**: seguir uma rampa deixa erro permanente
 `θ = 2ζn/ω_n`, e prograde gira à taxa orbital. Previsto 2,5930°, medido 2,5932°.
 
-### 3.11 Regressão (`tests/regression/test_reference_states.cpp`)
+### 3.11 Propulsão relativística (`tests/scientific/test_relativistic_propulsion.cpp`)
+
+Tudo em espaço plano, sem gravidade — que é o domínio declarado (§8 do documento).
+
+| Quantidade | Medido | Limite | Origem |
+|---|---|---|---|
+| `γ` de `u` vs `1/√(1−β²)`, escada inteira | — | 10⁻¹⁴ rel | duas formas exatas do mesmo número |
+| movimento hiperbólico: `β(t)` | exato aos dígitos impressos | 10⁻¹¹ rel | `β = (at/c)/√(1+(at/c)²)` |
+| movimento hiperbólico: `x(t)` | idem | 10⁻¹⁰ rel | `x = (c²/a)(γ−1)` |
+| movimento hiperbólico: `τ(t)` | idem | 10⁻¹¹ rel | `τ = (c/a)·asinh(at/c)` |
+| equação do foguete `Δφ`, de `β = 0 / 0,5 / 0,9` | exato | 10⁻⁹ rel | `Δφ = (ηw/c)ln(m₀/m₁)`, **independente** do `β` inicial |
+| anisotropia `du∥/du⊥` a `β = 0,9` | 2,29416 | 10⁻⁵ rel | `= γ` exatamente |
+| limite newtoniano a `β = 2,56·10⁻⁶` | 3,303·10⁻¹² | 20 % | `β²/2 = 3,289·10⁻¹²` |
+| recusa de gravidade | — | — | status `UnsupportedRegime`, §8 |
+
+**Onde o `double` acaba, e a física não.** A 1 g por 1 ano o teste chega a
+`β = 0,718`; empurrando a variável de estado direto:
+
+```
+u/c = 1·10⁷   γ = 1,0·10⁷   1 − β = 5,00·10⁻¹⁵
+u/c = 1·10⁸   γ = 1,0·10⁸   1 − β = 0          ← v arredonda para c
+u/c = 1·10⁹   γ = 1,0·10⁹   1 − β = 0
+```
+
+`β` lê exatamente 1 a partir de `γ ≈ 6,7·10⁷`, porque `1−β = 1/(2γ²)` cai abaixo
+de meio ulp de 1. Não é overflow nem clamp: a velocidade coordenada daquele estado
+não é um `double` distinguível. `u`, `γ` e a rapidez continuam exatos, e é neles
+que as equações são escritas. O teste passou a exigir `β ≤ 1` e a verificar `γ` e
+a rapidez, em vez de exigir `β < 1` de um número que não pode representá-lo.
+
+### 3.12 Regressão (`tests/regression/test_reference_states.cpp`)
 
 | Quantidade | Limite | Origem |
 |---|---|---|

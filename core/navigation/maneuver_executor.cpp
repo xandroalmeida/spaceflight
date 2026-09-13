@@ -81,7 +81,7 @@ gravity::ForceResult ManeuverExecutor::evaluate(const propagation::PropagationSt
         throw std::runtime_error("ManeuverExecutor: non-positive spacecraft mass");
     }
 
-    result.acceleration = thrust_direction(state, t, *maneuver) * (thrust / state.mass);
+    result.proper_thrust = thrust_direction(state, t, *maneuver) * thrust;
     result.mass_flow_rate = -flow;
     return result;
 }

@@ -1,5 +1,7 @@
 #include "core/propagation/dense_output.hpp"
 
+#include "core/relativity/kinematics.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -7,10 +9,13 @@
 
 namespace sf::propagation {
 
-PropagationState state_from_array(const StateArray& y) {
+PropagationState state_from_array(const StateArray& y, Kinematics kinematics) {
     PropagationState state{};
     state.state.position = math::Vec3{y[0], y[1], y[2]};
-    state.state.velocity = math::Vec3{y[3], y[4], y[5]};
+    const math::Vec3 velocity_slot{y[3], y[4], y[5]};
+    state.state.velocity = kinematics == Kinematics::SpecialRelativistic
+                               ? relativity::coordinate_velocity(velocity_slot)
+                               : velocity_slot;
     state.proper_time = time::Duration{y[6]};
     state.mass = y[7];
     // Normalised on read: integration takes q off the unit sphere by ~1e-13 per
@@ -20,11 +25,14 @@ PropagationState state_from_array(const StateArray& y) {
     return state;
 }
 
-StateArray array_from_state(const PropagationState& state) {
+StateArray array_from_state(const PropagationState& state, Kinematics kinematics) {
     const auto& q = state.attitude.orientation;
     const auto& w = state.attitude.angular_velocity;
+    const math::Vec3 velocity_slot = kinematics == Kinematics::SpecialRelativistic
+                                         ? relativity::proper_velocity(state.state.velocity)
+                                         : state.state.velocity;
     return StateArray{state.state.position.x, state.state.position.y, state.state.position.z,
-                      state.state.velocity.x, state.state.velocity.y, state.state.velocity.z,
+                      velocity_slot.x, velocity_slot.y, velocity_slot.z,
                       state.proper_time.seconds(), state.mass,
                       q.w(), q.x(), q.y(), q.z(), w.x, w.y, w.z};
 }
@@ -44,7 +52,7 @@ PropagationState DenseSegment::at_theta(double theta) const {
                      th1 * (coefficients[2][i] +
                             th * (coefficients[3][i] + th1 * coefficients[4][i])));
     }
-    return state_from_array(y);
+    return state_from_array(y, kinematics);
 }
 
 bool DenseSegment::contains(time::CoordinateTime t) const {

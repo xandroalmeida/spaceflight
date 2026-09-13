@@ -6,12 +6,13 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 3 concluído.** Núcleo científico, efemérides JPL, gravidade de
+**Estado: Milestone 4 concluído.** Núcleo científico, efemérides JPL, gravidade de
 N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
 targeting diferencial, e a camada de renderização (snapshot, origem flutuante,
 GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, e o
-cockpit. Sem gameplay, sem relatividade. 22 suítes de teste, das quais 12 comparam
-resultados contra o JPL Horizons ou contra soluções analíticas fechadas.
+cockpit, e propulsão relativística em espaço plano. Sem gameplay. 23 suítes de
+teste, das quais 13 comparam resultados contra o JPL Horizons ou contra soluções
+analíticas fechadas.
 
 ---
 
@@ -57,6 +58,7 @@ spaceflight/
 │   │   ├── propulsion-model.md        F = eta*q*w derivado de conservação; o que eta custa
 │   │   ├── lambert.md                 variáveis universais, casos degenerados, targeting
 │   │   ├── attitude.md                Euler, quaternions, RCS, eixo intermediário
+│   │   ├── relativistic-propulsion.md redução em componentes, foguete, limites
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
 │   ├── adr/                           0001 linguagem .. 0007 formato de configuração
@@ -82,7 +84,7 @@ spaceflight/
 │   ├── spacecraft/             SpacecraftState
 │   ├── simulation/             SimulationClock, SimulationSnapshot
 │   ├── render/                 RenderTransform: absoluto → câmera → float
-│   ├── relativity/             Milestone 4  (vazio: precisa do documento antes)
+│   ├── relativity/             cinemática em u = γv, sem cancelamento
 │   ├── attitude/               inércia, RCS, controle de apontamento PD
 │   ├── autopilot/              Milestone 3
 │
@@ -131,7 +133,7 @@ E três regras que valem para tudo o que vier:
 
 ```
 $ ctest --test-dir build
-100% tests passed, 0 tests failed out of 22
+100% tests passed, 0 tests failed out of 23
 ```
 
 Entre outras coisas:
@@ -161,6 +163,12 @@ Entre outras coisas:
   circular com `e = 4,9·10⁻⁶`;
 * Lambert reconstrói a velocidade de um arco conhecido a 10⁻¹¹, e o targeting
   diferencial leva um intercepto lunar de **267 573 km** de erro para **3,5 km**;
+* com aceleração própria de 1 g durante um ano, `β`, posição e tempo próprio
+  batem com o movimento hiperbólico exato até os dígitos impressos, e a equação
+  do foguete relativística vale partindo de `β = 0`, `0,5` ou `0,9` — porque é
+  escrita em rapidez, que é aditiva;
+* o mesmo empuxo a `β = 0,9` acelera `γ = 2,29416` vezes menos de través do que
+  ao longo do movimento, exatamente;
 * a rotação livre de torque conserva o **vetor** momento angular a 9·10⁻¹², um
   pião simétrico precessa na taxa analítica, e a instabilidade do eixo
   intermediário (efeito Dzhanibekov) bate com `cosh`/`sinh` da solução
@@ -203,10 +211,12 @@ revelou estão em `godot/README.md`.
 
 ## Próximo
 
-Milestone 4: propulsão relativística. A regra §37 vale: antes de qualquer código,
-`docs/physics/relativistic-propulsion.md` — estado matemático, conservação de
-momento, aceleração própria × coordenada, equação do foguete, limites
-newtonianos. A formulação alvo já está fixada em
-`docs/physics/relativity-roadmap.md` §3: a variável de estado passa a ser
-`u = γv`, e o limite `|v| < c` deixa de precisar de vigilância porque vira a
-forma da equação.
+Milestone 5: renderização relativística. A regra §38 vale como a §37 valeu: antes
+de qualquer código, `docs/physics/relativistic-rendering.md` — tempo de trânsito
+da luz, aberração, Doppler, *beaming*, posição aparente, rotação de Terrell. E
+**não** representar contração de Lorentz escalando meshes.
+
+Aberta desde o Milestone 4, e maior que ele: gravidade em regime relativístico
+(`relativity-roadmap.md` §5). Hoje o propagador **recusa** misturar cinemática
+relativística com campo gravitacional newtoniano, porque é uma aproximação válida
+colada numa inválida.

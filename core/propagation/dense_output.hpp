@@ -10,6 +10,7 @@
 // section 12 forbids.  See ADR-0006.
 
 #include "core/propagation/propagation_state.hpp"
+#include "core/propagation/spacecraft_propagator.hpp"
 #include "core/time/coordinate_time.hpp"
 #include "core/time/duration.hpp"
 
@@ -34,8 +35,14 @@ namespace sf::propagation {
 inline constexpr std::size_t kStateDimension = 15;
 using StateArray = std::array<double, kStateDimension>;
 
-PropagationState state_from_array(const StateArray& y);
-StateArray array_from_state(const PropagationState& state);
+// Slots 3-5 hold the coordinate velocity v under Newtonian kinematics and the
+// proper velocity u = gamma*v under relativistic ones. PropagationState always
+// exposes v, which is what a cockpit, an orbital element and a human all mean by
+// "velocity"; the conversion happens here and only here.
+PropagationState state_from_array(const StateArray& y,
+                                  Kinematics kinematics = Kinematics::Newtonian);
+StateArray array_from_state(const PropagationState& state,
+                            Kinematics kinematics = Kinematics::Newtonian);
 
 // One accepted step, stored as the five coefficient vectors of the Dormand-Prince
 // 4th order interpolant.  Costs no extra force evaluations: it is built from the
@@ -43,6 +50,7 @@ StateArray array_from_state(const PropagationState& state);
 struct DenseSegment {
     time::CoordinateTime begin{};
     double step_seconds{0.0};  // signed: negative when propagating backwards
+    Kinematics kinematics{Kinematics::Newtonian};
     std::array<StateArray, 5> coefficients{};
 
     [[nodiscard]] time::CoordinateTime end() const {

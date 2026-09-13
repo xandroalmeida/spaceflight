@@ -25,8 +25,10 @@ gravity::ForceResult MainEngineForce::evaluate(const propagation::PropagationSta
         return result;
     }
 
+    // The nose direction, as defined in the ship's rest frame. The integrator
+    // decides what that force does to the trajectory.
     const math::Vec3 nose = state.attitude.orientation.rotate(math::Vec3::unit_x());
-    result.acceleration = nose * (current_thrust() / state.mass);
+    result.proper_thrust = nose * current_thrust();
     result.mass_flow_rate = -craft_.engine().mass_flow_at(throttle_);
     // A main engine aligned with the centre of mass produces no torque. One that
     // is not would, and the term is here so that adding a gimbal later is a

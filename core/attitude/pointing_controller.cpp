@@ -110,9 +110,7 @@ gravity::ForceResult RcsForce::evaluate(const propagation::PropagationState& sta
     // The force is produced in the body frame and acts in the inertial one. A
     // balanced couple cancels here and this term is zero -- which is the point of
     // laying the thrusters out in couples.
-    result.acceleration =
-        state.mass > 0.0 ? state.attitude.orientation.rotate(output.force_body) / state.mass
-                         : Vec3{};
+    result.proper_thrust = state.attitude.orientation.rotate(output.force_body);
     result.mass_flow_rate = -output.mass_flow;
     return result;
 }

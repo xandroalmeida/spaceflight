@@ -16,6 +16,16 @@
 
 namespace sf::propagation {
 
+// Which equations of motion the integrator uses.
+//
+// The choice is deliberate and per-propagation, not global: the Newtonian path
+// is what every Solar System scenario wants, and the relativistic one is only
+// valid in flat spacetime (docs/physics/relativistic-propulsion.md section 8).
+enum class Kinematics {
+    Newtonian,           // integrates v; dtau/dt = 1
+    SpecialRelativistic  // integrates u = gamma*v; dtau/dt = 1/gamma
+};
+
 struct IntegratorConfig {
     // Error per step is measured against  atol + rtol*|y|  componentwise, with
     // separate absolute floors for position and velocity because they have
@@ -41,6 +51,15 @@ struct IntegratorConfig {
     double safety_factor{0.9};
     double min_shrink_factor{0.2};
     double max_growth_factor{5.0};
+
+    Kinematics kinematics{Kinematics::Newtonian};
+
+    // Relativistic kinematics is flat-spacetime physics. Adding a Newtonian
+    // gravitational acceleration to it mixes a valid approximation with an
+    // invalid one, and the error is silent. The propagator refuses unless this
+    // is set deliberately -- at which point the caller owns the claim that the
+    // field is weak and the speeds moderate.
+    bool allow_gravity_with_relativistic_kinematics{false};
 
     // PI step controller (Gustafsson).  beta = 0 reduces it to the classical
     // "elementary" controller; 0.04 is the standard value for DOPRI5 and damps
@@ -79,7 +98,8 @@ enum class PropagationStatus {
     MinimumStepReached,   // error control demanded a step below min_step
     MaxStepsExceeded,
     NonFiniteState,       // NaN/Inf appeared: reported, never swept under a clamp
-    InsideBody            // trajectory entered a body's radius
+    InsideBody,           // trajectory entered a body's radius
+    UnsupportedRegime     // relativistic kinematics asked to carry a gravity field
 };
 
 std::string to_string(PropagationStatus status);
