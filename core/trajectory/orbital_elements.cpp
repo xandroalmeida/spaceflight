@@ -52,50 +52,64 @@ OrbitalElements elements_from_state(const coordinates::StateVector& sv, double g
     el.eccentricity = e_vec.norm();
     el.circular = el.eccentricity < kEccentricityTolerance;
 
-    el.inclination = h_mag > 0.0 ? safe_acos(h.z / h_mag) : 0.0;
-    el.equatorial = el.inclination < kInclinationTolerance ||
-                    std::abs(el.inclination - units::pi) < kInclinationTolerance;
+    // The four angles are computed in radians, because that is what the
+    // trigonometry below speaks, and bound to units::Angle once at the end.
+    // Converting at every assignment would put a constructor call inside every
+    // quadrant test and say nothing extra: the unit is a property of the FIELD,
+    // and the field is where it is declared.
+    double inclination = h_mag > 0.0 ? safe_acos(h.z / h_mag) : 0.0;
+    double raan = 0.0;
+    double argument_of_periapsis = 0.0;
+    double true_anomaly = 0.0;
+
+    el.equatorial = inclination < kInclinationTolerance ||
+                    std::abs(inclination - units::pi) < kInclinationTolerance;
 
     // Node vector: z_hat x h.
     const Vec3 n{-h.y, h.x, 0.0};
     const double n_mag = n.norm();
 
     if (!el.equatorial && n_mag > 0.0) {
-        el.raan = safe_acos(n.x / n_mag);
+        raan = safe_acos(n.x / n_mag);
         if (n.y < 0.0) {
-            el.raan = units::two_pi - el.raan;
+            raan = units::two_pi - raan;
         }
     }
 
     if (!el.circular && !el.equatorial && n_mag > 0.0) {
-        el.argument_of_periapsis = safe_acos(dot(n, e_vec) / (n_mag * el.eccentricity));
+        argument_of_periapsis = safe_acos(dot(n, e_vec) / (n_mag * el.eccentricity));
         if (e_vec.z < 0.0) {
-            el.argument_of_periapsis = units::two_pi - el.argument_of_periapsis;
+            argument_of_periapsis = units::two_pi - argument_of_periapsis;
         }
     } else if (!el.circular && el.equatorial) {
         // Longitude of periapsis, measured from the x axis.
-        el.argument_of_periapsis = safe_acos(e_vec.x / el.eccentricity);
+        argument_of_periapsis = safe_acos(e_vec.x / el.eccentricity);
         if (e_vec.y < 0.0) {
-            el.argument_of_periapsis = units::two_pi - el.argument_of_periapsis;
+            argument_of_periapsis = units::two_pi - argument_of_periapsis;
         }
     }
 
     if (!el.circular) {
-        el.true_anomaly = safe_acos(dot(e_vec, r) / (el.eccentricity * r_mag));
+        true_anomaly = safe_acos(dot(e_vec, r) / (el.eccentricity * r_mag));
         if (dot(r, v) < 0.0) {
-            el.true_anomaly = units::two_pi - el.true_anomaly;
+            true_anomaly = units::two_pi - true_anomaly;
         }
     } else {
         // Argument of latitude for a circular orbit.
         if (n_mag > 0.0) {
-            el.true_anomaly = safe_acos(dot(n, r) / (n_mag * r_mag));
+            true_anomaly = safe_acos(dot(n, r) / (n_mag * r_mag));
             if (r.z < 0.0) {
-                el.true_anomaly = units::two_pi - el.true_anomaly;
+                true_anomaly = units::two_pi - true_anomaly;
             }
         } else {
-            el.true_anomaly = std::atan2(r.y, r.x);
+            true_anomaly = std::atan2(r.y, r.x);
         }
     }
+
+    el.inclination = units::Angle::radians(inclination);
+    el.raan = units::Angle::radians(raan);
+    el.argument_of_periapsis = units::Angle::radians(argument_of_periapsis);
+    el.true_anomaly = units::Angle::radians(true_anomaly);
 
     // Semi-major axis from energy: a = -gm/(2*eps).  Parabolic orbits (eps == 0)
     // have no finite a; they are reported as unbound with a == infinity.
@@ -140,10 +154,10 @@ std::string OrbitalElements::to_string() const {
     os << std::setprecision(12);
     os << "a     = " << semi_major_axis << " m\n"
        << "e     = " << eccentricity << "\n"
-       << "i     = " << units::rad_to_deg(inclination) << " deg\n"
-       << "RAAN  = " << units::rad_to_deg(raan) << " deg\n"
-       << "argp  = " << units::rad_to_deg(argument_of_periapsis) << " deg\n"
-       << "nu    = " << units::rad_to_deg(true_anomaly) << " deg\n"
+       << "i     = " << inclination.degrees() << " deg\n"
+       << "RAAN  = " << raan.degrees() << " deg\n"
+       << "argp  = " << argument_of_periapsis.degrees() << " deg\n"
+       << "nu    = " << true_anomaly.degrees() << " deg\n"
        << "rp    = " << periapsis_radius << " m\n"
        << "ra    = " << apoapsis_radius << " m\n"
        << "T     = " << period << " s\n"

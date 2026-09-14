@@ -186,7 +186,8 @@ TEST(retarded_time_for_a_moving_source_matches_the_closed_form_up_to_point_nine_
         // not another iteration of the equation used by apparent_position().
         LinearEphemeris provider{target, Vec3{distance, 0.0, 0.0}, Vec3{beta * c, 0.0, 0.0}};
         const auto apparent = relativity::apparent_position(
-            provider, target, Vec3{}, reception, frame, 1.0e-13, 1000);
+            provider, target, Vec3{}, reception, frame,
+            sf::time::Duration::seconds(1.0e-13), 1000);
         const double expected = distance / (c * (1.0 + beta));
 
         REQUIRE(apparent.converged);

@@ -67,12 +67,12 @@ TEST(elements_of_an_eccentric_inclined_orbit) {
                    "a recovered from the vis-viva energy; inputs are exact by construction, "
                    "so only a handful of roundings separate the two sides");
     CHECK_NEAR_REL(el.eccentricity, e, 1.0e-14, "same argument as for a");
-    CHECK_NEAR_REL(el.inclination, inclination, 1.0e-14,
+    CHECK_NEAR_REL(el.inclination.radians(), inclination, 1.0e-14,
                    "i = acos(h_z/|h|); acos is correctly rounded and the argument is well away "
                    "from +/-1 where it would lose precision");
     CHECK_NEAR_REL(el.periapsis_radius, rp, 1.0e-14, "rp = a(1-e), both recovered above");
     CHECK_NEAR_REL(el.apoapsis_radius, a * (1.0 + e), 1.0e-14, "ra = a(1+e)");
-    CHECK_NEAR_ABS(el.true_anomaly, 0.0, 1.0e-7,
+    CHECK_NEAR_ABS(el.true_anomaly.radians(), 0.0, 1.0e-7,
                    "the state was built at periapsis; nu is recovered through an acos whose "
                    "argument is within ~1e-16 of 1, where acos amplifies the error to sqrt(eps) "
                    "~ 1e-8. This amplification is inherent to the formulation, not a defect");

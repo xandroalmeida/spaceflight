@@ -24,6 +24,10 @@ GuidanceMode reversed(GuidanceMode mode) {
         case GuidanceMode::RadialOut:  return GuidanceMode::RadialIn;
         case GuidanceMode::RadialIn:   return GuidanceMode::RadialOut;
         case GuidanceMode::Inertial:   return GuidanceMode::Inertial;
+        // Neither has an opposite: an inertial direction is flipped by negating
+        // the VECTOR, and the hull's nose is flipped by turning the ship round,
+        // which is the attitude controller's business and not a planner's.
+        case GuidanceMode::Hull:       return GuidanceMode::Hull;
     }
     return mode;
 }

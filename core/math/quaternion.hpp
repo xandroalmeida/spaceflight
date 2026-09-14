@@ -10,16 +10,33 @@
 
 #include "core/math/mat3.hpp"
 #include "core/math/vec3.hpp"
+#include "core/units/angle.hpp"
 
 #include <cmath>
 #include <string>
 
 namespace sf::math {
 
+// Angles as a TYPE, not as a comment.
+//
+// The units audit of Milestone 6 found the B-plane angle crossing the core /
+// CLI / Godot boundary as radians on one side and degrees on the other, and
+// recorded the quaternion and orbital-element angles as the same risk still
+// open (docs/physics/units-audit.md).  A comment saying `[rad]` is checked by
+// nobody; units::Angle is checked by the compiler, and it costs nothing at run
+// time -- it holds one double and every accessor is constexpr.
 struct EulerZYX {
-    double yaw{0.0};    // about z, applied first  [rad]
-    double pitch{0.0};  // about y'                [rad]
-    double roll{0.0};   // about x''               [rad]
+    units::Angle yaw{units::Angle::radians(0.0)};    // about z, applied first
+    units::Angle pitch{units::Angle::radians(0.0)};  // about y'
+    units::Angle roll{units::Angle::radians(0.0)};   // about x''
+};
+
+// The output of to_axis_angle(), as a value rather than two out-parameters: a
+// function with two out-parameters can be called with them the wrong way round
+// and a function returning a struct cannot.
+struct AxisAngle {
+    Vec3 axis{Vec3::unit_z()};
+    units::Angle angle{units::Angle::radians(0.0)};
 };
 
 class Quaternion {
@@ -29,8 +46,8 @@ public:
 
     static constexpr Quaternion identity() { return Quaternion{1.0, 0.0, 0.0, 0.0}; }
 
-    // Rotation of `angle` radians about `axis` (need not be normalised).
-    static Quaternion from_axis_angle(const Vec3& axis, double angle);
+    // Rotation through `angle` about `axis` (which need not be normalised).
+    static Quaternion from_axis_angle(const Vec3& axis, units::Angle angle);
 
     // The shortest rotation taking `from` onto `to`. Handles the antiparallel
     // case, where the axis is undefined and any perpendicular one will do.
@@ -70,12 +87,16 @@ public:
     // which is exactly why the state is a quaternion.
     [[nodiscard]] EulerZYX to_euler_zyx() const;
 
-    void to_axis_angle(Vec3& axis, double& angle) const;
+    // Zero rotation returns an arbitrary axis with a zero angle, because the
+    // axis of a zero rotation is genuinely undefined -- not because anything
+    // went wrong.
+    [[nodiscard]] AxisAngle to_axis_angle() const;
 
     // q and -q are the same rotation, so the angle between two orientations uses
     // |dot| and never the raw difference.
     [[nodiscard]] static double dot(const Quaternion& a, const Quaternion& b);
-    [[nodiscard]] static double angle_between(const Quaternion& a, const Quaternion& b);
+    [[nodiscard]] static units::Angle angle_between(const Quaternion& a,
+                                                    const Quaternion& b);
 
     // Returns whichever of q, -q is closer to `reference`. Used before any
     // interpolation or error computation, so the controller never takes the long

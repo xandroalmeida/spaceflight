@@ -28,7 +28,22 @@ enum class GuidanceMode {
     Normal,      // along +h = r x v
     AntiNormal,
     RadialOut,   // along +r from the reference body
-    RadialIn
+    RadialIn,
+
+    // Along the hull's own +x axis, whichever way that is pointing.
+    //
+    // Every mode above is an IDEAL guidance law: the executor computes the exact
+    // direction at every step, and the engine follows it with no lag, because
+    // nothing in the loop has inertia.  That is the right model for a planner and
+    // the wrong one for an autopilot, where what the engine actually points along
+    // is where the attitude controller has managed to turn the ship -- and a PD
+    // controller tracking a rotating target settles at a lag, it does not reach
+    // it (docs/physics/attitude.md section 7.1).
+    //
+    // With Hull the direction comes from the integrated quaternion, so the
+    // pointing error is IN the trajectory instead of being assumed away.  It is
+    // what ExecutionModel::Autopilot flies.
+    Hull
 };
 
 std::string_view to_string(GuidanceMode mode);

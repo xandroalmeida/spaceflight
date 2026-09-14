@@ -50,7 +50,9 @@ spaceflight/
 │   └── warnings.cmake          -Wall -Wextra -Wpedantic -Wconversion ... para o nosso código
 ├── scripts/
 │   ├── fetch_cspice.sh         baixa o toolkit NAIF para o SO/arquitetura corrente
-│   └── fetch_kernels.sh        baixa LSK + PCK + DE440
+│   ├── fetch_kernels.sh        baixa LSK + PCK + DE440
+│   ├── lunar_campaign.sh       a campanha Terra-Lua, em processos paralelos
+│   └── starfield_validation.sh o arnês de dez estágios do campo de estrelas
 │
 ├── docs/
 │   ├── architecture/
@@ -291,6 +293,41 @@ em 1,17·10⁴ m = 7,96 × `GM/c²` — a escala em que dois sistemas de coorden
 desligada nos dois códigos, fica em **98 m**.
 
 Leitura completa em [`tools/validation/README.md`](tools/validation/README.md).
+
+## Milestone 6.1: os dois bloqueadores do Milestone 6
+
+O Milestone 6 ficou aberto por duas coisas, e as duas eram defeitos que o próprio
+instrumento de medida escondia.
+
+**A campanha Terra–Lua** reportava 18 sucessos em 100 épocas e todas as falhas
+diziam que o solver havia convergido. Ele havia — sobre trajetórias que
+atravessam a Terra: em 52 das 100 épocas a propagação parava com
+`trajectory entered Earth` seis minutos depois da ignição, **depois** de um
+estágio de plano B reportar `converged`. A causa não era o corretor; era que o
+pipeline não tinha busca nenhuma, e 82,5 % das geometrias que o calendário
+entregava são invoáveis a partir de uma órbita de 400 km. Hoje: **100/100** nas
+mesmas 100 épocas e **365/365** ao longo de um ano, com um critério de sucesso
+bem mais estrito (a órbita pedida, não `ε < 0`) e uma taxonomia de 20 razões em
+que nada falha como "solver failed".
+
+```bash
+./build/bin/lunar-campaign tests/scenarios/lunar-intercept.json --map
+./build/bin/lunar-campaign tests/scenarios/lunar-intercept.json --epochs 100
+scripts/lunar_campaign.sh 365 8
+```
+
+**O starfield** carregava 8 786 estrelas e não mostrava nenhuma — e "invisível" é
+o sintoma que todo defeito possível compartilha. Um arnês de dez estágios separou
+as hipóteses e achou **dois** defeitos, o primeiro escondendo o segundo:
+`render_mode unshaded` faz o Forward+ do Godot 4 descartar `EMISSION` (as
+estrelas eram desenhadas em preto sobre preto), e a esfera do céu ficava abaixo
+de um passo de quantização do buffer de profundidade de 24 bits.
+
+```bash
+./scripts/starfield_validation.sh     # precisa de tela; --headless não desenha nada
+```
+
+Relatório: [`docs/validation/milestone-6-1-report.md`](docs/validation/milestone-6-1-report.md).
 
 ## Próximo
 

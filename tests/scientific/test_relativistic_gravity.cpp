@@ -312,7 +312,7 @@ TEST(mercury_precesses_by_the_measured_forty_three_arcseconds) {
             t = step.time;
         }
         const auto elements = trajectory::elements_from_state(state.state, kGmSun);
-        double angle = elements.argument_of_periapsis;
+        double angle = elements.argument_of_periapsis.radians();
         while (angle - previous > units::pi) {
             angle -= units::two_pi;
         }

@@ -972,7 +972,7 @@ int command_intercept(const Args& args) {
                       << " km  (altitude "
                       << fmt((relative.apoapsis_radius - target_radius) / 1000.0, 8) << " km)\n"
                       << "  eccentricity   : " << fmt(relative.eccentricity, 10) << "\n"
-                      << "  inclination    : " << fmt(units::rad_to_deg(relative.inclination), 8)
+                      << "  inclination    : " << fmt(relative.inclination.degrees(), 8)
                       << " deg\n"
                       << "  period         : " << fmt(relative.period / 60.0, 8) << " min\n"
                       << "  propellant left: " << fmt(captured.state.mass -
@@ -1008,8 +1008,8 @@ int command_intercept(const Args& args) {
                 << relative.position.y << "," << relative.position.z << "," << relative.velocity.x
                 << "," << relative.velocity.y << "," << relative.velocity.z << ","
                 << relative.radius() << "," << relative.speed() << "," << el.semi_major_axis << ","
-                << el.eccentricity << "," << units::rad_to_deg(el.inclination) << ","
-                << units::rad_to_deg(el.raan) << "," << units::rad_to_deg(el.argument_of_periapsis)
+                << el.eccentricity << "," << el.inclination.degrees() << ","
+                << el.raan.degrees() << "," << el.argument_of_periapsis.degrees()
                 << "," << el.specific_energy << "," << el.specific_angular_momentum << "\n";
         }
         std::cout << "csv written: " << *csv << "\n";
@@ -1197,8 +1197,8 @@ int command_propagate(const Args& args) {
                 << relative.velocity.x << "," << relative.velocity.y << ","
                 << relative.velocity.z << "," << relative.radius() << "," << relative.speed()
                 << "," << el.semi_major_axis << "," << el.eccentricity << ","
-                << units::rad_to_deg(el.inclination) << "," << units::rad_to_deg(el.raan) << ","
-                << units::rad_to_deg(el.argument_of_periapsis) << "," << el.specific_energy << ","
+                << el.inclination.degrees() << "," << el.raan.degrees() << ","
+                << el.argument_of_periapsis.degrees() << "," << el.specific_energy << ","
                 << el.specific_angular_momentum << "\n";
         }
     }

@@ -26,9 +26,14 @@ render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled, fog_dis
 //
 // Measured on Godot 4.5.stable, Metal 3.2, Forward+, ten point primitives:
 //
-//   unshaded + EMISSION     0 lit pixels
-//   unshaded + ALBEDO     360 lit pixels
-//   lit      + EMISSION   360 lit pixels
+//   unshaded + EMISSION        0 lit pixels, brightest byte   0
+//   unshaded + EMISSION x100   0 lit pixels, brightest byte   0
+//   unshaded + ALBEDO        360 lit pixels, brightest byte 255
+//   lit      + EMISSION      360 lit pixels, brightest byte 255
+//
+// The second row is the one that settles it: multiplying the emission by a
+// hundred brings nothing back and the frame's brightest byte stays at zero, so
+// the colour is not being read rather than being too dark to see.
 //
 // `unshaded` is the right mode -- a star must not be shaded by the scene's
 // lights -- so the colour belongs in ALBEDO.  docs/validation/starfield-debug.md

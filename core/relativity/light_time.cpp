@@ -10,7 +10,7 @@ namespace sf::relativity {
 ApparentPosition apparent_position(const ephemeris::EphemerisProvider& provider,
                                    celestial::BodyId target,
                                    const math::Vec3& observer_position, time::CoordinateTime t,
-                                   coordinates::ReferenceFrame frame, double tolerance_seconds,
+                                   coordinates::ReferenceFrame frame, time::Duration tolerance,
                                    int max_iterations) {
     ApparentPosition result{};
     result.retarded_epoch = t;
@@ -41,7 +41,7 @@ ApparentPosition apparent_position(const ephemeris::EphemerisProvider& provider,
         }
 
         result.iterations = iteration + 1;
-        if (std::abs(updated - light_time) <= tolerance_seconds) {
+        if (std::abs(updated - light_time) <= tolerance.seconds()) {
             light_time = updated;
             result.converged = true;
             break;

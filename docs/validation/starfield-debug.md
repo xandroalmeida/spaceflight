@@ -105,16 +105,19 @@ carregadas, transformadas e rasterizadas — em preto, sobre preto.
 uma variante por quadro:
 
 ```text
-unshaded + EMISSION                0 pixels acesos
-unshaded + ALBEDO                360 pixels acesos
-iluminado + EMISSION             360 pixels acesos
+unshaded  + EMISSION               0 pixels acesos   byte máximo   0
+unshaded  + EMISSION x100          0 pixels acesos   byte máximo   0
+unshaded  + ALBEDO               360 pixels acesos   byte máximo 255
+iluminado + EMISSION             360 pixels acesos   byte máximo 255
 iluminado + EMISSION sem ALPHA   360 pixels acesos
-iluminado + EMISSION x100        360 pixels acesos
-unshaded + ALBEDO + alfa radial  290 pixels acesos
+unshaded  + ALBEDO + alfa radial 290 pixels acesos
 ```
 
-A quinta linha importa: multiplicar a emissão por cem não a traz de volta, o que
-elimina "está escuro demais" e deixa só "não é lido".
+A segunda linha é a que decide: multiplicar a emissão por cem não traz nada de
+volta, e o byte máximo do quadro continua em zero. Isso elimina "está escuro
+demais" e deixa só "não é lido". A sexta mostra a queda radial do alfa
+esculpindo o quadrado do sprite num disco — presentação, não fotometria
+(seção 3).
 
 **A correção.** `unshaded` é o modo certo — uma estrela não deve ser sombreada
 pelas luzes da cena — então a cor pertence a `ALBEDO`. Uma linha.

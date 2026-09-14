@@ -30,7 +30,7 @@ std::string SimulationSnapshot::describe() const {
        << "  apoapsis   " << spacecraft.elements.apoapsis_radius << " m\n"
        << "  periapsis  " << spacecraft.elements.periapsis_radius << " m\n"
        << "  ecc / inc  " << spacecraft.elements.eccentricity << " / "
-       << spacecraft.elements.inclination * 180.0 / units::pi << " deg\n"
+       << spacecraft.elements.inclination.degrees() << " deg\n"
        << "  nose->prograde " << spacecraft.angle_to_prograde * 180.0 / units::pi << " deg"
        << "   spin " << spacecraft.rotation_rate << " rad/s\n"
        << "  beta       " << spacecraft.beta << "   gamma - 1 "

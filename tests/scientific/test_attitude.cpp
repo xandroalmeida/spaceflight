@@ -111,7 +111,7 @@ TEST(torque_free_rotation_conserves_angular_momentum_and_energy) {
 
     propagation::PropagationState initial{};
     initial.mass = 1000.0;
-    initial.attitude.orientation = Quaternion::from_axis_angle(Vec3{1.0, 2.0, 3.0}, 0.9);
+    initial.attitude.orientation = Quaternion::from_axis_angle(Vec3{1.0, 2.0, 3.0}, sf::units::Angle::radians(0.9));
     initial.attitude.angular_velocity = Vec3{0.04, 0.02, 0.05};
 
     const auto t0 = time::CoordinateTime::j2000();
@@ -304,9 +304,7 @@ TEST(a_constant_torque_changes_the_angular_momentum_by_its_impulse) {
     CHECK_NEAR_ABS(result.state.attitude.angular_velocity.y, 0.0, 1.0e-14, "no torque about y");
 
     // The rotation angle is 1/2 alpha t^2.
-    Vec3 axis{};
-    double angle = 0.0;
-    result.state.attitude.orientation.to_axis_angle(axis, angle);
+    const double angle = result.state.attitude.orientation.to_axis_angle().angle.radians();
     CHECK_NEAR_REL(angle, 0.5 * expected.x / dt * dt * dt, 1.0e-9,
                    "constant angular acceleration about a fixed body axis integrates to "
                    "theta = alpha t^2 / 2; the axis does not move because the body is isotropic");

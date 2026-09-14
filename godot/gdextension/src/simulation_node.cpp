@@ -684,7 +684,7 @@ godot::Dictionary SpaceflightSimulation::get_orbit_about_target() const {
     out["periapsis_m"] = elements.periapsis_radius;
     out["apoapsis_m"] = elements.apoapsis_radius;
     out["eccentricity"] = elements.eccentricity;
-    out["inclination_deg"] = sf::units::rad_to_deg(elements.inclination);
+    out["inclination_deg"] = elements.inclination.degrees();
     out["period_s"] = elements.period;
     out["distance_m"] = distance;
     out["speed_ms"] = relative.velocity.norm();
@@ -756,7 +756,7 @@ godot::Dictionary SpaceflightSimulation::get_snapshot() const {
     out["periapsis_m"] = craft.elements.periapsis_radius;
     out["semi_major_axis_m"] = craft.elements.semi_major_axis;
     out["eccentricity"] = craft.elements.eccentricity;
-    out["inclination_deg"] = sf::units::rad_to_deg(craft.elements.inclination);
+    out["inclination_deg"] = craft.elements.inclination.degrees();
     out["period_s"] = craft.elements.period;
 
     out["target"] = craft.target.has_value() ? godot::String{craft.target->name().c_str()}

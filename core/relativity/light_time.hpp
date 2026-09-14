@@ -36,7 +36,14 @@ ApparentPosition apparent_position(const ephemeris::EphemerisProvider& provider,
                                    time::CoordinateTime t,
                                    coordinates::ReferenceFrame frame =
                                        coordinates::ReferenceFrame::ssb_j2000(),
-                                   double tolerance_seconds = 1.0e-9,
+                                   // A DURATION, not a bare double.  Milestone 6's
+                                   // units audit listed this as the last of the
+                                   // three angle-or-time quantities still
+                                   // travelling untyped; a caller that passed
+                                   // nanoseconds here meaning seconds would have
+                                   // converged twelve times harder in silence.
+                                   time::Duration tolerance =
+                                       time::Duration::seconds(1.0e-9),
                                    int max_iterations = 12);
 
 // Direction to look, in the SHIP's frame: light time then aberration, in that

@@ -37,6 +37,11 @@ std::optional<Vec3> PointingController::desired_direction(
         case navigation::GuidanceMode::AntiNormal: return -cross(r, v).normalized();
         case navigation::GuidanceMode::RadialOut:  return r.normalized();
         case navigation::GuidanceMode::RadialIn:   return -r.normalized();
+        // "Point where you are pointing" is not a command, it is the absence of
+        // one: a controller asked to track the hull's own axis has nothing to do
+        // and would report zero error from any attitude.  Answering nullopt sends
+        // it down the HOLD path, which is the honest reading.
+        case navigation::GuidanceMode::Hull:       return std::nullopt;
         case navigation::GuidanceMode::Inertial:   break;
     }
     return command_.inertial_direction.normalized();

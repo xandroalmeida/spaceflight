@@ -9,12 +9,12 @@
 
 namespace sf::math {
 
-Quaternion Quaternion::from_axis_angle(const Vec3& axis, double angle) {
+Quaternion Quaternion::from_axis_angle(const Vec3& axis, units::Angle angle) {
     const double length = axis.norm();
     if (length <= 0.0) {
         return identity();
     }
-    const double half = 0.5 * angle;
+    const double half = 0.5 * angle.radians();
     const double s = std::sin(half) / length;
     return Quaternion{std::cos(half), axis.x * s, axis.y * s, axis.z * s};
 }
@@ -125,41 +125,41 @@ Mat3 Quaternion::to_rotation_matrix() const {
 EulerZYX Quaternion::to_euler_zyx() const {
     EulerZYX angles{};
     const double sin_pitch = std::clamp(2.0 * (w_ * y_ - z_ * x_), -1.0, 1.0);
-    angles.pitch = std::asin(sin_pitch);
+    angles.pitch = units::Angle::radians(std::asin(sin_pitch));
 
     // Within this much of a pole the yaw/roll split is meaningless -- that is
     // gimbal lock, and it is why the STATE is never Euler angles (ADR-0008).
     if (std::abs(sin_pitch) > 1.0 - 1.0e-12) {
-        angles.yaw = 2.0 * std::atan2(x_, w_);
-        angles.roll = 0.0;
+        angles.yaw = units::Angle::radians(2.0 * std::atan2(x_, w_));
+        angles.roll = units::Angle::radians(0.0);
         return angles;
     }
 
-    angles.roll = std::atan2(2.0 * (w_ * x_ + y_ * z_), 1.0 - 2.0 * (x_ * x_ + y_ * y_));
-    angles.yaw = std::atan2(2.0 * (w_ * z_ + x_ * y_), 1.0 - 2.0 * (y_ * y_ + z_ * z_));
+    angles.roll = units::Angle::radians(
+        std::atan2(2.0 * (w_ * x_ + y_ * z_), 1.0 - 2.0 * (x_ * x_ + y_ * y_)));
+    angles.yaw = units::Angle::radians(
+        std::atan2(2.0 * (w_ * z_ + x_ * y_), 1.0 - 2.0 * (y_ * y_ + z_ * z_)));
     return angles;
 }
 
-void Quaternion::to_axis_angle(Vec3& axis, double& angle) const {
+AxisAngle Quaternion::to_axis_angle() const {
     const Quaternion q = normalized();
     const double w = std::clamp(q.w_, -1.0, 1.0);
-    angle = 2.0 * std::acos(w);
     const double s = std::sqrt(std::max(0.0, 1.0 - w * w));
     if (s < 1.0e-12) {
-        axis = Vec3::unit_x();
-        angle = 0.0;
-        return;
+        return AxisAngle{Vec3::unit_x(), units::Angle::radians(0.0)};
     }
-    axis = Vec3{q.x_ / s, q.y_ / s, q.z_ / s};
+    return AxisAngle{Vec3{q.x_ / s, q.y_ / s, q.z_ / s},
+                     units::Angle::radians(2.0 * std::acos(w))};
 }
 
 double Quaternion::dot(const Quaternion& a, const Quaternion& b) {
     return a.w_ * b.w_ + a.x_ * b.x_ + a.y_ * b.y_ + a.z_ * b.z_;
 }
 
-double Quaternion::angle_between(const Quaternion& a, const Quaternion& b) {
+units::Angle Quaternion::angle_between(const Quaternion& a, const Quaternion& b) {
     const double d = std::clamp(std::abs(dot(a.normalized(), b.normalized())), -1.0, 1.0);
-    return 2.0 * std::acos(d);
+    return units::Angle::radians(2.0 * std::acos(d));
 }
 
 Quaternion Quaternion::nearest_to(const Quaternion& q, const Quaternion& reference) {

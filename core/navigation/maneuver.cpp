@@ -29,6 +29,7 @@ std::string_view to_string(GuidanceMode mode) {
         case GuidanceMode::AntiNormal: return "ANTI_NORMAL";
         case GuidanceMode::RadialOut:  return "RADIAL_OUT";
         case GuidanceMode::RadialIn:   return "RADIAL_IN";
+        case GuidanceMode::Hull:       return "HULL";
     }
     return "?";
 }
@@ -42,6 +43,7 @@ std::optional<GuidanceMode> guidance_from_string(std::string_view name) {
     if (key == "anti_normal" || key == "antinormal") return GuidanceMode::AntiNormal;
     if (key == "radial_out" || key == "radialout") return GuidanceMode::RadialOut;
     if (key == "radial_in" || key == "radialin") return GuidanceMode::RadialIn;
+    if (key == "hull") return GuidanceMode::Hull;
     return std::nullopt;
 }
 

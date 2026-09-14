@@ -10,6 +10,22 @@ deliberadamente, demora, e produz um relatório.
   `reboundx_cross_check.py`;
 * estudos de convergência (erro × tolerância × custo) (pendente).
 
+A campanha Terra–Lua **saiu daqui** no Milestone 6.1. `lunar_mission_campaign.py`
+dirigia `orbit-cli intercept` e lia a PROSA dele com expressões regulares, o que
+fazia o veredicto da campanha depender da redação de um `print` e limitava o que
+podia ser registrado ao que a CLI por acaso imprimia. Ela agora é
+`tools/lunar-campaign`, em C++, chamando `core/navigation/lunar_transfer.hpp`
+direto, com o cabeçalho do CSV morando dentro de `TransferRecord` para que a
+ferramenta não possa discordar dos dados:
+
+```bash
+./build/bin/lunar-campaign tests/scenarios/lunar-intercept.json --epochs 100 \
+    --csv docs/validation/lunar-navigation-campaign-v2.csv
+scripts/lunar_campaign.sh 365 8
+```
+
+Ver [`docs/validation/lunar-navigation-hardening.md`](../../docs/validation/lunar-navigation-hardening.md).
+
 ## `horizons_cross_check.py`
 
 Consulta sequencialmente Mercury–Neptune, Terra e Lua em três épocas (1900,

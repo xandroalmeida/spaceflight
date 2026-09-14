@@ -205,8 +205,8 @@ TEST(j2_reproduces_the_secular_nodal_regression) {
     const auto before = trajectory::elements_from_state(initial.state, kGm);
     const auto after = trajectory::elements_from_state(result.state.state, kGm);
 
-    const double raan_end = unwrap(after.raan, before.raan);
-    const double measured = (raan_end - before.raan) / (orbits * period);
+    const double raan_end = unwrap(after.raan.radians(), before.raan.radians());
+    const double measured = (raan_end - before.raan.radians()) / (orbits * period);
 
     // First-order secular theory: dOmega/dt = -(3/2) n J2 (R/p)^2 cos i
     const double n = std::sqrt(kGm / (a * a * a));
@@ -264,9 +264,9 @@ TEST(apsidal_precession_changes_sign_at_the_critical_inclination) {
 
         const auto before = trajectory::elements_from_state(initial.state, kGm);
         const auto after = trajectory::elements_from_state(result.state.state, kGm);
-        const double measured =
-            (unwrap(after.argument_of_periapsis, before.argument_of_periapsis) -
-             before.argument_of_periapsis) / (orbits * period);
+        const double measured = (unwrap(after.argument_of_periapsis.radians(),
+                                        before.argument_of_periapsis.radians()) -
+                                 before.argument_of_periapsis.radians()) / (orbits * period);
 
         const double predicted = 0.75 * n * kJ2 * (kRef / p) * (kRef / p) *
                                  (5.0 * std::cos(inclination) * std::cos(inclination) - 1.0);

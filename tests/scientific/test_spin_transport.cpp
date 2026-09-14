@@ -220,9 +220,8 @@ TEST(a_relativistic_turn_accumulates_the_wigner_rotation) {
     CHECK_NEAR_REL(result.state.state.velocity.norm() / c, beta_target, 1.0e-12,
                    "and beta never moved, which is the premise of the closed form below");
 
-    Vec3 axis{};
-    double turned = 0.0;
-    result.state.attitude.orientation.to_axis_angle(axis, turned);
+    const auto rotation = result.state.attitude.orientation.to_axis_angle();
+    const double turned = rotation.angle.radians();
     const double expected = units::two_pi * (gamma - 1.0);
 
     std::ostringstream os;
@@ -238,7 +237,7 @@ TEST(a_relativistic_turn_accumulates_the_wigner_rotation) {
                    "1e-9 is the integrator at rtol 1e-13 over 200 steps, not a modelling term");
 
     // The rotation axis is the orbit normal, and retrograde against it.
-    CHECK_NEAR_REL(std::abs(dot(axis, Vec3::unit_z())), 1.0, 1.0e-9,
+    CHECK_NEAR_REL(std::abs(dot(rotation.axis, Vec3::unit_z())), 1.0, 1.0e-9,
                    "the precession is about the orbit normal");
 }
 
@@ -273,9 +272,7 @@ TEST(a_newtonian_run_has_no_precession_at_all) {
         initial, t0, t0 + time::Duration::seconds(units::two_pi * radius / speed));
     REQUIRE(result.ok());
 
-    Vec3 axis{};
-    double turned = 0.0;
-    result.state.attitude.orientation.to_axis_angle(axis, turned);
+    const double turned = result.state.attitude.orientation.to_axis_angle().angle.radians();
     CHECK_EQ(turned, 0.0);
     INFO("bit-exact zero, not 'small': the precession terms are never evaluated in this mode");
 }

@@ -22,6 +22,12 @@ Vec3 ManeuverExecutor::thrust_direction(const propagation::PropagationState& sta
     if (maneuver.guidance == GuidanceMode::Inertial) {
         return maneuver.inertial_direction.normalized();
     }
+    if (maneuver.guidance == GuidanceMode::Hull) {
+        // The nose, in the integration frame.  No reference body and no ideal
+        // direction: the engine points where the ship points, and where the ship
+        // points is a state the integrator carries.
+        return state.attitude.orientation.rotate(Vec3::unit_x()).normalized();
+    }
 
     // Prograde, radial and normal are all defined RELATIVE to a body: "prograde"
     // around the Earth and "prograde" around the Sun are 30 km/s apart.
@@ -36,7 +42,8 @@ Vec3 ManeuverExecutor::thrust_direction(const propagation::PropagationState& sta
         case GuidanceMode::AntiNormal: return -cross(r, v).normalized();
         case GuidanceMode::RadialOut:  return r.normalized();
         case GuidanceMode::RadialIn:   return -r.normalized();
-        case GuidanceMode::Inertial:   break;
+        case GuidanceMode::Inertial:
+        case GuidanceMode::Hull:       break;
     }
     return maneuver.inertial_direction.normalized();
 }

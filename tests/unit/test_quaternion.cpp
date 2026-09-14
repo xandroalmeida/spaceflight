@@ -41,8 +41,8 @@ TEST(the_algebra_is_hamilton_not_jpl) {
 }
 
 TEST(rotations_compose_and_invert) {
-    const auto a = Quaternion::from_axis_angle(Vec3::unit_z(), sf::units::deg_to_rad(90.0));
-    const auto b = Quaternion::from_axis_angle(Vec3::unit_x(), sf::units::deg_to_rad(90.0));
+    const auto a = Quaternion::from_axis_angle(Vec3::unit_z(), sf::units::Angle::degrees(90.0));
+    const auto b = Quaternion::from_axis_angle(Vec3::unit_x(), sf::units::Angle::degrees(90.0));
 
     const Vec3 v{1.0, 0.0, 0.0};
     // 90 degrees about z takes +x to +y.
@@ -66,7 +66,7 @@ TEST(rotations_compose_and_invert) {
 TEST(rotation_matrices_and_quaternions_are_the_same_rotation) {
     for (const double degrees : {1.0, 37.0, 90.0, 179.0, 181.0, 300.0}) {
         const Vec3 axis = Vec3{0.3, -0.7, 0.65}.normalized();
-        const auto q = Quaternion::from_axis_angle(axis, sf::units::deg_to_rad(degrees));
+        const auto q = Quaternion::from_axis_angle(axis, sf::units::Angle::degrees(degrees));
         const Mat3 m = q.to_rotation_matrix();
 
         const Vec3 v{2.0, -3.0, 0.5};
@@ -77,20 +77,20 @@ TEST(rotation_matrices_and_quaternions_are_the_same_rotation) {
         // Round trip, including through 180 degrees where the naive branch of
         // the matrix-to-quaternion conversion cancels catastrophically.
         const auto back = Quaternion::from_rotation_matrix(m);
-        CHECK_NEAR_ABS(Quaternion::angle_between(q, back), 0.0, 1.0e-12,
+        CHECK_NEAR_ABS(Quaternion::angle_between(q, back).radians(), 0.0, 1.0e-12,
                        "Shepperd's branch selection keeps the conversion well conditioned at every "
                        "angle, including 180 degrees, where the w-branch would divide by ~0");
     }
 }
 
 TEST(q_and_minus_q_are_the_same_orientation) {
-    const auto q = Quaternion::from_axis_angle(Vec3::unit_y(), 1.2);
+    const auto q = Quaternion::from_axis_angle(Vec3::unit_y(), sf::units::Angle::radians(1.2));
     const Quaternion negated = -q;
 
     const Vec3 v{1.0, 2.0, 3.0};
     CHECK_NEAR_ABS((q.rotate(v) - negated.rotate(v)).norm(), 0.0, 1.0e-14,
                    "the rotation is quadratic in q, so the sign cancels identically");
-    CHECK_NEAR_ABS(Quaternion::angle_between(q, negated), 0.0, 1.0e-12,
+    CHECK_NEAR_ABS(Quaternion::angle_between(q, negated).radians(), 0.0, 1.0e-12,
                    "angle_between uses |dot| precisely so that this is zero and not 2*pi");
 
     CHECK(Quaternion::dot(Quaternion::nearest_to(negated, q), q) > 0.0);
@@ -101,16 +101,16 @@ TEST(quaternion_kinematics_match_a_finite_rotation) {
     // omega on the RIGHT. Integrating it for a short time must reproduce the
     // finite rotation about the body axis -- and if the order were swapped, the
     // ship would turn the right way about the WRONG axis.
-    const auto q0 = Quaternion::from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.7);
+    const auto q0 = Quaternion::from_axis_angle(Vec3{1.0, 1.0, 0.0}, sf::units::Angle::radians(0.7));
     const Vec3 omega_body{0.0, 0.0, 0.3};  // spin about the body z axis
     const double dt = 1.0e-4;
 
     // One Euler step of the kinematic equation...
     const Quaternion stepped = (q0 + sf::math::attitude_derivative(q0, omega_body) * dt).normalized();
     // ...against the exact finite rotation about the BODY axis, applied on the right.
-    const Quaternion exact = q0 * Quaternion::from_axis_angle(Vec3::unit_z(), 0.3 * dt);
+    const Quaternion exact = q0 * Quaternion::from_axis_angle(Vec3::unit_z(), sf::units::Angle::radians(0.3 * dt));
 
-    const double error = Quaternion::angle_between(stepped, exact);
+    const double error = Quaternion::angle_between(stepped, exact).radians();
     std::ostringstream os;
     os << "after dt = " << dt << " the Euler step differs from the exact rotation by " << error
        << " rad";
@@ -142,24 +142,26 @@ TEST(from_two_vectors_handles_the_antiparallel_case) {
 }
 
 TEST(euler_angles_are_a_display_projection_with_a_known_failure) {
-    const EulerZYX angles{sf::units::deg_to_rad(30.0), sf::units::deg_to_rad(20.0),
-                          sf::units::deg_to_rad(-45.0)};
+    const EulerZYX angles{sf::units::Angle::degrees(30.0), sf::units::Angle::degrees(20.0),
+                          sf::units::Angle::degrees(-45.0)};
     const auto q = Quaternion::from_euler_zyx(angles);
     const EulerZYX back = q.to_euler_zyx();
 
-    CHECK_NEAR_ABS(back.yaw, angles.yaw, 1.0e-12, "round trip away from the poles is exact");
-    CHECK_NEAR_ABS(back.pitch, angles.pitch, 1.0e-12, "same");
-    CHECK_NEAR_ABS(back.roll, angles.roll, 1.0e-12, "same");
+    CHECK_NEAR_ABS(back.yaw.radians(), angles.yaw.radians(), 1.0e-12,
+                   "round trip away from the poles is exact");
+    CHECK_NEAR_ABS(back.pitch.radians(), angles.pitch.radians(), 1.0e-12, "same");
+    CHECK_NEAR_ABS(back.roll.radians(), angles.roll.radians(), 1.0e-12, "same");
 
     // At pitch = 90 degrees yaw and roll stop being separable. The function
     // returns a consistent answer rather than a NaN, but the split is arbitrary
     // -- which is exactly why the STATE is never Euler angles (rule 19).
     const auto locked = Quaternion::from_euler_zyx(
-        EulerZYX{sf::units::deg_to_rad(40.0), sf::units::deg_to_rad(90.0), sf::units::deg_to_rad(10.0)});
+        EulerZYX{sf::units::Angle::degrees(40.0), sf::units::Angle::degrees(90.0),
+                 sf::units::Angle::degrees(10.0)});
     const EulerZYX degenerate = locked.to_euler_zyx();
-    CHECK_NEAR_ABS(std::abs(degenerate.pitch), sf::units::pi / 2.0, 1.0e-7,
+    CHECK_NEAR_ABS(std::abs(degenerate.pitch.radians()), sf::units::pi / 2.0, 1.0e-7,
                    "pitch itself is still recovered; asin near its argument's limit loses half the "
                    "digits, hence 1e-7 rather than 1e-12");
-    CHECK_EQ(degenerate.roll, 0.0);
-    CHECK(std::isfinite(degenerate.yaw));
+    CHECK_EQ(degenerate.roll.radians(), 0.0);
+    CHECK(std::isfinite(degenerate.yaw.radians()));
 }

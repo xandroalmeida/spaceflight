@@ -456,7 +456,7 @@ TEST(the_throttle_burns_along_the_nose_and_nowhere_else) {
 
     // Nose along +y: 90 degrees from the body's default +x.
     initial.attitude.orientation =
-        math::Quaternion::from_axis_angle(Vec3::unit_z(), units::pi / 2.0);
+        math::Quaternion::from_axis_angle(Vec3::unit_z(), units::Angle::degrees(90.0));
 
     const auto inertia = attitude::InertiaTensor::solid_box(1000.0, Vec3{8.0, 3.0, 3.0});
     propagation::DormandPrince54Propagator propagator{main_engine, integrator_config()};
@@ -497,7 +497,7 @@ TEST(the_throttle_burns_along_the_nose_and_nowhere_else) {
     // Point the other way and the same throttle undoes it.
     propagation::PropagationState reversed = burn.state;
     reversed.attitude.orientation =
-        math::Quaternion::from_axis_angle(Vec3::unit_z(), -units::pi / 2.0);
+        math::Quaternion::from_axis_angle(Vec3::unit_z(), units::Angle::degrees(-90.0));
     const auto back = propagator.propagate(reversed, t0, t0 + time::Duration::seconds(10.0));
     REQUIRE(back.ok());
     CHECK(back.state.state.velocity.y < burn.state.state.velocity.y);
