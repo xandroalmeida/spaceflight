@@ -1,8 +1,14 @@
-# Checklist de verificação visual — Milestone 6
+# Checklist de verificação visual — Milestone 6 / 6.1
 
-Data: 2026-09-13  
-Build: worktree do Milestone 6 sobre `2468a33`  
-Ambiente: macOS, Godot 4.5, execução em janela
+Data: 2026-09-13 (Milestone 6), atualizado no Milestone 6.1  
+Build: worktree do Milestone 6 sobre `2468a33`; linhas marcadas **6.1** foram
+remedidas sobre `7181a30`  
+Ambiente: macOS, Godot 4.5, Metal 3.2, Forward+, execução em janela
+
+As cinco linhas que o Milestone 6 deixou em `FAIL` ou `BLOCKED` foram fechadas no
+Milestone 6.1 e trazem a evidência nova; as `PENDENTE`/`PARCIAL` continuam onde
+estavam, porque dependem de um operador humano e não foram exercitadas nesta
+entrega. Ver [milestone-6-1-report.md](milestone-6-1-report.md).
 
 Headless não aprova nenhum item desta lista. Para cada linha registrar
 `PASS`, `FAIL` ou `BLOCKED`, resolução, FPS, estado/β e evidência (captura ou
@@ -19,14 +25,14 @@ esconder um defeito visual.
 | escala da nave | comparar HUD e geometria declaradamente exagerada | PASS | nave visível e o exagero permanece declarado no código/HUD |
 | HUD | 1280×720, 1920×1080 e redimensionamento contínuo | PARCIAL | layout de duas colunas legível em 1440×900; outras resoluções pendentes |
 | cockpit/RCS | seis apontamentos, torque manual, quaternions sem flip | pendente | |
-| starfield | cobertura 360°, sem costura, orientação reconhecível | **FAIL** | HUD informa 8786 estrelas e arrays válidos, mas nenhuma aparece no framebuffer, inclusive com HUD oculto e exposição máxima |
-| aberração | cenário 0/.1/.5/.9/.99c, ON/OFF isolado | BLOCKED | seletor/HUD e teste de core passam; inspeção visual bloqueada pelo starfield invisível |
-| Doppler | frente azul/traseira vermelha, ON/OFF isolado | BLOCKED | fatores no HUD variaram corretamente; efeito visual bloqueado pelo starfield |
-| beaming | frente/traseira com exposição fixa, ON/OFF isolado | BLOCKED | toggle independente confirmado; efeito visual bloqueado pelo starfield |
+| starfield | cobertura 360°, sem costura, orientação reconhecível | **PASS (6.1)** | dois defeitos: `unshaded` descarta EMISSION, e a esfera do céu ficava abaixo de um passo do buffer de profundidade de 24 bits. 1851 de 1853 estrelas no quadro encontradas; as duas são pares próximos cujos blobs se fundiram. [starfield-debug.md](starfield-debug.md) |
+| aberração | cenário 0/.1/.5/.9/.99c, ON/OFF isolado | **PASS (6.1)** | ângulo da GPU contra `core/relativity/optics.hpp` em β = 0; 0,1; 0,5; 0,9; 0,99 — pior erro 0,199° contra orçamento de 0,359°. `docs/validation/scene/scene_forward_beta_*.png` |
+| Doppler | frente azul/traseira vermelha, ON/OFF isolado | **PASS (6.1)** | cromaticidade contra a tabela de Planck deslocada, 3 temperaturas × 2 ângulos: pior erro 0,0012 contra 0,04 |
+| beaming | frente/traseira com exposição fixa, ON/OFF isolado | **PASS (6.1)** | razão de intensidades contra D⁴ limitado à banda: pior erro 0,0146 contra 0,12; absoluto 0,0086 contra 0,03 |
 | objeto extenso | planeta próximo, silhueta e sentido Terrell | pendente | |
 | tempo retardado | Lua/Sol e alvo móvel artificial, ON/OFF | PARCIAL | toggle e posição de centro ativos; inspeção diferencial pendente |
 | time warp | 1×…100000×, sem saltar ignição/corte | PARCIAL | 1×→10× confirmado em tela; matriz completa coberta numericamente |
-| missão | planejar, executar, inserir e conferir órbita final | **FAIL** | campanha independente: 18/100 sucessos estritos; não repetir demo nominal como aprovação |
+| missão | planejar, executar, inserir e conferir órbita final | **PASS (6.1)** | campanha independente: 100/100 e 365/365, sob critério mais estrito (a órbita pedida, não `ε < 0`). [lunar-navigation-hardening.md](lunar-navigation-hardening.md) |
 
 Comando base:
 

@@ -4,6 +4,16 @@
 **Escopo:** auditoria científica, validação independente, robustez numérica e verificação visual  
 **Resultado global:** **não aprovado para encerramento**
 
+> Este documento é o registro do Milestone 6 e fica como está. Os dois
+> bloqueadores que ele levanta foram fechados no Milestone 6.1 —
+> [relatório](milestone-6-1-report.md),
+> [navegação](lunar-navigation-hardening.md),
+> [starfield](starfield-debug.md). Um dos seus números merece correção: os
+> "18 sucessos estritos" contavam também a convergência do corretor de posição,
+> e a campanha na verdade capturou 41 de 100. A convergência do estágio 1 não é
+> condição de captura, e tratá-la como tal escondeu que o problema real era
+> outro.
+
 ## Resumo executivo
 
 A auditoria encontrou e corrigiu dois defeitos no núcleo físico. Os propagadores, invariantes, transformações de referenciais, efemérides e testes de estresse apresentaram resultados consistentes com referências independentes.

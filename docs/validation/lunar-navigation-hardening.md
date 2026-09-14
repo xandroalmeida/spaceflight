@@ -190,11 +190,11 @@ Dois corpos, sem propagação, antes de qualquer corretor ver o candidato. Entre
 **A primeira versão recusava esses candidatos**, que é o que a seção 8 parece
 pedir com "hard constraints". A ablação da seção 5 mostrou que isso está errado,
 e por uma razão que vale mais do que a correção: a peneira lê a cônica **não
-corrigida**. O corretor depois move a velocidade de partida em 166 a 1 853 m/s
-(mediana 341), e uma correção desse tamanho rotineiramente levanta um perigeu que
-começou abaixo da superfície. Na configuração do Milestone 6 — partida fixa,
-tempo de voo fixo, quatro geometrias ao todo — recusar dá 15 % de sucesso e
-precificar dá **50 %**.
+corrigida**. O corretor depois move a velocidade de partida em 152 a 3 910 m/s
+(mediana 445 ao longo de 365 épocas), e uma correção desse tamanho rotineiramente
+levanta um perigeu que começou abaixo da superfície. Na configuração do
+Milestone 6 — partida fixa, tempo de voo fixo, quatro geometrias ao todo —
+recusar dá 15 % de sucesso e precificar dá **50 %**.
 
 Hoje o déficit entra na **função de custo** a 0,01 por metro: um déficit de
 1 000 km custa 10 000, o que põe o candidato atrás de qualquer um voável e ainda
@@ -481,10 +481,11 @@ Verificações independentes sobre as 365:
 
 - `ε > 0` antes da queima em 365/365 e `ε < 0` depois em 365/365 (seção 10),
   cada uma calculada do estado relativo e não inferida da excentricidade;
-- `ε` antes e `v∞²/2` concordam até o arredondamento — duas grandezas obtidas de
-  caminhos diferentes;
+- `ε` antes e `v∞²/2` concordam a 2,0e-15 relativo no pior caso — duas grandezas
+  obtidas de caminhos diferentes;
 - perigeu da cônica de partida entre 268 e 407 km, sempre acima do piso de 120 km;
-- raio no meio da queima de captura sempre dentro de 1 % do periastro;
+- raio no meio da queima de captura dentro de 8,1e-5 do periastro no pior caso —
+  1 835 a 1 838 km, contra um periastro pedido de 1 837;
 - o estágio 2 do plano B convergiu em 365/365; o estágio 1, em 330/365, e isso
   não impediu nenhum sucesso.
 

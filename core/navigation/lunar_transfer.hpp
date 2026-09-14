@@ -214,10 +214,10 @@ struct TransferCost {
     // those 100 succeed.
     //
     // The reason is that the screen reads the UNCORRECTED conic.  The corrector
-    // then moves the departure velocity by 166 to 1853 m/s (median 341), and a
-    // correction that size routinely lifts a perigee that started below the
-    // surface.  A screen that refuses on the two-body conic is therefore
-    // refusing flyable transfers.
+    // then moves the departure velocity by 152 to 3910 m/s (median 445 over 365
+    // epochs), and a correction that size routinely lifts a perigee that started
+    // below the surface.  A screen that refuses on the two-body conic is
+    // therefore refusing flyable transfers.
     //
     // The hard constraint still exists and is still enforced -- on the FLOWN
     // arc, where `stop_inside_body` reports it and the case is classified

@@ -108,7 +108,7 @@ diagnóstico está certo.
 A segunda linha é a que não foi prevista. A peneira analítica no perigeu da
 cônica de partida — que parecia a correção central — **recusava transferências
 voáveis**: ela lê a cônica não corrigida, e o corretor depois move a velocidade de
-partida em 166 a 1 853 m/s, o que rotineiramente levanta um perigeu que começou
+partida em 152 a 3 910 m/s, o que rotineiramente levanta um perigeu que começou
 abaixo da superfície. Hoje o déficit é um **preço** na função de custo, e a
 restrição rígida "sem colisão" vive onde uma colisão é um fato: no arco voado.
 Com a busca completa isso não muda nada — as duas leituras escolhem a mesma
@@ -124,8 +124,8 @@ Os três modelos voam a **mesma** geometria, fixada pela busca:
 | FINITE_BURN | 0,001732 | 96,41 × 102,78 km | 83,5 s | — |
 | AUTOPILOT | 0,010468 | 79,89 × 118,34 km | 83,5 s | 1,65° médio, 2,06° de pico |
 
-**Zero falhas de planejador, uma de execução por época.** O planejador entrega uma órbita
-circular de 100 km com `e = 3·10⁻⁶`; o que falta na órbita final é o custo de
+**Zero falhas de planejador, uma de execução por época.** O planejador entrega
+uma órbita circular de 100 km com `e = 3·10⁻⁶`; o que falta na órbita final é o custo de
 executar. E o custo tem fórmula: o atraso do autopilot vai exatamente como
 `1/ω_n` (produto `atraso × ω_n` constante a 0,5 % ao longo de 16× em largura de
 banda), e a partir de `ω_n = 0,1 rad/s` a captura entra na especificação.

@@ -1,5 +1,13 @@
 # Earth → Moon validation campaign
 
+> **Superado pelo Milestone 6.1.** Esta campanha media uma configuração sem busca
+> — ponto de partida e tempo de voo fixos — e 52 das suas 100 épocas terminavam
+> dentro da Terra depois de o solver reportar convergência. O diagnóstico, as
+> correções e a campanha nova estão em
+> [lunar-navigation-hardening.md](lunar-navigation-hardening.md); os dados, em
+> [lunar-navigation-campaign-v2.csv](lunar-navigation-campaign-v2.csv).
+
+
 Generated from 100 deterministic cases beginning 2026-01-01, spaced by 1 day(s). Each case uses the same spacecraft and parameters; only the TDB departure epoch changes.
 
 Success rate: **18/100 (18.0%)**.
