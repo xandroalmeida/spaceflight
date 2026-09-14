@@ -16,7 +16,7 @@ struct Entry {
 
 // Bodies this project names directly.  Not a replacement for SPICE's catalogue:
 // it exists so that BodyId::name() and the CLI work without kernels loaded.
-constexpr std::array<Entry, 22> kTable{{
+constexpr std::array<Entry, 32> kTable{{
     {0, "Solar System Barycenter"},
     {1, "Mercury Barycenter"},
     {2, "Venus Barycenter"},
@@ -38,6 +38,16 @@ constexpr std::array<Entry, 22> kTable{{
     {799, "Uranus"},
     {899, "Neptune"},
     {999, "Pluto"},
+    {401, "Phobos"},
+    {402, "Deimos"},
+    {501, "Io"},
+    {502, "Europa"},
+    {503, "Ganymede"},
+    {504, "Callisto"},
+    {602, "Enceladus"},
+    {606, "Titan"},
+    {801, "Triton"},
+    {901, "Charon"},
     {-1, ""},
 }};
 

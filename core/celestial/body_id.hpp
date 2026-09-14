@@ -57,6 +57,21 @@ inline constexpr BodyId jupiter{599};
 inline constexpr BodyId saturn{699};
 inline constexpr BodyId uranus{799};
 inline constexpr BodyId neptune{899};
+inline constexpr BodyId pluto{999};
+
+// The moons Milestone 8 names.  Whether any of them can actually be PLACED is a
+// question about the loaded kernels and is answered by
+// core/celestial/solar_system.hpp -- an id is not an ephemeris.
+inline constexpr BodyId phobos{401};
+inline constexpr BodyId deimos{402};
+inline constexpr BodyId io{501};
+inline constexpr BodyId europa{502};
+inline constexpr BodyId ganymede{503};
+inline constexpr BodyId callisto{504};
+inline constexpr BodyId enceladus{602};
+inline constexpr BodyId titan{606};
+inline constexpr BodyId triton{801};
+inline constexpr BodyId charon{901};
 }  // namespace bodies
 
 // Case-insensitive lookup over the built-in table ("earth", "MOON", "399").

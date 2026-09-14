@@ -11,7 +11,7 @@
 // See docs/validation/lunar-navigation-hardening.md.
 
 #include "core/celestial/body_catalog.hpp"
-#include "core/navigation/lunar_transfer.hpp"
+#include "core/navigation/transfer_planner.hpp"
 #include "core/propulsion/engine.hpp"
 #include "core/trajectory/orbital_elements.hpp"
 #include "core/units/conversions.hpp"
@@ -99,7 +99,7 @@ TEST(every_failure_has_a_name) {
         navigation::TransferFailure::DepartureCorrectorStagnated,
         navigation::TransferFailure::InvalidBPlane,
         navigation::TransferFailure::BPlaneCorrectorDiverged,
-        navigation::TransferFailure::LunarImpact,
+        navigation::TransferFailure::TargetImpact,
         navigation::TransferFailure::PeriapsisTooHigh,
         navigation::TransferFailure::PeriapsisTooLow,
         navigation::TransferFailure::CaptureBurnTooEarly,
@@ -232,7 +232,7 @@ TEST(the_grid_says_why_the_milestone_6_geometry_had_nowhere_to_go) {
     const auto epoch = spice.time->parse("2026-01-05 00:00:00 TDB");
     const auto inputs = make_inputs(spice, craft, epoch);
 
-    navigation::LunarTransferConfig config{};
+    navigation::TransferConfig config{};
     const auto grid = navigation::map_transfer_grid(inputs, config);
     REQUIRE(!grid.empty());
 
@@ -276,7 +276,7 @@ TEST(the_capture_changes_the_sign_of_the_specific_energy) {
     const auto epoch = spice.time->parse("2026-01-05 00:00:00 TDB");
     const auto inputs = make_inputs(spice, craft, epoch);
 
-    navigation::LunarTransferConfig config{};
+    navigation::TransferConfig config{};
     config.execution = navigation::ExecutionModel::FiniteBurn;
     const auto record = navigation::plan_and_fly(inputs, config);
     INFO(record.describe());
@@ -313,7 +313,7 @@ TEST(the_impulsive_plan_and_the_finite_burn_agree_on_the_trajectory) {
     const auto epoch = spice.time->parse("2026-01-05 00:00:00 TDB");
     const auto inputs = make_inputs(spice, craft, epoch);
 
-    navigation::LunarTransferConfig config{};
+    navigation::TransferConfig config{};
     config.execution = navigation::ExecutionModel::Impulsive;
     const auto impulsive = navigation::plan_and_fly(inputs, config);
     config.execution = navigation::ExecutionModel::FiniteBurn;
@@ -354,7 +354,7 @@ TEST(an_epoch_with_no_search_freedom_is_refused_and_says_why) {
     // 223 degrees and the two-body departure conic's perigee is 431 km BELOW the
     // Earth's surface.  What the taxonomy has to do is say that, instead of
     // reporting a converged solver.
-    navigation::LunarTransferConfig config{};
+    navigation::TransferConfig config{};
     config.departure_window = time::Duration::seconds(60.0);
     config.departure_samples = 2;
     config.time_of_flight_days = {4.5};

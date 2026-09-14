@@ -86,6 +86,16 @@ var interface: CanvasLayer
 var hud: MinimalHud
 var messages: MessageLog
 var mission_panel: MissionPanel
+
+## Se havia uma busca a correr no quadro anterior. Sem isto, `_poll_planning`
+## não consegue distinguir "acabou agora" de "nunca começou" e chamaria
+## `collect_plan()` todo quadro.
+var _search_was_running := false
+
+## O mapa heliocêntrico, reconstruído com os demais traçados. As ÓRBITAS dos
+## planetas vêm à parte e são pedidas uma vez só: são um milhar de consultas à
+## efeméride e não mudam de quadro para quadro.
+var _system_map: Dictionary = {}
 var orbit_map: OrbitMap
 var pause_menu: PauseMenu
 var help_panel: HelpPanel
@@ -356,6 +366,7 @@ func _wire_controls() -> void:
 		messages.post("MAIN ENGINE %s" % ("IGNITION" if running else "CUT-OFF"),
 			MessageLog.Level.INFO))
 
+	mission_panel.search_cancelled.connect(func() -> void: cancel_planning())
 	mission_panel.plan_requested.connect(func(target: String, pe: float, ap: float) -> void:
 		plan_mission(target, pe, ap))
 	mission_panel.execute_requested.connect(func() -> void: arm_mission())
@@ -445,6 +456,8 @@ func _process(delta: float) -> void:
 	_update_tracks(delta)
 	_update_instruments()
 	_update_audio()
+	_poll_planning()
+	_search_was_running = simulation.is_planning()
 	_watch_mission()
 
 	if debug_hud.visible:
@@ -532,6 +545,11 @@ func _update_tracks(delta: float) -> void:
 	if _track_timer > 0.0:
 		return
 	_track_timer = 0.25
+	# O mapa do sistema solar só é reconstruído quando está aberto: são mais umas
+	# centenas de consultas à efeméride, e pagá-las com o mapa fechado seria pagar
+	# por um desenho que ninguém vê.
+	if orbit_map.visible and orbit_map.mode == OrbitMap.Mode.SYSTEM:
+		_system_map = simulation.get_system_map()
 	_orbit_track = simulation.get_orbit_track(ORBIT_TRACK_SAMPLES)
 	var target_index := _target_index()
 	_target_track = (simulation.get_body_orbit_track(target_index, TARGET_TRACK_SAMPLES)
@@ -556,6 +574,8 @@ func _update_instruments() -> void:
 	if hud.visible:
 		hud.refresh(shared)
 	if orbit_map.visible:
+		if orbit_map.mode == OrbitMap.Mode.SYSTEM:
+			orbit_map.system = _system_map
 		orbit_map.refresh(shared)
 
 
@@ -740,35 +760,92 @@ func _master_caution() -> bool:
 
 func plan_mission(target: String = "", periapsis_km: float = MISSION_PERIAPSIS_KM,
 		apoapsis_km: float = MISSION_APOAPSIS_KM) -> bool:
-	## Uma tecla, e depois o quadro para por cerca de um segundo.
+	## Começa a busca. Ela roda numa thread e o jogo continua a andar.
 	##
-	## Isso não é um defeito a esconder: planejar procura oportunidades de partida
-	## e depois inverte o modelo completo duas vezes, dezenas de propagações. É
-	## uma operação de missão, não de quadro, e threadá-la compraria um segundo
-	## mais suave e custaria poder dizer qual era o estado da simulação quando o
-	## plano foi feito.
+	## ⚠️ O Milestone 7 fazia isto de forma bloqueante e escrevia aqui que um
+	## segundo de quadro parado era um custo aceitável. Era, para a Lua. Uma busca
+	## Terra→Marte leva 64 segundos medidos, e um minuto de quadros congelados não
+	## é uma tecla -- é uma queda, do ponto de vista de quem está olhando.
+	##
+	## O que a thread NÃO faz: tocar no estado que o quadro escreve. O pedido é
+	## copiado antes de ela começar e o resultado é instalado por `collect_plan()`
+	## no quadro, nunca pela thread. Ver `simulation_node.hpp`.
 	if simulation == null or not simulation.is_ready():
+		return false
+	if simulation.is_planning():
+		messages.post("ALREADY SEARCHING — cancel first", MessageLog.Level.WARNING)
 		return false
 	var wanted := target if not target.is_empty() else simulation.get_target_body()
 	if wanted.is_empty():
 		wanted = "Moon"
-	print("[mission] planning a transfer to %s -- this blocks for a moment" % wanted)
+	if not simulation.start_planning(wanted, periapsis_km, apoapsis_km, MISSION_SEARCH_HOURS):
+		messages.post(simulation.get_last_error(), MessageLog.Level.WARNING)
+		return false
+	print("[mission] searching for a transfer to %s" % wanted)
+	messages.post("SEARCHING TRAJECTORIES TO %s" % wanted.to_upper(), MessageLog.Level.MISSION)
+	return true
 
-	var plan := simulation.plan_transfer(wanted, periapsis_km, apoapsis_km,
-		MISSION_SEARCH_HOURS)
+
+func _cycle_map_mode() -> void:
+	## Alterna LOCAL / SISTEMA SOLAR (regra 26). Abre o mapa se estiver fechado:
+	## pedir o modo de um mostrador invisível e não ver nada acontecer é uma
+	## tecla que parece partida.
+	if not orbit_map.visible:
+		_toggle_panel(orbit_map)
+	orbit_map.mode = (OrbitMap.Mode.SYSTEM if orbit_map.mode == OrbitMap.Mode.LOCAL
+		else OrbitMap.Mode.LOCAL)
+	orbit_map.zoom = 1.0
+	if orbit_map.mode == OrbitMap.Mode.SYSTEM:
+		# Os caminhos planetários, uma vez. 96 amostras por corpo: a regra 29 pede
+		# explicitamente para não gerar milhares de pontos, e uma elipse desenhada
+		# com 96 segmentos é indistinguível de uma com 960 em qualquer zoom que
+		# mostre o planeta inteiro.
+		orbit_map.system_paths = simulation.get_system_orbit_paths(96)
+		_system_map = simulation.get_system_map()
+		messages.post("SOLAR SYSTEM MAP", MessageLog.Level.INFO)
+	else:
+		messages.post("LOCAL MAP", MessageLog.Level.INFO)
+	orbit_map.queue_redraw()
+
+
+func cancel_planning() -> void:
+	## Regra 120: uma busca longa tem de poder ser interrompida, e o worker tem de
+	## parar de facto -- não de ser abandonado a correr.
+	if simulation == null or not simulation.is_planning():
+		return
+	simulation.cancel_planning()
+	messages.post("CANCELLING SEARCH", MessageLog.Level.WARNING)
+
+
+func _poll_planning() -> void:
+	## Chamado todo quadro. Enquanto a busca corre, alimenta o painel com
+	## contagens; quando ela acaba, recolhe o resultado -- no QUADRO, porque é o
+	## quadro que pode instalar um plano.
+	if simulation == null:
+		return
+	if simulation.is_planning():
+		mission_panel.show_progress(simulation.get_planning_progress())
+		return
+	if not _search_was_running:
+		return
+
+	var plan := simulation.collect_plan()
 	mission_panel.show_plan(plan, simulation.get_last_error())
+	if plan.get("cancelled", false):
+		messages.post("SEARCH CANCELLED", MessageLog.Level.WARNING)
+		return
 	if plan.is_empty() or not plan.get("valid", false):
 		messages.post("NO TRANSFER FOUND — %s" % simulation.get_last_error(),
 			MessageLog.Level.WARNING)
 		push_warning("could not plan the transfer: %s" % simulation.get_last_error())
-		return false
+		return
 
 	mission_panel.show_alternatives(simulation.get_plan_alternatives())
-	messages.post("TRANSFER PLANNED — %.0f m/s, %.2f d" % [plan.get("total_delta_v", 0.0),
-		plan.get("time_of_flight_days", 0.0)], MessageLog.Level.MISSION)
+	messages.post("TRANSFER PLANNED — %.0f m/s, %s" % [plan.get("total_delta_v", 0.0),
+		Fmt.duration(plan.get("time_of_flight_days", 0.0) * 86400.0)],
+		MessageLog.Level.MISSION)
 	audio.notify()
 	_print_plan(plan)
-	return true
 
 
 func arm_mission() -> bool:
@@ -951,6 +1028,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif pressed.call("mission_execute"): arm_mission()
 	elif pressed.call("mission_abort"): abort_mission()
 	elif pressed.call("nav_panel"): _toggle_panel(mission_panel)
+	elif pressed.call("map_mode"): _cycle_map_mode()
 	elif pressed.call("orbit_map"): _toggle_panel(orbit_map)
 
 	# --- interface ---

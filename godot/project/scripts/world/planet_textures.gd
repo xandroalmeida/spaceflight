@@ -38,6 +38,10 @@ static func moon_albedo() -> Texture2D:
 	return _cached("moon_albedo", func() -> Image: return _draw_moon_albedo())
 
 
+static func mars_albedo() -> Texture2D:
+	return _cached("mars_albedo", func() -> Image: return _draw_mars_albedo())
+
+
 # --- cache -------------------------------------------------------------------
 
 static func _cached(name: String, generator: Callable) -> Texture2D:
@@ -197,5 +201,61 @@ static func _draw_moon_albedo() -> Image:
 			colour = colour.darkened(clampf(-rim * 0.9, 0.0, 1.0) * 0.35)
 			colour = colour.lerp(colour.darkened(0.12),
 				0.5 + 0.5 * dust.get_noise_3dv(direction * 2.0))
+			image.set_pixel(x, y, colour)
+	return image
+
+
+static func _draw_mars_albedo() -> Image:
+	## Marte, como substituto (regras 22, 68, 90).
+	##
+	## O que isto NÃO é: um mapa de Marte. Não há Valles Marineris, não há Olympus
+	## Mons e as manchas escuras não são Syrtis Major -- são ruído. O que ele
+	## acerta são as três coisas que fazem um planeta ser reconhecido a distância:
+	## a cor (óxido de ferro, laranja-acastanhado, não vermelho de desenho), o
+	## CONTRASTE entre planícies claras e regiões de albedo escuro, e as calotas
+	## polares, que são a assinatura de Marte num disco pequeno.
+	##
+	## A definitiva vem de fora (`docs/assets/planets/mars-albedo-codex-prompt.md`)
+	## e cai em `assets/textures/mars/mars_albedo.png`. Quando existir, o
+	## `CelestialView` a carrega e este gerador deixa de ser chamado.
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGB8)
+	var regions := _noise(4995, 1.05, 4)
+	var dust := _noise(1877, 3.2, 4)
+	var grit := _noise(6060, 11.0, 2)
+
+	# Três tons medidos a olho contra imagens do Viking/MOC, não escolhidos por
+	# gosto: a poeira clara, a rocha basáltica escura das regiões de albedo, e o
+	# gelo das calotas, que é CO2 e não é branco puro.
+	var bright_dust := Color(0.72, 0.46, 0.29)
+	var ochre := Color(0.58, 0.34, 0.20)
+	var dark_terrain := Color(0.33, 0.21, 0.145)
+	var polar_ice := Color(0.92, 0.90, 0.88)
+
+	for y in range(HEIGHT):
+		var latitude := (0.5 - (float(y) + 0.5) / float(HEIGHT)) * PI
+		var abs_lat := absf(latitude) / (PI * 0.5)
+		for x in range(WIDTH):
+			var direction := _direction(x, y)
+			var region := regions.get_noise_3dv(direction * 2.0)
+			# As regiões escuras de Marte cobrem cerca de um quarto do disco e
+			# concentram-se no hemisfério sul. O degrau e o viés de latitude
+			# produzem essa fração e essa assimetria.
+			var darkness := clampf((region + 0.10 - 0.22 * latitude / (PI * 0.5)) * 2.2, 0.0, 1.0)
+			var colour := bright_dust.lerp(ochre, clampf(0.5 + 0.5 * region, 0.0, 1.0))
+			colour = colour.lerp(dark_terrain, darkness)
+			# Poeira: as tempestades deixam o planeta manchado em escalas de
+			# centenas de quilômetros, e é isso que quebra a leitura de "esfera
+			# pintada".
+			colour = colour.lerp(bright_dust,
+				clampf(dust.get_noise_3dv(direction * 2.0) * 0.55, 0.0, 1.0))
+			colour = colour.lerp(colour.darkened(0.10),
+				0.5 + 0.5 * grit.get_noise_3dv(direction * 2.0))
+
+			# As calotas. A do sul é menor e a borda é irregular, pela mesma razão
+			# que a da Terra: uma faixa retangular lê-se como erro de textura.
+			var edge := (0.86 if latitude > 0.0 else 0.90) \
+				+ 0.05 * dust.get_noise_3dv(direction * 4.0)
+			if abs_lat > edge:
+				colour = colour.lerp(polar_ice, clampf((abs_lat - edge) / 0.09, 0.0, 1.0))
 			image.set_pixel(x, y, colour)
 	return image

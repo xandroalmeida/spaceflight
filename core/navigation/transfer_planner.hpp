@@ -4,10 +4,14 @@
 // another: searched, flown, measured and CLASSIFIED.
 //
 // Nothing in this file is lunar.  The centre and the target are arguments and
-// the arithmetic is the same for Mars or for Titan.  It is named for the Moon
-// because the Moon is the only case that has been qualified against a campaign
-// (docs/validation/lunar-navigation-hardening.md), and a generic name would
-// claim a generality nobody has measured.
+// the arithmetic is the same for Mars or for Titan.
+//
+// Until Milestone 8 it was NAMED for the Moon, because the Moon was the only
+// case a campaign had qualified and a generic name would have claimed a
+// generality nobody had measured.  What the rename records is that the claim is
+// now being made and tested: the same pipeline plans Earth->Moon and
+// Earth->Mars, and the ONE thing that differs between them is where the
+// candidate geometry comes from -- see TransferGeometry below.
 //
 // ---------------------------------------------------------------------------
 // Why this exists next to trajectory_planner.hpp and targeting.hpp
@@ -64,6 +68,7 @@
 #include "core/celestial/body_catalog.hpp"
 #include "core/celestial/body_orientation.hpp"
 #include "core/celestial/body_id.hpp"
+#include "core/celestial/solar_system.hpp"
 #include "core/coordinates/state_vector.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/math/vec3.hpp"
@@ -75,10 +80,12 @@
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/time/coordinate_time.hpp"
 #include "core/time/duration.hpp"
+#include "core/trajectory/departure_hyperbola.hpp"
 #include "core/trajectory/lambert.hpp"
 #include "core/units/angle.hpp"
 
 #include <functional>
+#include <optional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -111,7 +118,7 @@ enum class TransferFailure {
     // -- arrival -----------------------------------------------------------
     InvalidBPlane,              // the approach is not hyperbolic about the target
     BPlaneCorrectorDiverged,
-    LunarImpact,                // the flown arc entered the target
+    TargetImpact,                // the flown arc entered the target
     PeriapsisTooHigh,
     PeriapsisTooLow,
 
@@ -137,10 +144,72 @@ enum class TransferFailure {
     InsufficientDepartureDeltaV,
 
     // Captured, but not into the orbit that was asked for (section 13).
-    TargetOrbitNotAchieved
+    TargetOrbitNotAchieved,
+
+    // Whoever started the search asked for it to stop (rule 120).  A RESULT and
+    // not an error: nothing went wrong, and reporting it as NO_FEASIBLE_TRAJECTORY
+    // would say the grid was searched and found wanting when it was not searched.
+    Cancelled,
+
+    // -- added by Milestone 8 -----------------------------------------------
+
+    // The two bodies have no common primary in the directory, so there is no
+    // two-body problem to generate candidates from.  Distinct from
+    // NO_FEASIBLE_TRAJECTORY: nothing was searched, because the question could
+    // not be posed (rule 104).
+    NoTransferGeometry,
+
+    // An interplanetary departure needs a hyperbola through the ship's actual
+    // point in the parking orbit whose asymptote is the one the transfer wants,
+    // and at some points in the orbit that hyperbola does not exist -- the ship
+    // is standing along the direction it has to leave in.  A property of the
+    // departure POINT, not of the transfer, and the search simply moves on.
+    DepartureGeometryUnavailable
 };
 
 [[nodiscard]] std::string_view to_string(TransferFailure reason);
+
+// ---------------------------------------------------------------------------
+// Which two-body problem generates the candidates (Milestone 8 rules 32-36).
+//
+// This is the ONE place the two kinds of mission differ, and it is a statement
+// about the HIERARCHY of the two bodies rather than about their names -- it is
+// read off core/celestial/solar_system.hpp, so adding Titan adds no branch here
+// (rules 78, 79).
+//
+// Everything downstream is shared: the same differential corrector, the same
+// B-plane, the same capture burn, the same classification.  That is the claim
+// Milestone 8 exists to make, and test_planner_equivalence.cpp exists to keep
+// honest.
+// ---------------------------------------------------------------------------
+enum class TransferGeometry {
+    // The destination orbits the ORIGIN.  Earth to the Moon: the whole transfer
+    // happens inside the origin's gravity well, so Lambert is solved about the
+    // origin, from the parking orbit straight to where the destination will be.
+    //
+    // This is the geometry the 365/365 campaign qualified, and its arithmetic is
+    // untouched by Milestone 8.
+    Local,
+
+    // Origin and destination orbit a COMMON PRIMARY that is neither of them.
+    // Earth to Mars: over a hundred days the Sun dominates by four orders of
+    // magnitude, and a Lambert solved about the Earth would describe a
+    // trajectory that does not exist.
+    //
+    // So Lambert is solved about the primary, between the two BODIES, and its
+    // departure velocity is a heliocentric velocity rather than a burn.  What
+    // turns it into a burn is core/trajectory/departure_hyperbola.hpp: the
+    // excess velocity the transfer needs, converted into the state the ship has
+    // to be in at its actual point in the parking orbit.
+    Interplanetary
+};
+
+[[nodiscard]] std::string_view to_string(TransferGeometry geometry);
+
+// Which of the two applies, from the body hierarchy.  Nullopt when the pair has
+// no common primary in the directory, which is a refusal and not a default.
+[[nodiscard]] std::optional<TransferGeometry> geometry_for(celestial::BodyId origin,
+                                                           celestial::BodyId destination);
 
 // ---------------------------------------------------------------------------
 // Planning versus execution (sections 5 and 11).
@@ -268,12 +337,25 @@ struct TransferCost {
     [[nodiscard]] double evaluate(const TransferCostTerms& terms) const;
 };
 
+// Where the search has got to, for a user interface that must not freeze
+// (rule 48).  Counts, not trajectories: a progress report that carried a plan
+// would be a second place plans come from.
+struct SearchProgress {
+    std::string stage;              // "screening", "ranking", "flying"
+    int candidates_considered{0};   // geometries the two-body screen looked at
+    int candidates_screened{0};     // ... that survived it
+    int candidates_flown{0};
+    int candidates_succeeded{0};
+    double best_total_delta_v{0.0}; // [m/s]; 0 until something succeeds
+    std::size_t integrator_steps{0};
+};
+
 // ---------------------------------------------------------------------------
 // The search (sections 6 and 7).
 // ---------------------------------------------------------------------------
 struct TransferRecord;
 
-struct LunarTransferConfig {
+struct TransferConfig {
     // -- when to leave -----------------------------------------------------
     //
     // One revolution of the parking orbit, sampled.  Most points in a parking
@@ -333,6 +415,20 @@ struct LunarTransferConfig {
     double minimum_periapsis_altitude{20.0e3};    // [m]
     double maximum_periapsis_altitude{400.0e3};   // [m]
 
+    // The floor the INTERMEDIATE capture ellipse's periapsis has to clear, when
+    // the capture needs two burns (see CaptureSequence in the .cpp).
+    //
+    // Between the two burns the ship is on an ellipse whose periapsis is lower
+    // than the orbit that was asked for, because the first burn is long and the
+    // engine is lit on the way in. It then coasts out to apoapsis, and this is
+    // the line below which that coast is a landing.
+    //
+    // 50 km, and it is a SAFETY MARGIN rather than a physical effect: there is no
+    // atmosphere in this simulator and rule 56 forbids aerobraking, so nothing in
+    // the dynamics would stop a 10 km pass. What stops it is this number, stated
+    // here where it can be argued with.
+    double minimum_capture_periapsis_altitude{50.0e3};   // [m]
+
     TargetOrbit target_orbit{};
     TransferCost cost{};
 
@@ -373,6 +469,16 @@ struct LunarTransferConfig {
     }()};
     TargetingConfig b_plane_targeting{};
     int b_plane_passes{4};
+
+    // How many times the flyby AIM may be moved to anticipate the drop a long
+    // capture burn puts into the periapsis (see the note above
+    // TransferSession::attempt in the .cpp).
+    //
+    // Three, and the first pass is the only one a lunar transfer ever uses: the
+    // loop exits the moment the orbit lands in the requested band, and an 83 s
+    // burn puts it there. Each extra pass is a full departure correction, so
+    // this is the most expensive number in the file when it is actually needed.
+    int aim_passes{3};
 
     // How many candidates survive the two-body sort, and how many of those are
     // then corrected and flown all the way to a captured orbit.
@@ -457,6 +563,19 @@ struct LunarTransferConfig {
     // cost memory, and a 365-epoch campaign does not need them.
     bool keep_trajectory{false};
 
+    // ---- progress and cancellation (rules 48, 51, 120) ---------------------
+    //
+    // Both are CALLBACKS and not state, because the planner must not know
+    // whether it is running on a worker thread, in a campaign loop or in a test.
+    // Whoever started the search decides what stopping means.
+    //
+    // `cancelled` is asked between candidates and between aim passes -- never in
+    // the middle of one. A search that abandons a flight half way through leaves
+    // the step counters describing work that produced nothing, and the point of
+    // those counters is that they describe the search.
+    std::function<bool()> cancelled{};
+    std::function<void(const SearchProgress&)> on_progress{};
+
     // Called once per candidate that is actually flown, with that candidate's
     // own record, before the best of them is chosen.
     //
@@ -535,6 +654,31 @@ struct TransferRecord {
     double burn_duration_s{0.0};
     time::CoordinateTime burn_end{};
     double burn_offset_from_periapsis_s{0.0};
+
+    // -- the capture corrector (Milestone 8) --------------------------------
+    //
+    // All zero, and `converged` false, whenever it did not have to run -- which
+    // is every lunar capture. A non-zero iteration count is the signal that the
+    // impulsive plan was not an impulse and the burn had to be solved for.
+    // The second capture burn (rule 11's CIRCULARIZATION).  Zero whenever the
+    // sequence is one burn long, which is every lunar transfer.
+    double circularisation_delta_v{0.0};      // [m/s]
+    time::CoordinateTime circularisation_start{};
+    double circularisation_duration_s{0.0};
+
+    // The periapsis of the ellipse between the two burns. Zero when the capture
+    // was one burn, which is every lunar transfer.
+    double intermediate_periapsis_altitude{0.0};   // [m]
+
+    // How many aim passes this attempt used, and where the flyby was finally
+    // aimed. One and `flyby_altitude` for every lunar transfer.
+    int aim_passes{0};
+    double aim_altitude{0.0};   // [m]
+
+    int capture_corrector_iterations{0};
+    int capture_corrector_evaluations{0};
+    bool capture_corrector_converged{false};
+    std::string capture_corrector_message;
     double burn_midpoint_radius{0.0};     // [m]  section 12
     double burn_midpoint_speed{0.0};      // [m/s]
 
@@ -646,7 +790,7 @@ struct TransferRecord {
     double mass_at_departure{0.0};   // [kg] total, at the injection's ignition
     double mass_at_capture{0.0};     // [kg] total, at the capture burn's ignition
 
-    // The flown arc, when LunarTransferConfig::keep_trajectory asked for it.
+    // The flown arc, when TransferConfig::keep_trajectory asked for it.
     // shared_ptr because a TransferRecord is copied freely (the campaign holds a
     // vector of them) and a dense arc over five days is megabytes.
     std::shared_ptr<const propagation::Trajectory> trajectory{};
@@ -700,7 +844,7 @@ struct TransferInputs {
 // std::invalid_argument only for inputs that are not a question -- a null
 // provider, an empty time-of-flight grid.
 [[nodiscard]] TransferRecord plan_and_fly(const TransferInputs& inputs,
-                                          const LunarTransferConfig& config);
+                                          const TransferConfig& config);
 
 // ---------------------------------------------------------------------------
 // The departure x time-of-flight map (section 7).
@@ -735,6 +879,6 @@ struct GridCell {
 // Milestone 6 flew are the ones the calendar handed it, and most of them are
 // DepartureConicHitsBody.
 [[nodiscard]] std::vector<GridCell> map_transfer_grid(const TransferInputs& inputs,
-                                                      const LunarTransferConfig& config);
+                                                      const TransferConfig& config);
 
 }  // namespace sf::navigation

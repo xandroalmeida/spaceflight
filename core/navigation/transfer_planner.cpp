@@ -1,4 +1,4 @@
-#include "core/navigation/lunar_transfer.hpp"
+#include "core/navigation/transfer_planner.hpp"
 
 #include "core/attitude/inertia.hpp"
 #include "core/attitude/rcs.hpp"
@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <iostream>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -41,7 +43,7 @@ std::string_view to_string(TransferFailure reason) {
         case TransferFailure::DepartureCorrectorStagnated: return "DEPARTURE_CORRECTOR_STAGNATED";
         case TransferFailure::InvalidBPlane:               return "INVALID_BPLANE";
         case TransferFailure::BPlaneCorrectorDiverged:     return "BPLANE_CORRECTOR_DIVERGED";
-        case TransferFailure::LunarImpact:                 return "LUNAR_IMPACT";
+        case TransferFailure::TargetImpact:                 return "TARGET_IMPACT";
         case TransferFailure::PeriapsisTooHigh:            return "PERIAPSIS_TOO_HIGH";
         case TransferFailure::PeriapsisTooLow:             return "PERIAPSIS_TOO_LOW";
         case TransferFailure::CaptureBurnTooEarly:         return "CAPTURE_BURN_TOO_EARLY";
@@ -53,9 +55,45 @@ std::string_view to_string(TransferFailure reason) {
         case TransferFailure::DepartureConicHitsCentralBody:
             return "DEPARTURE_CONIC_HITS_CENTRAL_BODY";
         case TransferFailure::InsufficientDepartureDeltaV: return "INSUFFICIENT_DEPARTURE_DV";
+        case TransferFailure::Cancelled:                    return "CANCELLED";
+        case TransferFailure::NoTransferGeometry:           return "NO_TRANSFER_GEOMETRY";
+        case TransferFailure::DepartureGeometryUnavailable:
+            return "DEPARTURE_GEOMETRY_UNAVAILABLE";
         case TransferFailure::TargetOrbitNotAchieved:      return "TARGET_ORBIT_NOT_ACHIEVED";
     }
     return "UNCLASSIFIED";
+}
+
+std::string_view to_string(TransferGeometry geometry) {
+    switch (geometry) {
+        case TransferGeometry::Local:          return "LOCAL";
+        case TransferGeometry::Interplanetary: return "INTERPLANETARY";
+    }
+    return "UNKNOWN";
+}
+
+std::optional<TransferGeometry> geometry_for(celestial::BodyId origin,
+                                             celestial::BodyId destination) {
+    if (origin == destination) {
+        return std::nullopt;
+    }
+    const auto primary = celestial::common_primary(origin, destination);
+    if (!primary.has_value()) {
+        return std::nullopt;
+    }
+    // The destination orbits the origin (the Moon about the Earth): the whole
+    // transfer is inside one gravity well.
+    if (*primary == origin) {
+        return TransferGeometry::Local;
+    }
+    // The origin orbits the destination -- a moon-to-planet return. Same
+    // geometry, opposite direction: still one well, still a Lambert about the
+    // body both ends are bound to. Nothing in the pipeline below cares which of
+    // the two is on top.
+    if (*primary == destination) {
+        return TransferGeometry::Local;
+    }
+    return TransferGeometry::Interplanetary;
 }
 
 std::string_view to_string(ExecutionModel model) {
@@ -140,6 +178,8 @@ struct FlightResult {
     double propellant_used{0.0};
     time::CoordinateTime capture_ignition{};
     double capture_duration{0.0};
+    time::CoordinateTime circularisation_ignition{};
+    double circularisation_duration{0.0};
     double pointing_error_mean{0.0};   // [rad]; AUTOPILOT only
     double pointing_error_peak{0.0};   // [rad]; AUTOPILOT only
     double rcs_propellant{0.0};        // [kg];  AUTOPILOT only, inside the burn
@@ -163,7 +203,7 @@ struct FlightResult {
 // ---------------------------------------------------------------------------
 class TransferSession {
 public:
-    TransferSession(const TransferInputs& inputs, const LunarTransferConfig& config)
+    TransferSession(const TransferInputs& inputs, const TransferConfig& config)
         : inputs_(inputs),
           config_(config),
           ssb_(coordinates::ReferenceFrame::ssb_j2000()),
@@ -176,8 +216,27 @@ public:
                 "lunar transfer: the time-of-flight grid is empty; a search with nothing to "
                 "search is not a search");
         }
+        const auto geometry = geometry_for(inputs_.center, inputs_.target);
+        if (!geometry.has_value()) {
+            throw std::invalid_argument(
+                "transfer planner: " + inputs_.center.name() + " and " + inputs_.target.name() +
+                " have no common primary in the body directory, so there is no two-body "
+                "problem to generate candidates from");
+        }
+        geometry_ = *geometry;
+        // What Lambert is solved about. For a local transfer that is the origin
+        // itself; for an interplanetary one it is whatever both bodies orbit,
+        // read off the hierarchy rather than assumed to be the Sun -- the same
+        // code plans Io to Europa about Jupiter.
+        primary_ = geometry_ == TransferGeometry::Local
+                       ? inputs_.center
+                       : celestial::common_primary(inputs_.center, inputs_.target)
+                             .value_or(celestial::bodies::sun);
+        primary_frame_ = coordinates::ReferenceFrame::centered_on(primary_);
+
         gm_center_ = inputs_.provider->gravitational_parameter(inputs_.center);
         gm_target_ = inputs_.provider->gravitational_parameter(inputs_.target);
+        gm_primary_ = inputs_.provider->gravitational_parameter(primary_);
         radius_center_ = inputs_.provider->mean_radius(inputs_.center);
         radius_target_ = inputs_.provider->mean_radius(inputs_.target);
         if (!inputs_.j2_bodies.empty() && inputs_.orientation == nullptr) {
@@ -207,6 +266,12 @@ public:
         double departure_eccentricity{0.0};
         double departure_conic_deficit{0.0};
         double v_infinity_estimate{0.0};
+        // The arrival excess velocity as a VECTOR, in whatever frame Lambert was
+        // solved in.  Kept because the aim point needs a DIRECTION and the
+        // magnitude alone cannot give one -- and because re-deriving it
+        // downstream from `solution` would have to know which frame that was,
+        // which is exactly the confusion this milestone is avoiding.
+        Vec3 v_infinity_vector{};
         double insertion_estimate{0.0};
         double proxy_cost{0.0};
         double flown_miss{0.0};
@@ -214,16 +279,77 @@ public:
         std::string id;
     };
 
+    // ---- what turns an approach into an ORBIT ------------------------------
+    //
+    // One burn, or two.
+    //
+    // A lunar capture is one burn: 83 s against a periapsis speed of 1.6 km/s,
+    // near enough an impulse that the orbit comes out 96.9 x 103.2 km when
+    // 100 x 100 was asked for.
+    //
+    // A Mars capture at the speeds this engine produces is not.  Arrival
+    // v_infinity 18.5 km/s, periapsis speed 19.0 km/s, a single burn of 7.3 km/s
+    // lasting 732 s.  Measured, by sweeping where that burn sits relative to
+    // periapsis:
+    //
+    //     offset  -300 s    -957 x 4954 km   e = 0.549
+    //     offset     0 s     192 x  993 km   e = 0.101      <- the best there is
+    //     offset  +366 s   -1493 x 7131 km   e = 0.695
+    //
+    // Zero is a local optimum, so a corrector on (delta-v, offset) has a
+    // near-singular column there and stalls -- which is exactly what the first
+    // version of it did, after 57 flights.  The knob does not exist: ONE burn
+    // through a 19 km/s periapsis passage cannot produce a circle, because the
+    // engine is lit across four Mars radii of the trajectory.
+    //
+    // So: two burns, which is what a real Mars orbit insertion is.  The first
+    // brakes the hyperbola into an ellipse whose PERIAPSIS is the altitude that
+    // was asked for; the second, half a revolution later and an order of
+    // magnitude smaller, circularises there.  Being small, the second one really
+    // is nearly an impulse, which is why it can close what the first cannot.
+    //
+    // `has_circularisation` is false for every lunar transfer, and nothing in
+    // this struct is reached at all when the single-burn flight already lands in
+    // the requested orbit.
+    struct CaptureSequence {
+        bool active{false};
+
+        double capture_delta_v{0.0};
+        time::CoordinateTime capture_at{};
+        double mass_at_capture{0.0};
+
+        bool has_circularisation{false};
+        double circularisation_delta_v{0.0};
+        time::CoordinateTime circularisation_at{};
+        double mass_at_circularisation{0.0};
+
+        // PROGRADE, and that is not a detail. The second burn happens at the
+        // ellipse's apoapsis and its job is to RAISE the opposite apsis, which
+        // costs speed added and not speed removed. Firing it retrograde like the
+        // first one would lower the periapsis further and put the ship into the
+        // planet.
+        GuidanceMode circularisation_guidance{GuidanceMode::Prograde};
+
+        [[nodiscard]] double total_delta_v() const {
+            return capture_delta_v + (has_circularisation ? circularisation_delta_v : 0.0);
+        }
+    };
+
     struct Rejections {
         int considered{0};
         int no_lambert{0};
         int transfer_angle{0};
         int departure_conic{0};
+        int departure_geometry{0};
         int delta_v{0};
     };
 
     [[nodiscard]] TransferRecord run();
+    [[nodiscard]] TransferRecord attempt_with_aim(const Candidate& candidate,
+                                                  double aim_altitude,
+                                                  const Vec3& departure_guess);
     [[nodiscard]] std::vector<GridCell> map_grid();
+    [[nodiscard]] TransferGeometry geometry() const { return geometry_; }
 
 private:
     // ---- infrastructure ---------------------------------------------------
@@ -281,9 +407,7 @@ private:
                                              const Vec3& departure_velocity,
                                              time::CoordinateTime until,
                                              propagation::Trajectory* arc, bool stop_on_impact,
-                                             const std::optional<InsertionBurn>& capture,
-                                             time::CoordinateTime capture_at,
-                                             double mass_at_capture) {
+                                             const CaptureSequence& capture) {
         FlightResult out{};
         out.state = candidate.state;
         out.time = candidate.departure;
@@ -308,17 +432,16 @@ private:
             injection.inertial_direction = injection_direction;
             injection_cutoff = injection.cutoff();
             plan.add(std::move(injection));
-
-            if (capture.has_value() && capture->delta_v > 0.0 && mass_at_capture > 0.0) {
-                plan.add(maneuver_for_delta_v(*inputs_.craft, mass_at_capture, capture->delta_v,
-                                              capture_at, GuidanceMode::Hull, inputs_.target,
-                                              1.0, "insertion",
-                                              BurnCentering::CenterOnIgnition));
-            }
         } catch (const std::exception& e) {
             out.ok = false;
             out.status = propagation::PropagationStatus::OutOfPropellant;
             out.message = e.what();
+            return out;
+        }
+        if (!add_capture_burns(plan, capture, GuidanceMode::Hull)) {
+            out.ok = false;
+            out.status = propagation::PropagationStatus::OutOfPropellant;
+            out.message = "the ship cannot pay for the capture sequence";
             return out;
         }
 
@@ -505,6 +628,270 @@ private:
         return out;
     }
 
+    // How far from the target counts as "arrived" for the FIRST corrector stage.
+    //
+    // Stage 1 does not do precision -- its only job is to put the ship somewhere
+    // a B-plane can be read from, and stage 2 then aims it (see the note on
+    // TransferConfig::departure_targeting).  So the tolerance is a statement
+    // about the size of the target's gravitational neighbourhood, and that is
+    // 384 000 km from the Earth for one destination and 228 million for another.
+    //
+    // For a LOCAL transfer it is left exactly at the configured value, which is
+    // the number the 365/365 campaign was qualified with.  For an interplanetary
+    // one it is derived: half the radius at which the target's pull matches the
+    // primary's, r = R (m/M)^(2/5).  That is a NUMERICAL choice about where a
+    // corrector stage stops, not a physical boundary -- nothing in the dynamics
+    // below knows this radius exists, and gravity stays multibody throughout
+    // (rule 65).
+    [[nodiscard]] TargetingConfig departure_targeting_for(const Candidate& candidate) const {
+        auto targeting = config_.departure_targeting;
+        if (geometry_ == TransferGeometry::Local) {
+            return targeting;
+        }
+        const auto arrival = candidate.departure + time::Duration::seconds(candidate.tof_s);
+        const double separation =
+            inputs_.provider->state(inputs_.target, arrival, primary_frame_).state.position.norm();
+        if (separation > 0.0 && gm_primary_ > 0.0) {
+            const double influence = separation * std::pow(gm_target_ / gm_primary_, 0.4);
+            targeting.position_tolerance = 0.5 * influence;
+        }
+        return targeting;
+    }
+
+    // How far the arrival moves per m/s of departure velocity.  Used to convert a
+    // flown miss into the correction effort it predicts, so that candidates are
+    // ranked on one cost function instead of two.
+    //
+    // To first order it is just the time of flight: a metre per second held for
+    // t seconds moves the arrival by t metres.  The measured lunar figure is
+    // 1e6 m per m/s against a 4.5-day flight, i.e. 2.57 times that -- the
+    // amplification the target's own gravity adds on the way in.  The
+    // interplanetary value carries the same factor rather than inventing a new
+    // one, and the local value is left at the configured constant so that the
+    // qualified campaign's ranking does not move.
+    [[nodiscard]] double lever_arm_for(const Candidate& candidate) const {
+        if (geometry_ == TransferGeometry::Local) {
+            return std::max(config_.arrival_lever_arm, 1.0);
+        }
+        return std::max(2.57 * candidate.tof_s, 1.0);
+    }
+
+    // A body's velocity relative to whatever Lambert was solved about.  One line,
+    // named, because getting this frame wrong is silent: the excess velocity
+    // would come out about 30 km/s too large and every candidate would be
+    // refused as unaffordable with no indication of why.
+    [[nodiscard]] Vec3 primary_relative_velocity(celestial::BodyId body,
+                                                 time::CoordinateTime t) const {
+        return inputs_.provider->state(body, t, primary_frame_).state.velocity;
+    }
+
+    // ---- the capture, solved against the FLOWN orbit ----------------------
+    //
+    // See the note on CaptureSequence for why there are two burns and what was
+    // measured to find that out.
+    //
+    // Each burn is solved for ONE number against ONE number -- the first one's
+    // delta-v against the periapsis it produces, the second's against the
+    // apoapsis -- by the secant method.  One knob per target, so the map is
+    // monotone and there is no Jacobian to go singular: the two-knob version
+    // this replaced stalled after 57 flights because its second column was zero
+    // at the point it started from.
+    struct BurnSolution {
+        double delta_v{0.0};
+        double achieved{0.0};
+        trajectory::OrbitalElements elements{};
+        bool converged{false};
+        int evaluations{0};
+        std::string message;
+    };
+
+    // One capture sequence, flown from a state that is already on the approach.
+    //
+    // Deliberately NOT a flight from departure: the solvers need a dozen
+    // evaluations each, and every one would otherwise re-integrate the whole
+    // interplanetary coast -- the same arc every time. Starting from the approach
+    // makes an evaluation cost hours of flight instead of months, and changes no
+    // physics: the same force model, the same integrator, the same maneuvers.
+    [[nodiscard]] std::optional<trajectory::OrbitalElements> fly_capture_from(
+        const propagation::PropagationState& start, time::CoordinateTime t_start,
+        const CaptureSequence& capture, time::CoordinateTime until) {
+        ManeuverPlan plan;
+        if (!add_capture_burns(plan, capture,
+                               config_.execution == ExecutionModel::Autopilot
+                                   ? GuidanceMode::Hull
+                                   : GuidanceMode::Retrograde)) {
+            return std::nullopt;   // the ship cannot pay for this much braking
+        }
+
+        ManeuverExecutor executor{*inputs_.provider, *inputs_.craft, plan, ssb_};
+        auto forces = build_forces(&executor);
+
+        // A LOCAL budget, and it is the difference between a solver that answers
+        // in seconds and one that does not answer.
+        //
+        // These flights are hours long -- a burn and a couple of revolutions --
+        // and a healthy one costs a few thousand steps. Inheriting the search's
+        // whole budget meant that a trial burn which sent the ship grazing the
+        // planet could grind for fifty million steps before anyone was told,
+        // which is how a two-second solve became a ten-minute one. Measured: the
+        // departure stages of an Earth-Mars attempt cost 3.2 s together, and the
+        // capture solve after them did not finish.
+        //
+        // Exhausting it is not an error, it is an ANSWER: the trial did not close
+        // an orbit, and solve_burn responds by taking a shorter step. 200 000 is
+        // about a hundred times a healthy flight.
+        auto integrator = integrator_for(true);
+        integrator.max_steps = 200'000;
+        propagation::DormandPrince54Propagator propagator{*forces, integrator};
+        const auto mission = run_mission(propagator, executor, start, t_start, until, nullptr);
+        account(mission.stats);
+        if (!mission.ok()) {
+            return std::nullopt;
+        }
+        return elements_about_target(mission.state, mission.time);
+    }
+
+    [[nodiscard]] trajectory::OrbitalElements elements_about_target(
+        const propagation::PropagationState& state, time::CoordinateTime t) const {
+        const auto body = inputs_.provider->state(inputs_.target, t, ssb_);
+        coordinates::StateVector relative{};
+        relative.position = state.state.position - body.state.position;
+        relative.velocity = state.state.velocity - body.state.velocity;
+        return trajectory::elements_from_state(relative, gm_target_);
+    }
+
+    // Solve one burn's delta-v so that `readout` of the resulting orbit lands on
+    // `wanted`.  `mutate` writes the trial delta-v into the sequence, so the same
+    // routine solves the first burn and the second without knowing which is which.
+    template <typename Mutate, typename Readout>
+    [[nodiscard]] BurnSolution solve_burn(const propagation::PropagationState& start,
+                                          time::CoordinateTime t_start, CaptureSequence sequence,
+                                          Mutate&& mutate, Readout&& readout, double guess,
+                                          double wanted, double tolerance,
+                                          double settle_seconds) {
+        BurnSolution out{};
+        out.delta_v = guess;
+
+        auto evaluate = [&](double delta_v) -> std::optional<trajectory::OrbitalElements> {
+            if (!(delta_v > 0.0)) {
+                return std::nullopt;
+            }
+            ++out.evaluations;
+            CaptureSequence trial = sequence;
+            mutate(trial, delta_v);
+            const auto until = latest_burn_epoch(trial) + time::Duration::seconds(settle_seconds);
+            return fly_capture_from(start, t_start, trial, until);
+        };
+
+        auto first = evaluate(guess);
+        if (!first.has_value()) {
+            out.message = "the first trial burn did not close an orbit";
+            return out;
+        }
+        double x0 = guess;
+        double f0 = readout(*first) - wanted;
+
+        // The second point of the secant: one part in a thousand of the burn.
+        // Large enough to move the orbit by far more than the integrator's error,
+        // small enough that the two points still see the same curve.
+        double x1 = guess * 1.001 + 1.0;
+        auto second = evaluate(x1);
+        if (!second.has_value()) {
+            x1 = guess * 0.999;
+            second = evaluate(x1);
+        }
+        if (!second.has_value()) {
+            out.message = "the secant's second point did not close an orbit";
+            return out;
+        }
+        double f1 = readout(*second) - wanted;
+        auto best = *second;
+
+        for (int iteration = 0; iteration < 20; ++iteration) {
+            if (std::abs(f1) < tolerance) {
+                out.converged = true;
+                break;
+            }
+            const double slope = (f1 - f0) / (x1 - x0);
+            if (!std::isfinite(slope) || slope == 0.0) {
+                out.message = "the burn solver's secant went flat";
+                break;
+            }
+            double next = x1 - f1 / slope;
+            // The delta-v cannot go negative and cannot run away: a step of more
+            // than half the current burn means the secant is extrapolating far
+            // outside the two points it was built from.
+            const double limit = std::max(0.5 * std::abs(x1), 1.0);
+            next = std::clamp(next, x1 - limit, x1 + limit);
+            if (!(next > 0.0)) {
+                next = 0.5 * x1;
+            }
+
+            // A trial that does not come back is a trial that flew into the
+            // planet or ran the tank dry, and the honest response is to take a
+            // shorter step rather than to give up: the secant extrapolates, and
+            // the first point outside the feasible set says where the edge is,
+            // not that there is no answer inside it.
+            std::optional<trajectory::OrbitalElements> trial;
+            double accepted = next;
+            for (int retreat = 0; retreat < 6; ++retreat) {
+                trial = evaluate(accepted);
+                if (trial.has_value()) {
+                    break;
+                }
+                accepted = 0.5 * (accepted + x1);
+                if (std::abs(accepted - x1) < 1.0e-6 * std::max(1.0, std::abs(x1))) {
+                    break;
+                }
+            }
+            if (!trial.has_value()) {
+                out.message = "the burn solver lost the orbit";
+                break;
+            }
+            x0 = x1;
+            f0 = f1;
+            x1 = accepted;
+            f1 = readout(*trial) - wanted;
+            best = *trial;
+        }
+
+        out.delta_v = x1;
+        out.achieved = f1 + wanted;
+        out.elements = best;
+        if (out.converged && out.message.empty()) {
+            out.message = "converged";
+        }
+        return out;
+    }
+
+    // How long until the next periapsis passage, from a set of elements read at
+    // some instant on the orbit.
+    //
+    // Through the eccentric anomaly rather than by propagating: the answer is
+    // wanted as an IGNITION EPOCH for a burn the solver will then size, and a
+    // Kepler step is exact for that purpose while a propagation would cost
+    // another flight. The orbit it is read from is the FLOWN one, so the two-body
+    // step is taken over an arc of half a revolution rather than over a transfer.
+    [[nodiscard]] static double seconds_to_periapsis(const trajectory::OrbitalElements& e) {
+        if (!(e.period > 0.0) || !std::isfinite(e.period) || e.eccentricity >= 1.0) {
+            return 0.0;
+        }
+        const double nu = e.true_anomaly.radians();
+        const double eccentric = 2.0 * std::atan2(std::sqrt(1.0 - e.eccentricity) *
+                                                      std::sin(0.5 * nu),
+                                                  std::sqrt(1.0 + e.eccentricity) *
+                                                      std::cos(0.5 * nu));
+        const double mean = eccentric - e.eccentricity * std::sin(eccentric);
+        // Mean anomaly is measured FROM periapsis, so the time still to run is
+        // whatever is left of a revolution.
+        const double since = std::fmod(mean / units::two_pi * e.period + e.period, e.period);
+        return e.period - since;
+    }
+
+    [[nodiscard]] static time::CoordinateTime latest_burn_epoch(const CaptureSequence& sequence) {
+        return sequence.has_circularisation ? sequence.circularisation_at : sequence.capture_at;
+    }
+
     [[nodiscard]] double propellant_for(double mass, double delta_v) const {
         if (!(delta_v > 0.0)) {
             return 0.0;
@@ -524,6 +911,22 @@ private:
         return result.ok();
     }
 
+    void report_progress(const char* stage, const Rejections& rejections, int screened,
+                         int flown, int succeeded, double best_delta_v) const {
+        if (!config_.on_progress) {
+            return;
+        }
+        SearchProgress progress{};
+        progress.stage = stage;
+        progress.candidates_considered = rejections.considered;
+        progress.candidates_screened = screened;
+        progress.candidates_flown = flown;
+        progress.candidates_succeeded = succeeded;
+        progress.best_total_delta_v = best_delta_v;
+        progress.integrator_steps = steps_;
+        config_.on_progress(progress);
+    }
+
     void account(const propagation::IntegratorStats& stats) {
         steps_ += stats.accepted_steps + stats.rejected_steps;
         ++propagations_;
@@ -535,9 +938,16 @@ private:
     // Milestone 6 did not have lives: a transfer whose post-injection conic dives
     // below the central body's surface is not a transfer, and no corrector can
     // make it one.
+    //
+    // `r1` and `r2` are relative to `primary_`, and `primary` is its state: for a
+    // LOCAL transfer the primary IS the origin, so `primary` and `center` are the
+    // same BodyState and every line below reduces term by term to what the
+    // 365/365 campaign ran.  That equivalence is not a hope -- it is what
+    // tests/scientific/test_planner_equivalence.cpp measures.
     [[nodiscard]] std::optional<Candidate> screen(time::CoordinateTime t_depart,
                                                   const propagation::PropagationState& state,
                                                   const ephemeris::BodyState& center,
+                                                  const ephemeris::BodyState& primary,
                                                   const Vec3& r1, const Vec3& r2,
                                                   time::Duration tof,
                                                   trajectory::TransferDirection direction,
@@ -568,7 +978,7 @@ private:
 
         trajectory::LambertSolution solution{};
         try {
-            solution = trajectory::solve_lambert(r1, r2, tof, gm_center_, direction);
+            solution = trajectory::solve_lambert(r1, r2, tof, gm_primary_, direction);
         } catch (const std::exception&) {
             ++rejections.no_lambert;
             if (cell != nullptr) {
@@ -596,7 +1006,41 @@ private:
         candidate.direction = direction;
         candidate.solution = solution;
         candidate.transfer_angle = transfer_angle;
-        candidate.departure_velocity = center.state.velocity + solution.departure_velocity;
+        // The position and velocity of the departure conic ABOUT THE ORIGIN: the
+        // conic the ship actually flies out on, whichever geometry this is.
+        const Vec3 r_origin = state.state.position - center.state.position;
+        Vec3 departure_velocity_relative{};
+
+        if (geometry_ == TransferGeometry::Local) {
+            // Lambert's departure velocity is already relative to the origin,
+            // because the origin is what Lambert was solved about.
+            departure_velocity_relative = solution.departure_velocity;
+        } else {
+            // Rules 33 and 34.  Lambert answered a HELIOCENTRIC question, so its
+            // departure velocity is a heliocentric velocity and not a burn: the
+            // difference between it and the origin body's own heliocentric
+            // velocity is the excess velocity the ship has to leave with.
+            //
+            // Treating that excess velocity as the burn -- which is what "use
+            // v_depart from Lambert directly" amounts to -- forgets that the ship
+            // is 6378 km down a gravity well and has to climb out of it. It is
+            // wrong by about 8 km/s at a 400 km parking orbit, which no
+            // differential corrector recovers from.
+            const Vec3 v_infinity_out = solution.departure_velocity - primary_relative_velocity(
+                                            inputs_.center, t_depart);
+            const auto hyperbola =
+                trajectory::departure_onto_asymptote(r_origin, v_infinity_out, gm_center_);
+            if (!hyperbola.ok) {
+                ++rejections.departure_geometry;
+                if (cell != nullptr) {
+                    cell->classification = GridClass::NoSolution;
+                }
+                return std::nullopt;
+            }
+            departure_velocity_relative = hyperbola.velocity;
+        }
+
+        candidate.departure_velocity = center.state.velocity + departure_velocity_relative;
         candidate.delta_v = (candidate.departure_velocity - state.state.velocity).norm();
 
         // THE constraint.  The post-injection conic about the central body, as a
@@ -604,7 +1048,12 @@ private:
         // flies into the planet it just left, minutes after ignition.  46 of the
         // 59 Milestone 6 failures are exactly this, and every one of them was
         // preceded by a B-plane stage reporting `converged`.
-        const coordinates::StateVector departure_conic{r1, solution.departure_velocity};
+        //
+        // The same test for both geometries, and it has to be: an interplanetary
+        // departure hyperbola can dive through the Earth exactly as readily as a
+        // trans-lunar one, and for the same reason -- the asymptote the transfer
+        // wants may sit on the far side of the planet from where the ship is.
+        const coordinates::StateVector departure_conic{r_origin, departure_velocity_relative};
         const auto elements = trajectory::elements_from_state(departure_conic, gm_center_);
         candidate.departure_perigee = elements.periapsis_radius;
         candidate.departure_eccentricity = elements.eccentricity;
@@ -627,7 +1076,34 @@ private:
             if (cell != nullptr) {
                 cell->classification = GridClass::DepartureConicHitsBody;
             }
-            if (config_.refuse_departure_conic_below_floor) {
+            // A penalty for a LOCAL transfer and a refusal for an interplanetary
+            // one, and the difference is in what the number means rather than in
+            // how strict anyone feels.
+            //
+            // Locally, the perigee is read off a Lambert conic that the corrector
+            // then moves by 152 to 3910 m/s (median 445 over 365 epochs), and a
+            // correction that size routinely lifts a perigee that started below
+            // the surface. Refusing there refuses flyable transfers -- measured:
+            // 84 epochs of 100 lost to it.
+            //
+            // Interplanetary, the perigee is read off the EXACT hyperbola through
+            // the ship's own position with the asymptote the transfer needs. It is
+            // a geometric fact about that departure point, not an estimate, and
+            // the corrector's authority here is tens of m/s against a periapsis
+            // thousands of kilometres inside the planet. Nothing lifts it.
+            //
+            // Flying them anyway is not merely wasteful, it is the dominant cost
+            // of the whole search: with `stop_inside_body` off -- which the probe
+            // flights need, because a corrector wants a smooth map -- a
+            // trajectory that passes through the Earth meets an acceleration of
+            // 10^11 m/s^2 and the error controller grinds the step to the floor.
+            // Measured on the first Earth-Mars search: 226 000 integrator steps
+            // per flight against 5 003 for the same transfer that clears the
+            // surface, and the 2 000 000-step budget exhausted after nine
+            // propagations.
+            const bool refuse = config_.refuse_departure_conic_below_floor ||
+                                geometry_ == TransferGeometry::Interplanetary;
+            if (refuse) {
                 return std::nullopt;
             }
         }
@@ -636,9 +1112,9 @@ private:
         // here: v_infinity relative to the target, and the periapsis burn it
         // implies.
         const auto target_arrival = inputs_.provider->state(inputs_.target, t_depart + tof,
-                                                            centered_);
-        candidate.v_infinity_estimate =
-            (solution.arrival_velocity - target_arrival.state.velocity).norm();
+                                                            primary_frame_);
+        candidate.v_infinity_vector = solution.arrival_velocity - target_arrival.state.velocity;
+        candidate.v_infinity_estimate = candidate.v_infinity_vector.norm();
         if (candidate.v_infinity_estimate > 0.0) {
             candidate.insertion_estimate =
                 plan_insertion(wanted_periapsis_, gm_target_, candidate.v_infinity_estimate, 0.0)
@@ -688,12 +1164,14 @@ private:
             }
             const auto state = coast_.state_at(t_depart);
             const auto center = inputs_.provider->state(inputs_.center, t_depart, ssb_);
-            const Vec3 r1 = state.state.position - center.state.position;
+            const auto primary = inputs_.provider->state(primary_, t_depart, ssb_);
+            const Vec3 r1 = state.state.position - primary.state.position;
             const auto tof = time::Duration::days(config_.pinned.time_of_flight_days);
-            const Vec3 r2 = inputs_.provider->state(inputs_.target, t_depart + tof, centered_)
-                                .state.position;
+            const Vec3 r2 =
+                inputs_.provider->state(inputs_.target, t_depart + tof, primary_frame_)
+                    .state.position;
             ++rejections.considered;
-            auto candidate = screen(t_depart, state, center, r1, r2, tof,
+            auto candidate = screen(t_depart, state, center, primary, r1, r2, tof,
                                     config_.pinned.direction, rejections);
             if (candidate.has_value()) {
                 candidates.push_back(std::move(*candidate));
@@ -713,16 +1191,17 @@ private:
 
         for (const auto& [t_depart, state] : samples) {
             const auto center = inputs_.provider->state(inputs_.center, t_depart, ssb_);
-            const Vec3 r1 = state.state.position - center.state.position;
+            const auto primary = inputs_.provider->state(primary_, t_depart, ssb_);
+            const Vec3 r1 = state.state.position - primary.state.position;
             for (const double tof_days : config_.time_of_flight_days) {
                 const auto tof = time::Duration::days(tof_days);
                 const Vec3 r2 = inputs_.provider
-                                    ->state(inputs_.target, t_depart + tof, centered_)
+                                    ->state(inputs_.target, t_depart + tof, primary_frame_)
                                     .state.position;
                 for (const auto direction : directions) {
                     ++rejections.considered;
-                    auto candidate =
-                        screen(t_depart, state, center, r1, r2, tof, direction, rejections);
+                    auto candidate = screen(t_depart, state, center, primary, r1, r2, tof,
+                                            direction, rejections);
                     if (candidate.has_value()) {
                         candidates.push_back(std::move(*candidate));
                     }
@@ -734,22 +1213,60 @@ private:
 
     // ---- flying -----------------------------------------------------------
 
+    // A flight with no capture burns at all: every probe the correctors run.
     [[nodiscard]] FlightResult fly(const Candidate& candidate, const Vec3& departure_velocity,
                                    time::CoordinateTime until, propagation::Trajectory* arc,
-                                   bool stop_on_impact,
-                                   const std::optional<InsertionBurn>& capture = std::nullopt,
-                                   time::CoordinateTime capture_at = {},
-                                   double mass_at_capture = 0.0) {
+                                   bool stop_on_impact) {
+        const CaptureSequence none{};
+        return fly(candidate, departure_velocity, until, arc, stop_on_impact, none);
+    }
+
+    [[nodiscard]] FlightResult fly(const Candidate& candidate, const Vec3& departure_velocity,
+                                   time::CoordinateTime until, propagation::Trajectory* arc,
+                                   bool stop_on_impact, const CaptureSequence& capture) {
         if (config_.execution == ExecutionModel::Impulsive) {
             return fly_impulsive(candidate, departure_velocity, until, arc, stop_on_impact,
-                                 capture, capture_at);
+                                 capture);
         }
         if (config_.execution == ExecutionModel::Autopilot) {
             return fly_autopilot(candidate, departure_velocity, until, arc, stop_on_impact,
-                                 capture, capture_at, mass_at_capture);
+                                 capture);
         }
-        return fly_finite(candidate, departure_velocity, until, arc, stop_on_impact, capture,
-                          capture_at, mass_at_capture);
+        return fly_finite(candidate, departure_velocity, until, arc, stop_on_impact, capture);
+    }
+
+    // The capture burns as MANEUVERS.  One builder, used by the finite model, the
+    // autopilot model and the capture corrector alike, so that what the corrector
+    // solves for and what the ship is eventually armed with cannot drift apart.
+    [[nodiscard]] bool add_capture_burns(ManeuverPlan& plan, const CaptureSequence& capture,
+                                         GuidanceMode guidance) const {
+        if (!capture.active) {
+            return true;
+        }
+        try {
+            if (capture.capture_delta_v > 0.0 && capture.mass_at_capture > 0.0) {
+                plan.add(maneuver_for_delta_v(*inputs_.craft, capture.mass_at_capture,
+                                              capture.capture_delta_v, capture.capture_at,
+                                              guidance, inputs_.target, 1.0, "insertion",
+                                              BurnCentering::CenterOnIgnition));
+            }
+            if (capture.has_circularisation && capture.circularisation_delta_v > 0.0 &&
+                capture.mass_at_circularisation > 0.0) {
+                // Under the autopilot the direction comes from the hull and the
+                // controller is told where to point; under the ideal models the
+                // guidance law is the direction.
+                const GuidanceMode second = guidance == GuidanceMode::Hull
+                                                ? GuidanceMode::Hull
+                                                : capture.circularisation_guidance;
+                plan.add(maneuver_for_delta_v(
+                    *inputs_.craft, capture.mass_at_circularisation,
+                    capture.circularisation_delta_v, capture.circularisation_at, second,
+                    inputs_.target, 1.0, "circularisation", BurnCentering::CenterOnIgnition));
+            }
+        } catch (const std::exception&) {
+            return false;   // the rocket equation refused
+        }
+        return true;
     }
 
     // Impulsive: the velocity is SET, the mass is debited by the rocket equation,
@@ -760,8 +1277,7 @@ private:
                                              const Vec3& departure_velocity,
                                              time::CoordinateTime until,
                                              propagation::Trajectory* arc, bool stop_on_impact,
-                                             const std::optional<InsertionBurn>& capture,
-                                             time::CoordinateTime capture_at) {
+                                             const CaptureSequence& capture) {
         FlightResult out{};
         auto forces = build_forces(nullptr);
         propagation::DormandPrince54Propagator propagator{*forces,
@@ -773,11 +1289,30 @@ private:
         state.mass -= propellant_for(state.mass, injection_dv);
         state.state.velocity = departure_velocity;
 
+        // Each burn is an instantaneous change of velocity applied at a break in
+        // the propagation. Two of them when the sequence carries a
+        // circularisation, and the impulsive model is the one place where a
+        // second burn costs nothing extra to represent -- it has no duration.
+        struct Impulse {
+            time::CoordinateTime at{};
+            double delta_v{0.0};
+        };
+        std::vector<Impulse> impulses;
+        if (capture.active && capture.capture_delta_v > 0.0 &&
+            capture.capture_at > candidate.departure && capture.capture_at < until) {
+            impulses.push_back({capture.capture_at, capture.capture_delta_v});
+        }
+        if (capture.active && capture.has_circularisation &&
+            capture.circularisation_delta_v > 0.0 &&
+            capture.circularisation_at > candidate.departure &&
+            capture.circularisation_at < until) {
+            impulses.push_back({capture.circularisation_at, capture.circularisation_delta_v});
+        }
+
         std::vector<time::CoordinateTime> breaks;
-        const bool has_capture =
-            capture.has_value() && capture_at > candidate.departure && capture_at < until;
-        if (has_capture) {
-            breaks.push_back(capture_at);
+        breaks.reserve(impulses.size() + 1);
+        for (const auto& impulse_at : impulses) {
+            breaks.push_back(impulse_at.at);
         }
         breaks.push_back(until);
 
@@ -804,15 +1339,20 @@ private:
                 out.ok = false;
                 break;
             }
-            if (has_capture && i + 1 < breaks.size()) {
+            if (i < impulses.size()) {
                 const auto body = inputs_.provider->state(inputs_.target, t, ssb_);
                 const Vec3 relative = state.state.velocity - body.state.velocity;
                 if (relative.norm() > 0.0) {
-                    state.mass -= propellant_for(state.mass, capture->delta_v);
-                    state.state.velocity -= relative.normalized() * capture->delta_v;
+                    state.mass -= propellant_for(state.mass, impulses[i].delta_v);
+                    state.state.velocity -= relative.normalized() * impulses[i].delta_v;
                 }
-                out.capture_ignition = t;
-                out.capture_duration = 0.0;
+                if (i == 0) {
+                    out.capture_ignition = t;
+                    out.capture_duration = 0.0;
+                } else {
+                    out.circularisation_ignition = t;
+                    out.circularisation_duration = 0.0;
+                }
             }
         }
         out.state = state;
@@ -829,9 +1369,7 @@ private:
                                           const Vec3& departure_velocity,
                                           time::CoordinateTime until,
                                           propagation::Trajectory* arc, bool stop_on_impact,
-                                          const std::optional<InsertionBurn>& capture,
-                                          time::CoordinateTime capture_at,
-                                          double mass_at_capture) {
+                                          const CaptureSequence& capture) {
         FlightResult out{};
         out.state = candidate.state;
         out.time = candidate.departure;
@@ -846,18 +1384,17 @@ private:
             injection.ignition = candidate.departure;
             injection.inertial_direction = impulse.normalized();
             plan.add(std::move(injection));
-
-            if (capture.has_value() && capture->delta_v > 0.0 && mass_at_capture > 0.0) {
-                plan.add(maneuver_for_delta_v(*inputs_.craft, mass_at_capture, capture->delta_v,
-                                              capture_at, GuidanceMode::Retrograde, inputs_.target,
-                                              1.0, "insertion",
-                                              BurnCentering::CenterOnIgnition));
-            }
         } catch (const std::exception& e) {
             // The rocket equation refused: the ship cannot pay for this plan.
             out.ok = false;
             out.status = propagation::PropagationStatus::OutOfPropellant;
             out.message = e.what();
+            return out;
+        }
+        if (!add_capture_burns(plan, capture, GuidanceMode::Retrograde)) {
+            out.ok = false;
+            out.status = propagation::PropagationStatus::OutOfPropellant;
+            out.message = "the ship cannot pay for the capture sequence";
             return out;
         }
 
@@ -879,6 +1416,9 @@ private:
             if (burn.name == "insertion") {
                 out.capture_ignition = burn.ignition;
                 out.capture_duration = burn.duration.seconds();
+            } else if (burn.name == "circularisation") {
+                out.circularisation_ignition = burn.ignition;
+                out.circularisation_duration = burn.duration.seconds();
             }
         }
         out.plan = plan;
@@ -965,10 +1505,12 @@ private:
     [[nodiscard]] Vec3 aim_point(const Candidate& candidate,
                                  time::CoordinateTime t_arrive) const {
         const auto target = inputs_.provider->state(inputs_.target, t_arrive, ssb_);
-        const auto target_centered =
-            inputs_.provider->state(inputs_.target, t_arrive, centered_);
-        const Vec3 v_infinity = candidate.solution.arrival_velocity -
-                                target_centered.state.velocity;
+        // The candidate's own arrival excess velocity, measured when it was
+        // screened and in the frame Lambert was solved in.  Recomputing it here
+        // from `solution.arrival_velocity` would have to know which frame that
+        // was -- and getting it wrong is the kind of mistake that produces a
+        // perfectly converged corrector aiming at the wrong side of the planet.
+        const Vec3 v_infinity = candidate.v_infinity_vector;
         const double speed = v_infinity.norm();
         if (!(speed > 0.0)) {
             return target.state.position;
@@ -1004,12 +1546,12 @@ private:
                 const double to_target =
                     (flight.state.state.position - target.state.position).norm();
                 if (to_target <= radius_target_ * 1.001) {
-                    return TransferFailure::LunarImpact;
+                    return TransferFailure::TargetImpact;
                 }
                 if (radius_center_ > 0.0 && to_center <= radius_center_ * 1.001) {
                     return TransferFailure::DepartureConicHitsCentralBody;
                 }
-                return TransferFailure::LunarImpact;
+                return TransferFailure::TargetImpact;
             }
             case propagation::PropagationStatus::MaxStepsExceeded:
                 return TransferFailure::Timeout;
@@ -1035,11 +1577,21 @@ private:
     }
 
     const TransferInputs& inputs_;
-    const LunarTransferConfig& config_;
+    const TransferConfig& config_;
     coordinates::ReferenceFrame ssb_;
     coordinates::ReferenceFrame centered_;
+
+    // Which two-body problem the candidates come from, and the body it is posed
+    // about. For a local transfer `primary_` is the origin and `primary_frame_`
+    // is `centered_`; the code below then reduces, term by term, to what the
+    // 365/365 campaign ran.
+    TransferGeometry geometry_{TransferGeometry::Local};
+    celestial::BodyId primary_{};
+    coordinates::ReferenceFrame primary_frame_{};
+
     double gm_center_{0.0};
     double gm_target_{0.0};
+    double gm_primary_{0.0};
     double radius_center_{0.0};
     double radius_target_{0.0};
     double wanted_periapsis_{0.0};
@@ -1051,7 +1603,119 @@ private:
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Where the flyby is AIMED, as a solved quantity rather than a wish.
+//
+// The B-plane aims the hyperbola's periapsis at the altitude the mission asked
+// for, and for a lunar capture that is the right aim: the burn lasts 83 s, the
+// periapsis barely moves, and the orbit comes out where the aim was.
+//
+// For a Mars capture at this engine's arrival speeds it is not.  The burn is
+// lit on the way IN, so the ship is already slower than the hyperbola says when
+// it reaches its closest point and falls short of it.  Measured on the first
+// Earth-Mars plan: aimed at 500 km, the capture ellipse's periapsis came out at
+// -523 km -- through the planet -- once the burn was sized to bring the apoapsis
+// down to 500.  The aim was not wrong by a little; it was the wrong question.
+//
+// So the aim ANTICIPATES the droop.  Fly it once, measure how far the periapsis
+// fell, aim that much higher, fly it again.  Two or three passes, each a full
+// departure correction, and the loop stops the moment the orbit lands in the
+// requested band -- which is the first pass, always, for every lunar transfer.
+// ---------------------------------------------------------------------------
 TransferRecord TransferSession::attempt(const Candidate& candidate) {
+    double aim_altitude = config_.flyby_altitude;
+    TransferRecord best{};
+    best.failure = TransferFailure::NoFeasibleTrajectory;
+
+    // The departure velocity each pass STARTS from.
+    //
+    // Warm-started from the previous pass, and that is what makes the aim loop
+    // affordable rather than merely correct. Cold, each pass re-runs a full
+    // two-stage correction from the Lambert guess -- about four hundred
+    // propagations of a two-hundred-day arc, several minutes apiece. Warm, the
+    // aim has moved by a thousand kilometres of periapsis out of two hundred
+    // million of transfer, so the previous answer is already nearly this one's
+    // and the corrector converges in a couple of iterations.
+    Vec3 departure_guess = candidate.departure_velocity;
+
+    for (int pass = 0; pass < std::max(1, config_.aim_passes); ++pass) {
+        if (pass > 0 && config_.cancelled && config_.cancelled()) {
+            break;
+        }
+        auto record = attempt_with_aim(candidate, aim_altitude, departure_guess);
+        if (record.departure_velocity.norm() > 0.0) {
+            departure_guess = record.departure_velocity;
+        }
+        record.aim_passes = pass + 1;
+        record.aim_altitude = aim_altitude;
+        if (record.success) {
+            return record;
+        }
+        // Keep the most informative attempt, and only retry when there is a
+        // MEASURED droop to correct: a case that never reached the target, or
+        // that failed for a reason the aim cannot fix, is not helped by aiming
+        // somewhere else.
+        if (pass == 0 || record.capture_corrector_evaluations > 0) {
+            best = record;
+        }
+        // The droop this pass measured, and it is measured rather than modelled:
+        // one flight of the impulsive capture burn, with the achieved periapsis
+        // read off the orbit it produced.
+        const double achieved = record.intermediate_periapsis_altitude;
+        if (achieved == 0.0 || !std::isfinite(achieved)) {
+            break;   // the pass failed before it could measure anything
+        }
+        const double correction = config_.target_orbit.mean_altitude - achieved;
+        if (!(correction > 1.0e3)) {
+            break;   // the aim is not what is wrong
+        }
+        aim_altitude += correction;
+    }
+    return best;
+}
+
+// A stage-by-stage trace of where a search spends itself, on stderr, behind an
+// environment variable.
+//
+// Rule 51 asks for the search to be INSTRUMENTED, and the first Earth-Mars runs
+// showed why: an attempt that takes ten minutes tells you nothing about which of
+// its four stages took them, and three rounds of guessing at that question cost
+// more than writing this did.
+namespace {
+bool trace_enabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("SPACEFLIGHT_TRACE_SEARCH");
+        return value != nullptr && *value != '\0' && *value != '0';
+    }();
+    return enabled;
+}
+}  // namespace
+
+TransferRecord TransferSession::attempt_with_aim(const Candidate& candidate,
+                                                 double aim_altitude,
+                                                 const Vec3& departure_guess) {
+    const auto stage_clock = std::chrono::steady_clock::now();
+    auto mark = [&, last = stage_clock, steps = steps_,
+                 props = propagations_](const char* what) mutable {
+        if (!trace_enabled()) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        std::cerr << "    [trace] " << std::left << std::setw(22) << what
+                  << std::chrono::duration<double>(now - last).count() << " s, "
+                  << (propagations_ - props) << " propagations, " << (steps_ - steps)
+                  << " steps\n";
+        last = now;
+        steps = steps_;
+        props = propagations_;
+    };
+    // The aim for THIS pass, and the band the achieved periapsis is judged
+    // against, which has to move with it: a flyby deliberately aimed 1500 km out
+    // is not a flyby that came out 1000 km too high.
+    wanted_periapsis_ = radius_target_ + aim_altitude;
+    const double band_low = std::max(0.0, aim_altitude - 80.0e3);
+    const double band_high = aim_altitude + 300.0e3;
+
     TransferRecord record{};
     record.requested_epoch = inputs_.epoch;
     record.departure_epoch = candidate.departure;
@@ -1087,17 +1751,24 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     // INTERIOR to the window or it is pinned at the end of it -- and then the
     // time of closest approach stops responding to the departure velocity, the
     // third row of the Jacobian goes to zero, and Newton has nothing to solve.
+    // A quarter of the transfer for a lunar arc -- about a day, which is what
+    // the campaign qualified -- and a twentieth for an interplanetary one. It
+    // only has to be long enough that the minimum is interior, and on a
+    // two-hundred-day transfer a quarter is fifty extra days of integration on
+    // EVERY probe flight the correctors make.
+    const double probe_overshoot =
+        geometry_ == TransferGeometry::Local ? 0.25 : 0.05;
     const auto t_probe_end =
-        t_arrive + time::Duration::seconds(candidate.tof_s * 0.25);
+        t_arrive + time::Duration::seconds(candidate.tof_s * probe_overshoot);
 
     // ---- stage 1: reach the flyby ----------------------------------------
     const Vec3 target_aim = aim_point(candidate, t_arrive);
-    auto stage_one_config = config_.departure_targeting;
+    auto stage_one_config = departure_targeting_for(candidate);
     const auto reach = correct_departure(
         [&](const Vec3& v) {
             return fly(candidate, v, t_arrive, nullptr, false).state.state.position;
         },
-        candidate.departure_velocity, target_aim, stage_one_config);
+        departure_guess, target_aim, stage_one_config);
 
     record.position_corrector_iterations = reach.iterations;
     record.position_corrector_evaluations = reach.evaluations;
@@ -1106,6 +1777,7 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     record.position_corrector_message = reach.message;
 
     Vec3 departure_velocity = reach.departure_velocity;
+    mark("stage 1 reach");
 
     // ---- stage 2: shape the flyby ----------------------------------------
     //
@@ -1205,6 +1877,7 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
         }
     }
 
+    mark("stage 2 b-plane");
     record.correction_magnitude =
         (departure_velocity - candidate.departure_velocity).norm();
     record.departure_velocity = departure_velocity;
@@ -1234,6 +1907,7 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
         record.detail = approach_flight.message;
         return record;
     }
+    mark("approach as flown");
     const Approach approach = find_approach(approach_arc);
     if (!approach.valid) {
         record.failure = TransferFailure::InvalidBPlane;
@@ -1250,14 +1924,14 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     record.periapsis_velocity = approach.relative_velocity.norm();
 
     const double periapsis_altitude = approach.distance - radius_target_;
-    if (periapsis_altitude < config_.minimum_periapsis_altitude) {
-        record.failure = periapsis_altitude <= 0.0 ? TransferFailure::LunarImpact
+    if (periapsis_altitude < band_low) {
+        record.failure = periapsis_altitude <= 0.0 ? TransferFailure::TargetImpact
                                                    : TransferFailure::PeriapsisTooLow;
         record.detail = "flown periapsis altitude " + fixed(periapsis_altitude / 1000.0, 3) +
                         " km";
         return record;
     }
-    if (periapsis_altitude > config_.maximum_periapsis_altitude) {
+    if (periapsis_altitude > band_high) {
         record.failure = TransferFailure::PeriapsisTooHigh;
         record.detail = "flown periapsis altitude " + fixed(periapsis_altitude / 1000.0, 3) +
                         " km";
@@ -1282,11 +1956,13 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     record.energy_before_burn = energy_before;
 
     const auto burn = plan_insertion(bp.periapsis_radius, gm_target_, bp.v_infinity, 0.0);
-    record.required_capture_delta_v = burn.delta_v;
 
-    // Where the burn sits relative to periapsis (section 12).  Zero is centred
-    // on it; the campaign tool sweeps this.
-    const auto capture_at =
+    CaptureSequence sequence{};
+    sequence.active = true;
+    sequence.capture_delta_v = burn.delta_v;
+    // Where the burn sits relative to periapsis (section 12).  Zero is centred on
+    // it; the campaign tool sweeps this.
+    sequence.capture_at =
         approach.time + time::Duration::seconds(config_.capture_burn_offset_seconds);
     record.burn_offset_from_periapsis_s = config_.capture_burn_offset_seconds;
 
@@ -1294,13 +1970,16 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     // using the departure mass would ask the engine for a duration wrong by the
     // whole injection's propellant.  So: fly the coast once with no capture,
     // read the mass there, then plan the burn.
-    const auto coast_to_burn = fly(candidate, departure_velocity, capture_at, nullptr, true);
+    const auto coast_to_burn = fly(candidate, departure_velocity, sequence.capture_at, nullptr,
+                                   true);
     if (!coast_to_burn.ok) {
         record.failure = classify(coast_to_burn);
         record.detail = coast_to_burn.message;
         return record;
     }
-    const double mass_at_capture = coast_to_burn.state.mass;
+    sequence.mass_at_capture = coast_to_burn.state.mass;
+    const double mass_at_capture = sequence.mass_at_capture;
+    record.required_capture_delta_v = burn.delta_v;
     record.available_capture_delta_v = inputs_.craft->delta_v_budget(mass_at_capture);
     if (record.required_capture_delta_v > record.available_capture_delta_v) {
         record.failure = TransferFailure::InsufficientCaptureDeltaV;
@@ -1309,14 +1988,207 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
         return record;
     }
 
-    // Two orbits past the burn, so the result is an ORBIT and not a lucky
+    // ---- is the impulsive plan actually an impulse? -----------------------
+    //
+    // Flown once, cheaply, from a state already on the approach, and the ORBIT it
+    // produces is compared with the one the mission asked for.  When it matches
+    // -- which is every lunar capture, where the burn lasts 83 s -- nothing below
+    // runs, the sequence stays one burn long, and the trajectory is exactly the
+    // one the 365/365 campaign qualified.
+    //
+    // When it does not, the two burns are SOLVED against the flight instead of
+    // predicted from an impulse.  See the note on CaptureSequence.
+    const double wanted_altitude = config_.target_orbit.mean_altitude;
+    const double settle = std::min(burn.period * 2.0, 6.0 * 3600.0);
+
+    // Not under the AUTOPILOT model, and this is a stated limitation rather than
+    // an oversight.
+    //
+    // The short flights below are what make solving the capture affordable: they
+    // start on the approach instead of at departure, so an evaluation costs hours
+    // instead of months. What they cannot do is carry the autopilot, because the
+    // attitude controller, the inertia tensor and the twelve thrusters are built
+    // by fly_autopilot() and are not part of the force model these flights
+    // assemble. Running a Hull-guided burn without them produces a ship that
+    // points nowhere -- which is exactly what happened: the qualified lunar
+    // AUTOPILOT case started failing with "the capture burn did not leave a
+    // readable orbit".
+    //
+    // So under AUTOPILOT the capture stays one burn, as it was, and the lunar
+    // campaign is untouched. An autopilot-flown interplanetary capture is
+    // therefore not available in this milestone; it is in the backlog, and what
+    // it needs is for the attitude stack to be built once and shared rather than
+    // assembled inside one flight function.
+    if (config_.execution != ExecutionModel::Autopilot) {
+        const double impulsive_duration = inputs_.craft->engine().burn_duration_for_delta_v(
+            mass_at_capture, burn.delta_v, 1.0);
+        // Far enough before any plausible ignition that the arc contains the whole
+        // burn whatever the solver does to its length.
+        const auto arc_start =
+            approach.time - time::Duration::seconds(3.0 * impulsive_duration + 120.0);
+        const auto to_arc_start = fly(candidate, departure_velocity, arc_start, nullptr, true);
+        if (!to_arc_start.ok) {
+            record.failure = classify(to_arc_start);
+            record.detail = to_arc_start.message;
+            return record;
+        }
+
+        const auto first = fly_capture_from(
+            to_arc_start.state, to_arc_start.time, sequence,
+            sequence.capture_at + time::Duration::seconds(settle));
+        if (!first.has_value()) {
+            record.failure = TransferFailure::TargetOrbitNotAchieved;
+            record.detail = "the capture burn did not leave a readable orbit";
+            return record;
+        }
+
+        // The DROOP, measured, and this one flight is what the whole aim loop
+        // runs on: the impulsive burn was sized to circularise at the altitude
+        // the flyby was aimed at, so however far the periapsis falls short of
+        // that aim is how far the finite burn moves it.
+        //
+        // Recorded before anything is decided, because a pass that is going to
+        // fail still has to hand the next one this number.
+        record.intermediate_periapsis_altitude = first->periapsis_radius - radius_target_;
+
+        const bool good =
+            std::isfinite(first->apoapsis_radius) &&
+            config_.target_orbit.check(first->periapsis_radius - radius_target_,
+                                       first->apoapsis_radius - radius_target_,
+                                       first->eccentricity) == TransferFailure::None;
+
+        // Is the AIM wrong, or only the shape?
+        //
+        // Two different failures with two different fixes, and spending flights
+        // on the second while the first is outstanding is what made the early
+        // versions of this take ten minutes. If the periapsis has fallen far
+        // below what was asked for, no amount of solving the burns recovers it --
+        // braking hard enough to bring the apoapsis down simply drives the
+        // periapsis through the planet. The answer is to aim higher and fly
+        // again, and that is the caller's loop.
+        const double periapsis_shortfall =
+            config_.target_orbit.mean_altitude - record.intermediate_periapsis_altitude;
+        const double aim_slack =
+            std::max(1.0e3, config_.target_orbit.mean_altitude -
+                                config_.target_orbit.min_periapsis_altitude);
+        if (!good && periapsis_shortfall > aim_slack) {
+            record.failure = TransferFailure::TargetOrbitNotAchieved;
+            record.detail =
+                "aimed at " + fixed(aim_altitude / 1000.0, 1) +
+                " km, the capture burn leaves periapsis at " +
+                fixed(record.intermediate_periapsis_altitude / 1000.0, 1) + " km: " +
+                fixed(periapsis_shortfall / 1000.0, 1) + " km short of the requested orbit";
+            return record;
+        }
+
+        if (!good) {
+            // ---- the second burn (rule 11's CIRCULARIZATION) ---------------
+            //
+            // Burn ONE is left exactly as the two-body arithmetic sized it, and
+            // that is the point: the aim loop above has already made its result
+            // land on the periapsis that was asked for. What it cannot fix is the
+            // SHAPE -- the orbit comes out roughly 500 x 2100 km, because a burn
+            // that is lit across four Mars radii removes energy over an arc
+            // rather than at a point.
+            //
+            // So the second burn is a plain apoapsis trim: retrograde, at the
+            // periapsis the first one produced, lowering the far side to meet the
+            // near one. About 270 m/s against the first burn's 7 300, which makes
+            // it 27 seconds long instead of 730 -- and THAT is why it can close
+            // what the first could not. A 27-second burn really is very nearly
+            // the impulse the two-body arithmetic assumes it is.
+            //
+            // Two earlier assignments of these two burns are worth recording,
+            // because each failed for a reason that says something about the
+            // physics rather than about the code:
+            //
+            //   * solving burn one for the PERIAPSIS is degenerate. The periapsis
+            //     rises monotonically as the braking shrinks, and at zero braking
+            //     it is the incoming hyperbola's own periapsis -- which is the
+            //     altitude that was asked for, because that is where the flyby
+            //     was aimed. The solver converged on "do not burn", reported
+            //     success, and handed back an orbit with no period.
+            //
+            //   * solving burn one for the APOAPSIS drives it through the planet.
+            //     Braking hard enough to bring the far side down to 500 km takes
+            //     the near side to -523 km, measured.
+            //
+            // One burn cannot produce a circle here. Two can, provided the first
+            // is the one the aim loop has already fixed.
+            const auto& ellipse = *first;
+            record.intermediate_periapsis_altitude = ellipse.periapsis_radius - radius_target_;
+            if (record.intermediate_periapsis_altitude <
+                config_.minimum_capture_periapsis_altitude) {
+                record.failure = TransferFailure::PeriapsisTooLow;
+                record.detail =
+                    "the capture ellipse's periapsis falls to " +
+                    fixed(record.intermediate_periapsis_altitude / 1000.0, 1) +
+                    " km, below the " +
+                    fixed(config_.minimum_capture_periapsis_altitude / 1000.0, 1) +
+                    " km floor, before the trim burn can be reached";
+                return record;
+            }
+            const double period = ellipse.period;
+            if (!(period > 0.0) || !std::isfinite(period)) {
+                record.failure = TransferFailure::TargetOrbitNotAchieved;
+                record.detail = "the capture burn did not leave a closed orbit to trim";
+                return record;
+            }
+
+            const auto probe_end = sequence.capture_at + time::Duration::seconds(settle);
+            sequence.has_circularisation = true;
+            sequence.circularisation_guidance = GuidanceMode::Retrograde;
+            sequence.circularisation_at =
+                probe_end + time::Duration::seconds(seconds_to_periapsis(ellipse));
+
+            // What it has to remove: from the ellipse's own periapsis speed down
+            // to the circular speed there.
+            const double r_periapsis = ellipse.periapsis_radius;
+            const double v_periapsis = std::sqrt(std::max(
+                0.0, gm_target_ * (2.0 / r_periapsis - 1.0 / ellipse.semi_major_axis)));
+            const double v_circular = std::sqrt(gm_target_ / r_periapsis);
+            const double guess = std::max(1.0, v_periapsis - v_circular);
+            sequence.mass_at_circularisation =
+                mass_at_capture - propellant_for(mass_at_capture, sequence.capture_delta_v);
+
+            const double apoapsis_tolerance =
+                std::max(1.0e3, 0.25 * (config_.target_orbit.max_apoapsis_altitude -
+                                        config_.target_orbit.mean_altitude));
+            const auto trim = solve_burn(
+                to_arc_start.state, to_arc_start.time, sequence,
+                [](CaptureSequence& trial, double delta_v) {
+                    trial.circularisation_delta_v = delta_v;
+                },
+                [&](const trajectory::OrbitalElements& elements) {
+                    return std::isfinite(elements.apoapsis_radius)
+                               ? elements.apoapsis_radius - radius_target_
+                               : std::numeric_limits<double>::infinity();
+                },
+                guess, wanted_altitude, apoapsis_tolerance, settle);
+
+            record.capture_corrector_iterations = 1;
+            record.capture_corrector_evaluations = trim.evaluations;
+            record.capture_corrector_message = trim.message;
+            record.capture_corrector_converged = trim.converged;
+            if (!trim.converged) {
+                record.failure = TransferFailure::TargetOrbitNotAchieved;
+                record.detail = "the trim burn could not be solved for a " +
+                                fixed(wanted_altitude / 1000.0, 1) + " km apoapsis: " +
+                                trim.message;
+                return record;
+            }
+            sequence.circularisation_delta_v = trim.delta_v;
+            record.required_capture_delta_v = sequence.total_delta_v();
+        }
+    }
+
+    // Two orbits past the last burn, so the result is an ORBIT and not a lucky
     // instant: the elements are read after a full revolution.
-    const auto t_end = capture_at + time::Duration::seconds(burn.period * 2.0);
+    const auto t_end = latest_burn_epoch(sequence) + time::Duration::seconds(burn.period * 2.0);
     auto captured_arc = std::make_shared<propagation::Trajectory>();
     const auto captured =
         fly(candidate, departure_velocity, t_end,
-            config_.keep_trajectory ? captured_arc.get() : nullptr, true, burn, capture_at,
-            mass_at_capture);
+            config_.keep_trajectory ? captured_arc.get() : nullptr, true, sequence);
     if (!captured.ok) {
         record.failure = classify(captured);
         record.detail = captured.message;
@@ -1337,6 +2209,10 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     record.capture_angular_rate_peak = captured.angular_rate_peak;
     record.burn_end = captured.capture_ignition +
                       time::Duration::seconds(captured.capture_duration);
+    record.circularisation_delta_v =
+        sequence.has_circularisation ? sequence.circularisation_delta_v : 0.0;
+    record.circularisation_start = captured.circularisation_ignition;
+    record.circularisation_duration_s = captured.circularisation_duration;
     record.propellant_used = captured.propellant_used;
     record.propellant_left = captured.state.mass - inputs_.craft->dry_mass();
     // The plan the flight flew, verbatim -- this is what the scene is armed with
@@ -1351,8 +2227,8 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     {
         const auto midpoint = captured.capture_ignition +
                               time::Duration::seconds(0.5 * captured.capture_duration);
-        const auto probe = fly(candidate, departure_velocity, midpoint, nullptr, true, burn,
-                               capture_at, mass_at_capture);
+        const auto probe =
+            fly(candidate, departure_velocity, midpoint, nullptr, true, sequence);
         if (probe.ok) {
             const auto body = inputs_.provider->state(inputs_.target, probe.time, ssb_);
             record.burn_midpoint_radius =
@@ -1397,6 +2273,7 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
         return record;
     }
 
+    mark("final flight");
     record.success = true;
     record.failure = TransferFailure::None;
     record.cost = config_.cost.evaluate(TransferCostTerms{
@@ -1441,8 +2318,10 @@ TransferRecord TransferSession::run() {
         os << rejections.considered << " geometries considered: " << rejections.no_lambert
            << " with no Lambert solution, " << rejections.transfer_angle
            << " in the degenerate transfer-angle band, " << rejections.departure_conic
-           << " whose post-injection conic re-enters the central body, " << rejections.delta_v
-           << " the ship cannot pay for";
+           << " whose post-injection conic re-enters the central body, "
+           << rejections.departure_geometry
+           << " where no departure hyperbola exists at that point in the parking orbit, "
+           << rejections.delta_v << " the ship cannot pay for";
         record.detail = os.str();
         fill_search_counters(record, rejections);
         record.integrator_steps = steps_;
@@ -1470,14 +2349,21 @@ TransferRecord TransferSession::run() {
     // about 1e6 m -- and added to the same cost function everything else is
     // priced in.  One ranking, one rule, and the rule is section 8's.
     for (auto& candidate : candidates) {
+        if (config_.cancelled && config_.cancelled()) {
+            record.failure = TransferFailure::Cancelled;
+            record.detail = "cancelled while ranking candidates";
+            record.integrator_steps = steps_;
+            record.propagations = propagations_;
+            return record;
+        }
+        report_progress("ranking", rejections, static_cast<int>(candidates.size()), 0, 0, 0.0);
         const auto t_arrive = candidate.departure + time::Duration::seconds(candidate.tof_s);
         const auto flight = fly(candidate, candidate.departure_velocity, t_arrive, nullptr, false);
         const auto target = inputs_.provider->state(inputs_.target, flight.time, ssb_);
         candidate.flown_miss =
             flight.ok ? (flight.state.state.position - target.state.position).norm()
                       : std::numeric_limits<double>::infinity();
-        const double predicted_correction =
-            candidate.flown_miss / std::max(config_.arrival_lever_arm, 1.0);
+        const double predicted_correction = candidate.flown_miss / lever_arm_for(candidate);
         candidate.selection_score = config_.cost.evaluate(TransferCostTerms{
             candidate.delta_v, candidate.insertion_estimate, 0.0, predicted_correction,
             candidate.departure_conic_deficit, candidate.tof_s / 86400.0, 0.0});
@@ -1497,6 +2383,15 @@ TransferRecord TransferSession::run() {
     int succeeded = 0;
 
     for (std::size_t i = 0; i < attempts; ++i) {
+        if (config_.cancelled && config_.cancelled()) {
+            if (!have_best) {
+                best.failure = TransferFailure::Cancelled;
+                best.detail = "cancelled after " + std::to_string(flown) + " attempt(s)";
+            }
+            break;
+        }
+        report_progress("flying", rejections, static_cast<int>(candidates.size()), flown,
+                        succeeded, have_best ? best.departure_delta_v : 0.0);
         if (steps_ > config_.step_budget) {
             // Out of budget.  Only SAY so when there is nothing better to say:
             // an attempt that got as far as "the orbit came out at e = 0.0104,
@@ -1568,18 +2463,20 @@ std::vector<GridCell> TransferSession::map_grid() {
 
     for (const auto& [t_depart, state] : samples) {
         const auto center = inputs_.provider->state(inputs_.center, t_depart, ssb_);
-        const Vec3 r1 = state.state.position - center.state.position;
+        const auto primary = inputs_.provider->state(primary_, t_depart, ssb_);
+        const Vec3 r1 = state.state.position - primary.state.position;
         for (const double tof_days : config_.time_of_flight_days) {
             const auto tof = time::Duration::days(tof_days);
-            const Vec3 r2 =
-                inputs_.provider->state(inputs_.target, t_depart + tof, centered_).state.position;
+            const Vec3 r2 = inputs_.provider->state(inputs_.target, t_depart + tof, primary_frame_)
+                                .state.position;
             for (const auto direction : directions) {
                 GridCell cell{};
                 cell.departure_coast_s = (t_depart - inputs_.epoch).seconds();
                 cell.time_of_flight_days = tof_days;
                 cell.direction = direction;
                 Rejections ignored{};
-                (void)screen(t_depart, state, center, r1, r2, tof, direction, ignored, &cell);
+                (void)screen(t_depart, state, center, primary, r1, r2, tof, direction, ignored,
+                             &cell);
                 grid.push_back(cell);
             }
         }
@@ -1591,13 +2488,13 @@ std::vector<GridCell> TransferSession::map_grid() {
 
 // ---------------------------------------------------------------------------
 
-TransferRecord plan_and_fly(const TransferInputs& inputs, const LunarTransferConfig& config) {
+TransferRecord plan_and_fly(const TransferInputs& inputs, const TransferConfig& config) {
     TransferSession session{inputs, config};
     return session.run();
 }
 
 std::vector<GridCell> map_transfer_grid(const TransferInputs& inputs,
-                                        const LunarTransferConfig& config) {
+                                        const TransferConfig& config) {
     TransferSession session{inputs, config};
     return session.map_grid();
 }

@@ -2,6 +2,7 @@
 
 #include "core/coordinates/reference_frame.hpp"
 #include "core/trajectory/orbital_elements.hpp"
+#include "core/units/constants.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +29,7 @@ std::string_view to_string(MissionPlanStatus status) {
         case MissionPlanStatus::InsufficientPropellant: return "INSUFFICIENT_PROPELLANT";
         case MissionPlanStatus::ExecutionFailed:        return "EXECUTION_FAILED";
         case MissionPlanStatus::Invalid:                return "INVALID";
+        case MissionPlanStatus::Cancelled:              return "CANCELLED";
     }
     return "UNKNOWN";
 }
@@ -47,13 +49,78 @@ DurationRange DurationRange::linear(double from_days, double to_days, int sample
     return range;
 }
 
+SearchSpace default_search_space(const ephemeris::EphemerisProvider& provider,
+                                 celestial::BodyId origin, celestial::BodyId destination,
+                                 time::CoordinateTime epoch) {
+    const auto geometry = geometry_for(origin, destination);
+    if (!geometry.has_value()) {
+        throw std::invalid_argument("default_search_space: " + origin.name() + " and " +
+                                    destination.name() +
+                                    " have no common primary in the body directory");
+    }
+
+    SearchSpace space{};
+    space.geometry = *geometry;
+
+    // One revolution of a low parking orbit, in both geometries and for the same
+    // reason: where the ship is when it leaves is what decides which way the
+    // departure conic can point. Two hours covers a 400 km orbit's 92 minutes
+    // with margin.
+    space.departure_window.span = time::Duration::hours(2.0);
+
+    if (space.geometry == TransferGeometry::Local) {
+        // EXACTLY the values docs/validation/lunar-navigation-hardening.md
+        // qualified, left as constants rather than re-derived. Deriving them
+        // would move the grid the 365/365 campaign measured, which is a new
+        // campaign and not a tidy-up.
+        space.departure_window.samples = 16;
+        space.time_of_flight = DurationRange{};
+        return space;
+    }
+
+    // Interplanetary. The departure point matters more here than it does for a
+    // lunar transfer -- the required asymptote can be anywhere on the sky, and
+    // only part of a parking orbit can reach it cheaply -- so the window is
+    // sampled more finely even though it is the same length.
+    space.departure_window.samples = 24;
+
+    // The Hohmann time between the two orbits, as the SCALE of the problem. Not
+    // as the answer: rule 39 is explicit that 259 days must not be assumed to be
+    // the only option, and the sweep below deliberately runs from a quarter of it
+    // to well past it so that the trade-off between flight time and delta-v is
+    // something the pilot can see rather than something the planner decided.
+    const auto primary = celestial::common_primary(origin, destination);
+    const auto frame = coordinates::ReferenceFrame::centered_on(*primary);
+    const double gm = provider.gravitational_parameter(*primary);
+
+    const auto semi_major_axis = [&](celestial::BodyId body) {
+        const auto state = provider.state(body, epoch, frame);
+        return trajectory::elements_from_state(state.state, gm).semi_major_axis;
+    };
+    const double a1 = semi_major_axis(origin);
+    const double a2 = semi_major_axis(destination);
+
+    double hohmann_days = 259.0;
+    if (a1 > 0.0 && a2 > 0.0 && gm > 0.0) {
+        const double a_transfer = 0.5 * (a1 + a2);
+        hohmann_days = units::pi * std::sqrt(a_transfer * a_transfer * a_transfer / gm) / 86400.0;
+    }
+
+    // Sixteen samples from a quarter of the Hohmann time to 1.6 times it. The
+    // lower end is where the cost curve turns vertical (60 days costs 117 km/s
+    // against 52 at 150) and the upper end is past the minimum, so the sweep
+    // brackets the trade-off instead of sitting on one side of it.
+    space.time_of_flight = DurationRange::linear(0.25 * hohmann_days, 1.6 * hohmann_days, 16);
+    return space;
+}
+
 namespace {
 
 // The weights each objective means (section 14).
 //
 // Only Balanced is qualified.  The other three exist because the question they
 // answer is a real one, and each one carries the measurement that says what it
-// costs -- see the note on TransferCost in lunar_transfer.hpp.
+// costs -- see the note on TransferCost in transfer_planner.hpp.
 TransferCost cost_for(OptimizationObjective objective) {
     TransferCost cost{};
     switch (objective) {
@@ -95,7 +162,7 @@ TransferCost cost_for(OptimizationObjective objective) {
         // plan said.  Distinguishing these from "no trajectory exists" is what
         // section 19 needs in order to say PLANNER FAILURE against AUTOPILOT
         // FAILURE against PROPULSION FAILURE.
-        case TransferFailure::LunarImpact:
+        case TransferFailure::TargetImpact:
         case TransferFailure::PeriapsisTooHigh:
         case TransferFailure::PeriapsisTooLow:
         case TransferFailure::PostBurnHyperbolic:
@@ -104,6 +171,9 @@ TransferCost cost_for(OptimizationObjective objective) {
         case TransferFailure::CaptureBurnTooLate:
         case TransferFailure::DepartureConicHitsCentralBody:
             return MissionPlanStatus::ExecutionFailed;
+
+        case TransferFailure::Cancelled:
+            return MissionPlanStatus::Cancelled;
 
         default:
             return MissionPlanStatus::NoSolution;
@@ -146,8 +216,8 @@ double duration_of(const ManeuverPlan& plan, std::string_view name) {
 // the translation
 // ---------------------------------------------------------------------------
 
-LunarTransferConfig config_for(const LunarTransferRequest& request) {
-    LunarTransferConfig config{};
+TransferConfig config_for(const MissionRequest& request) {
+    TransferConfig config{};
 
     config.departure_window = request.departure_window.span;
     config.departure_samples = request.departure_window.samples;
@@ -158,8 +228,65 @@ LunarTransferConfig config_for(const LunarTransferRequest& request) {
     // up is how a "100 km orbit" arrives at 300 km and nobody can say which
     // number was wrong.
     config.flyby_altitude = request.target_orbit.periapsis_altitude;
-    config.periapsis_tolerance = request.effort.periapsis_tolerance;
     config.b_plane_angle = request.effort.b_plane_angle;
+
+    const auto geometry =
+        geometry_for(request.origin, request.destination).value_or(TransferGeometry::Local);
+
+    // How precisely the flyby has to be AIMED, in metres of periapsis.
+    //
+    // 2 km for a lunar transfer, which is what the campaign qualified, and 50 km
+    // for an interplanetary one -- and the reason is arithmetic rather than
+    // ambition.
+    //
+    // The B-plane corrector estimates its Jacobian by moving the departure
+    // velocity by 1e-3 m/s. Over a four-day trans-lunar arc that probe moves the
+    // arrival by about 1 km, so a 2 km tolerance is something it can see. Over a
+    // two-hundred-day arc the lever arm is about 3.4e7 m per m/s, so the SAME
+    // probe moves the arrival by 34 kilometres: asking for 2 km would be asking
+    // the corrector to resolve a sixteenth of its own finite-difference step. It
+    // does not converge, it grinds -- measured at more than ten minutes per
+    // attempt before this line existed.
+    //
+    // What makes 50 km acceptable is that for an interplanetary capture the aim
+    // is no longer what decides the final orbit. The two capture burns are SOLVED
+    // against the flown trajectory -- one for the apoapsis, one for the periapsis
+    // -- so a flyby that comes in 50 km high still ends in the orbit that was
+    // asked for. The aim only has to be good enough to keep the intermediate
+    // ellipse above the surface, and 50 km against a 1000 km droop is well inside
+    // that.
+    config.periapsis_tolerance = request.effort.periapsis_tolerance;
+    if (geometry == TransferGeometry::Interplanetary &&
+        request.effort.periapsis_tolerance <= 2.0e3) {
+        config.periapsis_tolerance = 50.0e3;
+    }
+
+    // Two B-plane passes instead of four, for the same reason and with the same
+    // caveat: the outer loop exists to prove that v_infinity barely moves when
+    // the aim does, and each extra pass costs a full correction over an arc fifty
+    // times longer than a lunar one.
+    config.b_plane_passes =
+        geometry == TransferGeometry::Interplanetary
+            ? std::min(request.effort.b_plane_passes, 2)
+            : request.effort.b_plane_passes;
+
+    // The band the ACHIEVED flyby periapsis has to land in before the capture
+    // burn is even attempted -- outside it the case is PERIAPSIS_TOO_HIGH or
+    // PERIAPSIS_TOO_LOW rather than a near miss.
+    //
+    // It has to be relative to what was ASKED for.  TransferConfig's own defaults
+    // are 20 to 400 km, which are the right numbers for the 100 km lunar orbit
+    // the campaign qualified and are silently the wrong ones for anything else:
+    // Milestone 8's first Earth-Mars plan aimed a 500 km Mars periapsis, hit it
+    // to within 446 metres, and was then classified PERIAPSIS_TOO_HIGH because
+    // 500 is more than 400.
+    //
+    // The OFFSETS are what the lunar defaults actually encode -- 80 km below the
+    // request and 300 km above it -- so a 100 km request still produces exactly
+    // 20 to 400 and the campaign's classification does not move by a metre.
+    config.minimum_periapsis_altitude =
+        std::max(0.0, request.target_orbit.periapsis_altitude - 80.0e3);
+    config.maximum_periapsis_altitude = request.target_orbit.periapsis_altitude + 300.0e3;
 
     config.target_orbit.mean_altitude =
         0.5 * (request.target_orbit.periapsis_altitude + request.target_orbit.apoapsis_altitude);
@@ -175,8 +302,9 @@ LunarTransferConfig config_for(const LunarTransferRequest& request) {
         request.effort.refuse_departure_conic_below_floor;
     config.screened_candidates = request.effort.screened_candidates;
     config.flown_candidates = request.effort.flown_candidates;
-    config.b_plane_passes = request.effort.b_plane_passes;
-    config.step_budget = request.effort.budget_for(request.spacecraft.execution);
+    config.step_budget = request.effort.budget_for(
+        request.spacecraft.execution,
+        geometry_for(request.origin, request.destination).value_or(TransferGeometry::Local));
     config.approach_bracket_samples = request.effort.approach_bracket_samples;
     config.capture_burn_offset_seconds = request.effort.capture_burn_offset_seconds;
     config.settling_threshold = request.effort.settling_threshold;
@@ -189,12 +317,14 @@ LunarTransferConfig config_for(const LunarTransferRequest& request) {
     config.autopilot_rcs_exhaust_fraction_c = request.spacecraft.rcs_exhaust_fraction_c;
     config.autopilot_gains = request.spacecraft.pointing;
 
+    config.cancelled = request.effort.cancelled;
+    config.on_progress = request.effort.on_progress;
     config.pinned = request.pinned;
     config.keep_trajectory = request.want_trajectory;
     return config;
 }
 
-TransferInputs inputs_for(const SimulationState& state, const LunarTransferRequest& request) {
+TransferInputs inputs_for(const SimulationState& state, const MissionRequest& request) {
     TransferInputs inputs{};
     inputs.provider = state.provider;
     inputs.orientation = state.orientation;
@@ -211,21 +341,21 @@ TransferInputs inputs_for(const SimulationState& state, const LunarTransferReque
 
 // ---------------------------------------------------------------------------
 
-MissionPlanResult plan_lunar_transfer(const SimulationState& state,
-                                      const LunarTransferRequest& request) {
+MissionPlanResult plan_mission(const SimulationState& state,
+                                      const MissionRequest& request) {
     if (state.provider == nullptr) {
         throw std::invalid_argument(
-            "plan_lunar_transfer: no ephemeris provider; this is not a question about the "
+            "plan_mission: no ephemeris provider; this is not a question about the "
             "Solar System");
     }
     if (request.spacecraft.vehicle == nullptr) {
         throw std::invalid_argument(
-            "plan_lunar_transfer: no spacecraft; a transfer is a property of a ship as much as "
+            "plan_mission: no spacecraft; a transfer is a property of a ship as much as "
             "of a geometry");
     }
     if (request.time_of_flight.days.empty()) {
         throw std::invalid_argument(
-            "plan_lunar_transfer: the time-of-flight grid is empty; a search with nothing to "
+            "plan_mission: the time-of-flight grid is empty; a search with nothing to "
             "search is not a search");
     }
 

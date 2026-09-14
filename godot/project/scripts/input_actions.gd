@@ -77,6 +77,7 @@ const BINDINGS := [
 	["mission_abort", KEY_K, true, false, false, "MISSÃO", "ABORTA a missão"],
 	["nav_panel", KEY_TAB, false, false, false, "MISSÃO", "computador de navegação"],
 	["orbit_map", KEY_M, false, false, false, "MISSÃO", "mapa orbital"],
+	["map_mode", KEY_M, true, false, false, "MISSÃO", "mapa local / sistema solar"],
 
 	# --- tempo ---
 	["warp_up", KEY_PERIOD, false, false, false, "TEMPO", "sobe o time warp"],

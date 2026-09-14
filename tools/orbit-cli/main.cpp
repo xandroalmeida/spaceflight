@@ -5,6 +5,8 @@
 // that can be diffed against JPL Horizons or an analytic result.
 
 #include "core/celestial/body_catalog.hpp"
+#include "core/celestial/solar_system.hpp"
+#include "core/navigation/mission_planner.hpp"
 #include "core/ephemeris/errors.hpp"
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
 #include "core/ephemeris/spice_time_converter.hpp"
@@ -23,6 +25,7 @@
 #include "tools/orbit-cli/scenario.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -51,6 +54,10 @@ Usage:
   orbit-cli gravity [--center <body>] [--position x,y,z] [--date <epoch>]
   orbit-cli propagate <scenario.json> [--csv <file>] [--samples <n>] [--j2]
   orbit-cli lambert --to <body> --depart <epoch> --tof <days> [--center <body>] [--from <body|x,y,z>]
+  orbit-cli mission --to <body> [--from <body>] [--target-orbit-km <n>]
+                    [--parking-altitude-km <n>] [--parking-inclination-deg <n>]
+                    [--objective balanced|min-dv|min-time] [--date <epoch>]
+                    [--tof-days <n>] [--departure-window-hours <n>]
   orbit-cli intercept <scenario.json> --to <body> --tof <days> [--csv <file>]
                     [--no-retarget] [--tolerance-km <n>]
                     [--flyby-altitude-km <n>] [--b-plane-angle <deg>]
@@ -98,6 +105,22 @@ struct Args {
         return option(name).value_or(fallback);
     }
     [[nodiscard]] bool has_flag(const std::string& name) const { return option(name).has_value(); }
+
+    // A numeric option with a stated default.  Throws rather than silently using
+    // the default when the text is not a number: "--target-orbit-km 5OO" quietly
+    // planning a 500 km orbit would be worse than refusing.
+    [[nodiscard]] double number(const std::string& name, double fallback) const {
+        const auto text = option(name);
+        if (!text.has_value()) {
+            return fallback;
+        }
+        std::size_t consumed = 0;
+        const double value = std::stod(*text, &consumed);
+        if (consumed != text->size()) {
+            throw std::runtime_error("--" + name + " \"" + *text + "\" is not a number");
+        }
+        return value;
+    }
 };
 
 Args parse_args(int argc, char** argv) {
@@ -224,19 +247,54 @@ int command_kernels(const Args& args) {
     return 0;
 }
 
+// The Solar System directory (Milestone 8 rules 17-21), resolved against the
+// kernels that are actually loaded.
+//
+// Two columns carry the whole point of the table.  `source` says which NAIF id is
+// queried for a position, and it differs from the body when the planet's own SPK
+// segment is absent -- Jupiter is drawn at the Jupiter SYSTEM barycentre, which
+// sits inside Jupiter because its moons are a ten-thousandth of its mass.
+// `mission` says what that costs: a body standing in for a point cannot be the
+// centre of a capture orbit, so it drops to `observation` no matter what the
+// table claims.
 int command_bodies(const Args& args) {
     const Context ctx = make_context(args);
-    const auto catalog = celestial::BodyCatalog::default_solar_system(*ctx.provider);
+    const auto epoch = args.option("date").has_value()
+                           ? ctx.time->parse(*args.option("date"))
+                           : time::CoordinateTime::j2000();
+    const auto system = celestial::SolarSystem::resolve(*ctx.provider, epoch);
 
-    std::cout << std::left << std::setw(22) << "body" << std::setw(8) << "NAIF"
-              << std::setw(26) << "GM [m^3/s^2]" << "mean radius [m]\n";
-    for (const auto& body : catalog.bodies()) {
-        std::cout << std::left << std::setw(22) << body.name << std::setw(8) << body.id.naif_id()
-                  << std::setw(26) << fmt(body.gm, 16)
-                  << (body.radius > 0.0 ? fmt(body.radius, 10) : std::string{"-"}) << "\n";
+    std::cout << std::left << std::setw(12) << "body" << std::setw(7) << "NAIF"
+              << std::setw(11) << "type" << std::setw(9) << "parent" << std::setw(8) << "source"
+              << std::setw(24) << "GM [m^3/s^2]" << std::setw(16) << "radius [m]"
+              << "mission\n";
+    for (const auto& body : system.bodies()) {
+        std::cout << std::left << std::setw(12) << body.entry.name
+                  << std::setw(7) << body.entry.id.naif_id()
+                  << std::setw(11) << to_string(body.entry.type)
+                  << std::setw(9) << body.entry.parent.naif_id();
+        if (!body.has_ephemeris) {
+            std::cout << std::setw(8) << "-";
+        } else {
+            std::cout << std::setw(8) << body.ephemeris_source.naif_id();
+        }
+        std::cout << std::setw(24) << (body.gm > 0.0 ? fmt(body.gm, 16) : std::string{"-"})
+                  << std::setw(16) << (body.radius > 0.0 ? fmt(body.radius, 10) : std::string{"-"})
+                  << to_string(body.support) << "\n";
     }
+
     std::cout << "\nGM values come from the loaded PCK (gm_de440.tpc), not from constants in the\n"
-                 "source: the dynamics must use the same masses that generated the ephemeris.\n";
+                 "source: the dynamics must use the same masses that generated the ephemeris.\n"
+                 "A `source` that is not the body itself is a system barycentre standing in for\n"
+                 "a planet whose own SPK segment is not loaded: good enough to draw, refused as\n"
+                 "a destination.  An empty one means the kernels cannot place the body at all.\n";
+
+    std::cout << "\ngravity model (a different question -- whose mass is in the force model)\n";
+    const auto catalog = celestial::BodyCatalog::default_solar_system(*ctx.provider);
+    for (const auto& body : catalog.bodies()) {
+        std::cout << "  " << std::left << std::setw(22) << body.name
+                  << fmt(body.gm, 16) << "\n";
+    }
     return 0;
 }
 
@@ -1017,6 +1075,219 @@ int command_intercept(const Args& args) {
     return mission.ok() ? 0 : 1;
 }
 
+// ---------------------------------------------------------------------------
+// `orbit-cli mission` -- the general planner, from the command line (rule 106).
+//
+// It calls plan_mission() and nothing else.  There is no second algorithm here,
+// no alternative cost rule and no CLI-only shortcut: whatever this prints is
+// what the cockpit gets when the pilot presses SEARCH, which is the invariant
+// Milestone 6.2 established and this milestone has to keep while the planner
+// stops being lunar.
+// ---------------------------------------------------------------------------
+int command_mission(const Args& args) {
+    const Context ctx = make_context(args);
+
+    const auto origin = resolve_body(args.option_or("from", "Earth"));
+    const auto destination_name = args.option("to");
+    if (!destination_name.has_value()) {
+        throw std::runtime_error("usage: orbit-cli mission --to <body> [--from <body>] "
+                                 "[--target-orbit-km N] [--parking-altitude-km N] "
+                                 "[--date <epoch>]");
+    }
+    const auto destination = resolve_body(*destination_name);
+    const auto epoch = epoch_from(args, ctx);
+
+    const auto system = celestial::SolarSystem::resolve(*ctx.provider, epoch);
+    if (const auto* body = system.find(destination);
+        body != nullptr && !body->can_be_destination()) {
+        std::cerr << destination.name() << " cannot be a destination: "
+                  << (body->has_ephemeris
+                          ? "its position is the system barycentre's, so an orbit about it "
+                            "would be an orbit about a point"
+                          : "the loaded kernels cannot place it")
+                  << "\n";
+        return 1;
+    }
+
+    // The ship. The scene's Torch Mk III unless a scenario file says otherwise,
+    // because the question "can this ship reach Mars" is about THAT ship.
+    const double parking_altitude_m = args.number("parking-altitude-km", 400.0) * 1000.0;
+    const double inclination_deg = args.number("parking-inclination-deg", 51.6);
+    const double target_periapsis_m = args.number("target-orbit-km", 500.0) * 1000.0;
+    const double target_apoapsis_m =
+        args.number("target-apoapsis-km", args.number("target-orbit-km", 500.0)) * 1000.0;
+
+    const propulsion::MultiModeEngine engine{
+        {{"IMPULSE", propulsion::EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
+         {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
+    const spacecraft::Spacecraft craft{"Torch", 1000.0, 19000.0, engine};
+
+    const auto frame = coordinates::ReferenceFrame::centered_on(origin);
+    const double gm_origin = ctx.provider->gravitational_parameter(origin);
+    const double parking_radius = ctx.provider->mean_radius(origin) + parking_altitude_m;
+
+    trajectory::OrbitalElements parking{};
+    parking.semi_major_axis = parking_radius;
+    parking.eccentricity = 0.0;
+    parking.inclination = units::Angle::degrees(inclination_deg);
+    const auto parking_state = trajectory::state_from_elements(parking, gm_origin);
+
+    navigation::SimulationState state{};
+    state.provider = ctx.provider.get();
+    state.orientation = ctx.provider.get();
+    state.catalog = celestial::BodyCatalog::default_solar_system(*ctx.provider);
+    state.j2_bodies = {origin};
+    state.vehicle = parking_state;
+    state.epoch = epoch;
+    state.integrator.relative_tolerance = 1.0e-11;
+    state.integrator.absolute_tolerance_position = 1.0e-3;
+    state.integrator.absolute_tolerance_velocity = 1.0e-6;
+    state.integrator.max_step = time::Duration::seconds(args.number("max-step-s", 3600.0));
+
+    navigation::MissionRequest request{};
+    request.origin = origin;
+    request.destination = destination;
+    request.target_orbit.periapsis_altitude = target_periapsis_m;
+    request.target_orbit.apoapsis_altitude = target_apoapsis_m;
+    request.target_orbit.minimum_periapsis_altitude = target_periapsis_m - 20.0e3;
+    request.target_orbit.maximum_apoapsis_altitude = target_apoapsis_m + 20.0e3;
+    request.spacecraft.vehicle = &craft;
+    request.spacecraft.execution = navigation::ExecutionModel::FiniteBurn;
+    request.effort.capture_burn_offset_seconds = args.number("capture-offset-s", 0.0);
+    request.effort.screened_candidates =
+        static_cast<int>(args.number("screened", request.effort.screened_candidates));
+    request.effort.flown_candidates =
+        static_cast<int>(args.number("flown", request.effort.flown_candidates));
+
+    const auto space = navigation::default_search_space(*ctx.provider, origin, destination, epoch);
+    request.departure_window = space.departure_window;
+    request.time_of_flight = space.time_of_flight;
+    if (const auto given = args.option("tof-days"); given.has_value()) {
+        request.time_of_flight.days.assign(1, std::stod(*given));
+    }
+    if (const auto given = args.option("departure-window-hours"); given.has_value()) {
+        request.departure_window.span = time::Duration::hours(std::stod(*given));
+    }
+    request.departure_window.samples =
+        static_cast<int>(args.number("departure-samples", request.departure_window.samples));
+
+    if (const auto given = args.option("objective"); given.has_value()) {
+        if (*given == "balanced") request.objective = navigation::OptimizationObjective::Balanced;
+        else if (*given == "min-dv")
+            request.objective = navigation::OptimizationObjective::MinimumTotalDeltaV;
+        else if (*given == "min-time")
+            request.objective = navigation::OptimizationObjective::ShortestTimeOfFlight;
+        else throw std::runtime_error("unknown --objective \"" + *given + "\"");
+    }
+
+    std::cout << "mission        : " << origin.name() << " -> " << destination.name() << "\n"
+              << "geometry       : " << navigation::to_string(space.geometry) << "\n"
+              << "epoch          : " << ctx.time->to_utc_string(epoch, 0) << "\n"
+              << "parking orbit  : " << fmt(parking_altitude_m / 1000.0, 6) << " km circular at "
+              << fmt(inclination_deg, 4) << " deg\n"
+              << "target orbit   : " << fmt(target_periapsis_m / 1000.0, 6) << " x "
+              << fmt(target_apoapsis_m / 1000.0, 6) << " km\n"
+              << "objective      : " << navigation::to_string(request.objective) << "\n"
+              << "departure grid : " << request.departure_window.samples << " points over "
+              << fmt(request.departure_window.span.hours(), 4) << " h\n"
+              << "flight times   : " << request.time_of_flight.days.size() << " values from "
+              << fmt(request.time_of_flight.days.front(), 5) << " to "
+              << fmt(request.time_of_flight.days.back(), 5) << " days\n"
+              << "delta-v budget : " << fmt(craft.delta_v_budget(craft.initial_mass()), 8)
+              << " m/s\n\n"
+              << "searching...\n"
+              << std::flush;
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto plan = navigation::plan_mission(state, request);
+    const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    std::cout << "status         : " << navigation::to_string(plan.status) << "   ("
+              << fmt(elapsed, 4) << " s)\n";
+    if (plan.failure.has_value()) {
+        std::cout << "failure        : " << plan.failure->name() << "\n"
+                  << "detail         : " << plan.failure->detail << "\n";
+    }
+    if (plan.diagnostics.capture_corrector_evaluations > 0) {
+        std::cout << "capture solver : " << plan.diagnostics.capture_corrector_iterations
+                  << " iteration(s), " << plan.diagnostics.capture_corrector_evaluations
+                  << " flight(s), "
+                  << (plan.diagnostics.capture_corrector_converged ? "converged" : "gave up")
+                  << " -- " << plan.diagnostics.capture_corrector_message << "\n";
+    }
+
+    if (!plan.alternatives.empty()) {
+        std::cout << "\ncandidates flown by the search (rule 105)\n"
+                  << std::left << std::setw(34) << "  geometry" << std::setw(7) << "ok"
+                  << std::setw(14) << "tof [d]" << std::setw(14) << "inject [m/s]"
+                  << std::setw(14) << "capture" << std::setw(14) << "total"
+                  << std::setw(14) << "cost" << "orbit / reason\n";
+        for (const auto& alternative : plan.alternatives) {
+            std::cout << "  " << std::left << std::setw(32) << alternative.label
+                      << std::setw(7) << (alternative.feasible ? "yes" : "no")
+                      << std::setw(14) << fmt(alternative.time_of_flight_s / 86400.0, 5)
+                      << std::setw(14) << fmt(alternative.injection_delta_v, 7)
+                      << std::setw(14) << fmt(alternative.capture_delta_v, 7)
+                      << std::setw(14) << fmt(alternative.total_delta_v, 7)
+                      << std::setw(14) << fmt(alternative.cost, 7);
+            if (alternative.feasible) {
+                std::cout << fmt(alternative.predicted_periapsis_altitude / 1000.0, 5) << " x "
+                          << fmt(alternative.predicted_apoapsis_altitude / 1000.0, 5) << " km, i "
+                          << fmt(alternative.predicted_inclination.degrees(), 4) << " deg";
+            } else {
+                std::cout << navigation::to_string(alternative.failure);
+            }
+            std::cout << "\n";
+        }
+    }
+
+    std::cout << "\nsearch cost (rule 51)\n"
+              << "  candidates screened : " << plan.diagnostics.candidates_feasible << " of "
+              << plan.diagnostics.candidates_considered << " considered\n"
+              << "  candidates flown    : " << plan.diagnostics.candidates_flown << "\n"
+              << "  propagations        : " << plan.diagnostics.propagations << "\n"
+              << "  integrator steps    : " << plan.diagnostics.integrator_steps << "\n"
+              << "  wall time           : " << fmt(elapsed, 5) << " s\n";
+
+    if (!plan.ok()) {
+        return 1;
+    }
+
+    const auto& m = plan.metrics;
+    std::cout << "\nthe plan\n"
+              << "  departure    : " << ctx.time->to_utc_string(m.departure, 0) << "\n"
+              << "  arrival      : " << ctx.time->to_utc_string(m.arrival, 0) << "\n"
+              << "  flight time  : " << fmt(m.time_of_flight_s / 86400.0, 6) << " days   ("
+              << (m.branch == trajectory::TransferDirection::Prograde ? "prograde" : "retrograde")
+              << " branch, transfer angle "
+              << fmt(m.transfer_angle.degrees(), 5) << " deg)\n"
+              << "  injection dv : " << fmt(m.injection_delta_v, 8) << " m/s over "
+              << fmt(m.injection_duration_s, 6) << " s\n"
+              << "  midcourse    : " << fmt(m.midcourse_delta_v, 8)
+              << " m/s  (folded into the injection)\n"
+              << "  capture dv   : " << fmt(m.capture_delta_v, 8) << " m/s over "
+              << fmt(m.capture_duration_s, 6) << " s\n"
+              << "  total dv     : " << fmt(m.total_delta_v, 8) << " m/s of "
+              << fmt(m.delta_v_available, 8) << " available\n"
+              << "  propellant   : " << fmt(m.propellant_required, 6) << " kg required, "
+              << fmt(m.propellant_remaining, 6) << " kg left\n"
+              << "  v_infinity   : " << fmt(m.v_infinity, 6) << " m/s at " << destination.name()
+              << "\n"
+              << "  flyby rp     : " << fmt(m.predicted_flyby_periapsis / 1000.0, 6)
+              << " km predicted from the centre\n"
+              << "  arrival orbit: " << fmt(m.predicted_periapsis_altitude / 1000.0, 6) << " x "
+              << fmt(m.predicted_apoapsis_altitude / 1000.0, 6) << " km, e "
+              << fmt(m.predicted_eccentricity, 6) << ", i "
+              << fmt(m.predicted_inclination.degrees(), 5) << " deg\n"
+              << "  requested    : " << fmt(m.requested_periapsis_altitude / 1000.0, 6) << " x "
+              << fmt(m.requested_apoapsis_altitude / 1000.0, 6) << " km\n\n"
+              << "  maneuvers    :\n"
+              << plan.maneuvers.describe() << "\n";
+
+    return 0;
+}
+
 int command_propagate(const Args& args) {
     if (args.positional.empty()) {
         throw std::runtime_error("usage: orbit-cli propagate <scenario.json>");
@@ -1259,6 +1530,7 @@ int main(int argc, char** argv) {
         if (args.command == "propagate") return command_propagate(args);
         if (args.command == "lambert")   return command_lambert(args);
         if (args.command == "intercept") return command_intercept(args);
+        if (args.command == "mission")   return command_mission(args);
 
         std::cerr << "unknown command \"" << args.command << "\"\n\n" << kUsage;
         return 1;

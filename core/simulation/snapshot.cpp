@@ -65,13 +65,23 @@ SimulationSnapshot SnapshotBuilder::build(const propagation::PropagationState& s
     snapshot.clock_difference = snapshot.elapsed_coordinate - state.proper_time;
     snapshot.time_warp = time_warp_;
 
-    snapshot.bodies.reserve(catalog_.size());
-    for (const auto& body : catalog_.bodies()) {
-        const auto body_state = provider_.state(body.id, t, frame_);
-        snapshot.bodies.push_back(CelestialBodySnapshot{body.id, body.name,
-                                                        body_state.state.position,
-                                                        body_state.state.velocity, body.gm,
-                                                        body.radius});
+    if (display_.empty()) {
+        snapshot.bodies.reserve(catalog_.size());
+        for (const auto& body : catalog_.bodies()) {
+            const auto body_state = provider_.state(body.id, t, frame_);
+            snapshot.bodies.push_back(CelestialBodySnapshot{body.id, body.name,
+                                                            body_state.state.position,
+                                                            body_state.state.velocity, body.gm,
+                                                            body.radius, body.id});
+        }
+    } else {
+        snapshot.bodies.reserve(display_.size());
+        for (const auto& body : display_) {
+            const auto body_state = provider_.state(body.ephemeris_source, t, frame_);
+            snapshot.bodies.push_back(CelestialBodySnapshot{
+                body.id, body.name, body_state.state.position, body_state.state.velocity, body.gm,
+                body.radius, body.ephemeris_source});
+        }
     }
 
     auto& craft = snapshot.spacecraft;

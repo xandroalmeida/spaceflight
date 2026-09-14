@@ -15,6 +15,7 @@ add_library(spaceflight_core STATIC
     attitude/rcs.cpp
     celestial/body_catalog.cpp
     celestial/oblateness.cpp
+    celestial/solar_system.cpp
     ephemeris/spice_internal.cpp
     ephemeris/spice_kernel_set.cpp
     ephemeris/spice_ephemeris_provider.cpp
@@ -28,7 +29,7 @@ add_library(spaceflight_core STATIC
     propulsion/main_engine_force.cpp
     spacecraft/spacecraft.cpp
     navigation/b_plane.cpp
-    navigation/lunar_transfer.cpp
+    navigation/transfer_planner.cpp
     navigation/maneuver.cpp
     navigation/mission_execution.cpp
     navigation/mission_planner.cpp
@@ -39,6 +40,7 @@ add_library(spaceflight_core STATIC
     propagation/dense_output.cpp
     propagation/dormand_prince_54.cpp
     propagation/propagator_report.cpp
+    trajectory/departure_hyperbola.cpp
     trajectory/lambert.cpp
     trajectory/orbital_elements.cpp
     render/render_transform.cpp

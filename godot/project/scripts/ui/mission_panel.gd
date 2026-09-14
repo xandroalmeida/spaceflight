@@ -23,23 +23,35 @@ extends PanelContainer
 signal plan_requested(target: String, periapsis_km: float, apoapsis_km: float)
 signal execute_requested()
 signal cancel_requested()
+signal search_cancelled()
 signal target_changed(target: String)
 signal closed()
 
 const DEFAULT_PERIAPSIS_KM := 100.0
 const DEFAULT_APOAPSIS_KM := 100.0
 
+## As altitudes que o piloto pode pedir, em km (regras 9 e 57).
+##
+## Uma lista e não um campo de texto: o número tem de ser plausível para o corpo
+## escolhido, e uma caixa livre convida a pedir uma órbita de 5 m. 500 km é o
+## default de Marte e 100 km o da Lua, e qual deles aparece primeiro depende do
+## alvo -- ver `_default_altitude_for`.
+const ALTITUDES_KM: Array[float] = [50.0, 100.0, 200.0, 300.0, 500.0, 1000.0, 2000.0]
+
 var targets: PackedStringArray = PackedStringArray()
 var target_index := 0
+var altitude_index := 1
 
 var _header: Label
 var _target_label: Label
+var _orbit_label: Label
 var _summary: RichTextLabel
 var _plan_button: Button
 var _execute_button: Button
 var _cancel_button: Button
 var _status: Label
 var _pending_plan := false
+var _searching := false
 var _font: Font
 
 
@@ -83,8 +95,29 @@ func _ready() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	target_row.add_child(spacer)
 
-	_plan_button = _button("PLAN TRANSFER", func() -> void: _request_plan())
-	target_row.add_child(_plan_button)
+	# --- órbita desejada (regras 9, 45, 57) ---
+	var orbit_row := HBoxContainer.new()
+	orbit_row.add_theme_constant_override("separation", 10)
+	column.add_child(orbit_row)
+	orbit_row.add_child(_label("TARGET ORBIT", 13, Palette.SECONDARY))
+	var lower := _button("◀", func() -> void: _step_altitude(-1))
+	lower.custom_minimum_size = Vector2(44, 0)
+	orbit_row.add_child(lower)
+	_orbit_label = _label("—", 18, Palette.PRIMARY)
+	_orbit_label.custom_minimum_size = Vector2(190, 0)
+	_orbit_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	orbit_row.add_child(_orbit_label)
+	var higher := _button("▶", func() -> void: _step_altitude(1))
+	higher.custom_minimum_size = Vector2(44, 0)
+	orbit_row.add_child(higher)
+
+	var orbit_spacer := Control.new()
+	orbit_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	orbit_row.add_child(orbit_spacer)
+
+	_plan_button = _button("SEARCH", func() -> void: _request_plan())
+	orbit_row.add_child(_plan_button)
+	_refresh_orbit()
 
 	# --- resumo ---
 	_summary = RichTextLabel.new()
@@ -123,13 +156,16 @@ func _process(_delta: float) -> void:
 	# Só agora é que o quadro bloqueia. Um quadro de diferença é o que separa
 	# "o jogo avisou" de "o jogo congelou".
 	_pending_plan = false
-	plan_requested.emit(current_target(), DEFAULT_PERIAPSIS_KM, DEFAULT_APOAPSIS_KM)
+	plan_requested.emit(current_target(), current_altitude_km(), current_altitude_km())
 
 
 func set_targets(names: PackedStringArray, current: String) -> void:
 	targets = names
 	target_index = maxi(targets.find(current), 0)
+	altitude_index = _default_altitude_for(current_target())
 	_refresh_target()
+	if _orbit_label != null:
+		_refresh_orbit()
 
 
 func current_target() -> String:
@@ -146,7 +182,9 @@ func _step_target(direction: int) -> void:
 	if targets.is_empty():
 		return
 	target_index = wrapi(target_index + direction, 0, targets.size())
+	altitude_index = _default_altitude_for(current_target())
 	_refresh_target()
+	_refresh_orbit()
 	target_changed.emit(current_target())
 
 
@@ -154,17 +192,69 @@ func _refresh_target() -> void:
 	_target_label.text = current_target().to_upper() if not targets.is_empty() else "—"
 
 
+func _step_altitude(direction: int) -> void:
+	altitude_index = wrapi(altitude_index + direction, 0, ALTITUDES_KM.size())
+	_refresh_orbit()
+
+
+func _refresh_orbit() -> void:
+	_orbit_label.text = "%.0f km circular" % ALTITUDES_KM[altitude_index]
+
+
+func current_altitude_km() -> float:
+	return ALTITUDES_KM[altitude_index]
+
+
+func _default_altitude_for(target: String) -> int:
+	## 100 km para a Lua, 500 km para tudo o mais. Não é um número mágico por
+	## corpo: é o default do milestone (regra 57) com a exceção que a campanha
+	## lunar qualificou.
+	var wanted := 100.0 if target == "Moon" else 500.0
+	return maxi(ALTITUDES_KM.find(wanted), 0)
+
+
 func _request_plan() -> void:
-	_plan_button.text = "PLANNING…"
-	_plan_button.disabled = true
-	_status.text = "searching departure opportunities -- the frame will stop for about a second"
+	if _searching:
+		search_cancelled.emit()
+		return
+	_plan_button.text = "CANCEL SEARCH"
+	_status.text = "starting the search…"
 	_status.add_theme_color_override("font_color", Palette.SECONDARY)
 	_pending_plan = true
+	_searching = true
+
+
+func show_progress(progress: Dictionary) -> void:
+	## Regra 48: a interface diz o que está a acontecer enquanto acontece.
+	##
+	## Contagens, não trajetórias. Um relatório de progresso que trouxesse um
+	## plano seria um segundo lugar de onde planos vêm.
+	if progress.is_empty():
+		return
+	_searching = true
+	_plan_button.text = "CANCEL SEARCH"
+	_plan_button.disabled = false
+	_execute_button.disabled = true
+	var stage := String(progress.get("stage", "searching")).to_upper()
+	var line := "SEARCHING TRAJECTORIES — %s\n  candidates tested %d of %d   flown %d   found %d" % [
+		stage,
+		int(progress.get("candidates_screened", 0)),
+		int(progress.get("candidates_considered", 0)),
+		int(progress.get("candidates_flown", 0)),
+		int(progress.get("candidates_succeeded", 0))]
+	var steps := int(progress.get("integrator_steps", 0))
+	if steps > 0:
+		line += "   %s integrator steps" % Fmt.count(steps)
+	if progress.get("cancelled", false):
+		line = "CANCELLING — the search stops between candidates\n" + line
+	_status.add_theme_color_override("font_color", Palette.SECONDARY)
+	_status.text = line
 
 
 ## Chamado pelo `Flight` depois de planejar (ou de falhar).
 func show_plan(plan: Dictionary, error: String) -> void:
-	_plan_button.text = "PLAN TRANSFER"
+	_searching = false
+	_plan_button.text = "SEARCH"
 	_plan_button.disabled = false
 
 	if plan.is_empty() or not plan.get("valid", false):
@@ -185,28 +275,94 @@ func show_plan(plan: Dictionary, error: String) -> void:
 
 
 func show_alternatives(alternatives: Array) -> void:
-	## As geometrias que a busca de facto voou (M6.2 seção 13), cada uma com a
-	## órbita em que teria chegado. Mostradas em vez de escondidas, porque o
-	## planejador NÃO mira uma inclinação e esta lista é como ele diz isso.
+	## As geometrias que a busca de facto voou (regra 47), lado a lado.
+	##
+	## Uma TABELA e não uma lista, porque a pergunta que ela responde é uma
+	## comparação: qual é mais rápida, qual é mais barata, o que custa a
+	## diferença. Uma coluna por candidata viável, no máximo três -- a quarta não
+	## cabe e, medido sobre cem épocas, nunca deslocou a vencedora.
+	##
+	## Cada número vem do planejador. Este painel não estima tempo de voo nem Δv
+	## e não inventa uma linha quando a busca só encontrou uma opção (regra 47:
+	## "não escrever valores fictícios estáticos").
 	if alternatives.is_empty():
 		return
-	var lines := ["", "[color=#8a939e]CANDIDATES FLOWN BY THE SEARCH[/color]"]
+
+	var feasible: Array = []
+	var refused: Array = []
 	for entry in alternatives:
 		var alternative: Dictionary = entry
-		# Uma linha por candidato, e curta o bastante para não quebrar: o rótulo
-		# completo do planejador tem 28 caracteres e, com a órbita prevista atrás
-		# dele, cada candidato ocupava duas linhas e a lista transbordava para
-		# fora do painel. O que interessa do rótulo é o tempo de voo, que é o que
-		# distingue um candidato do seguinte.
-		var label := String(alternative["label"]).split("/")
-		lines.append("  %-7s %s %6.0f m/s   %.0f × %.0f km   i %.1f°"
-			% [label[1] if label.size() > 1 else label[0],
-			   "ok " if alternative["feasible"] else "no ",
-			   alternative["total_delta_v"],
-			   float(alternative["predicted_periapsis_m"]) / 1000.0,
-			   float(alternative["predicted_apoapsis_m"]) / 1000.0,
-			   alternative["predicted_inclination_deg"]])
+		if alternative.get("feasible", false):
+			feasible.append(alternative)
+		else:
+			refused.append(alternative)
+
+	var lines: Array[String] = ["", "[color=#8a939e]TRAJECTORIES FOUND[/color]"]
+	if feasible.is_empty():
+		lines.append("  none — every geometry the search flew was refused")
+	else:
+		# Ordenadas pelo tempo de voo, para que a coluna da esquerda seja sempre a
+		# mais rápida: é a leitura que a regra 47 desenha.
+		feasible.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return float(a["time_of_flight_s"]) < float(b["time_of_flight_s"]))
+		var shown: Array = feasible.slice(0, mini(3, feasible.size()))
+		var headings := PackedStringArray()
+		for i in range(shown.size()):
+			headings.append(_alternative_name(i, shown.size()))
+		lines.append("  %-12s %s" % ["", _row_of(headings)])
+		lines.append("  %-12s %s" % ["FLIGHT", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return Fmt.duration(float(a["time_of_flight_s"]))))])
+		lines.append("  %-12s %s" % ["DEPART ΔV", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return "%.0f m/s" % float(a["injection_delta_v"])))])
+		lines.append("  %-12s %s" % ["CAPTURE ΔV", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return "%.0f m/s" % float(a["capture_delta_v"])))])
+		lines.append("  %-12s %s" % ["TOTAL ΔV", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return "%.0f m/s" % float(a["total_delta_v"])))])
+		lines.append("  %-12s %s" % ["ORBIT", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return "%.0f × %.0f km" % [float(a["predicted_periapsis_m"]) / 1000.0,
+				float(a["predicted_apoapsis_m"]) / 1000.0]))])
+		lines.append("  %-12s %s" % ["INC", _row_of(_column(shown, func(a: Dictionary) -> String:
+			return "%.1f°" % float(a["predicted_inclination_deg"])))])
+
+	if not refused.is_empty():
+		lines.append("")
+		lines.append("[color=#8a939e]REFUSED (%d)[/color]" % refused.size())
+		for entry in refused:
+			var alternative: Dictionary = entry
+			lines.append("  %-22s %s" % [_short_label(String(alternative["label"])),
+				String(alternative.get("failure", "?"))])
 	_summary.text += "\n".join(lines)
+
+
+func _alternative_name(index: int, total: int) -> String:
+	## FAST / BALANCED / LOW ΔV, e apenas quando há três para nomear.
+	##
+	## Com duas opções, chamar uma de "BALANCED" seria inventar um meio-termo que
+	## a busca não encontrou; com uma, qualquer rótulo é uma comparação com nada.
+	if total >= 3:
+		return ["FAST", "BALANCED", "LOW ΔV"][index]
+	if total == 2:
+		return ["FASTER", "CHEAPER"][index]
+	return "ONLY OPTION"
+
+
+func _column(rows: Array, reader: Callable) -> PackedStringArray:
+	var out := PackedStringArray()
+	for row in rows:
+		out.append(String(reader.call(row)))
+	return out
+
+
+func _row_of(cells: PackedStringArray) -> String:
+	var parts := PackedStringArray()
+	for cell in cells:
+		parts.append(cell.rpad(16))
+	return "".join(parts)
+
+
+func _short_label(label: String) -> String:
+	var parts := label.split("/")
+	return parts[1] if parts.size() > 1 else label
 
 
 func _format(p: Dictionary) -> String:

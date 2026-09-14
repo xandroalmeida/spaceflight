@@ -14,6 +14,7 @@
 #include "core/attitude/pointing_controller.hpp"
 #include "core/attitude/rcs.hpp"
 #include "core/celestial/body_catalog.hpp"
+#include "core/celestial/solar_system.hpp"
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
 #include "core/ephemeris/spice_time_converter.hpp"
 #include "core/gravity/composite_force_model.hpp"
@@ -38,8 +39,11 @@
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <thread>
 
 namespace spaceflight_godot {
 
@@ -198,6 +202,17 @@ public:
     // a target selector: a display that says TARGET and cannot be pointed
     // anywhere else is a label, not an instrument.
     godot::Array get_selectable_targets() const;
+
+    // The Solar System, as the user interface has to show it (Milestone 8 rules
+    // 20 and 21): one Dictionary per body, in directory order, each naming its
+    // parent and saying how far the planner has been qualified for it.
+    //
+    // A TREE expressed as a flat list with parents on it, rather than nested
+    // Dictionaries, because the consumer is a menu and a menu walks. What must
+    // not happen is the user interface keeping a body list of its own: that is
+    // the second source of truth rule 19 forbids, and it is how "Mars" ends up
+    // selectable in a build whose kernels cannot place it.
+    godot::Array get_body_directory() const;
     bool set_target_body(const godot::String& name);
     godot::String get_target_body() const;
 
@@ -274,6 +289,77 @@ public:
     godot::Dictionary plan_transfer(const godot::String& target_body,
                                     double periapsis_altitude_km, double apoapsis_altitude_km,
                                     double search_hours);
+
+    // --- planning without freezing the game (Milestone 8 rules 48, 49, 120) ---
+    //
+    // `plan_transfer` above blocks, and for a lunar transfer that is a defensible
+    // second. An Earth-Mars search is 64 seconds, measured, and a minute of
+    // frozen frames is not a keypress -- it is a crash as far as anyone watching
+    // is concerned.
+    //
+    // So: one worker thread, started by `start_planning`, polled by
+    // `get_planning_progress`, collected by `collect_plan`.
+    //
+    // ---------------------------------------------------------------------
+    // Why ONE thread, and why the core does not know about it
+    //
+    // CSPICE has a global kernel pool and a global error state and is not thread
+    // safe. Every toolkit call in this project is already made while holding
+    // core/ephemeris/spice_internal.hpp's mutex, so a worker and the frame can
+    // both ask the ephemeris questions and the toolkit sees them one at a time.
+    // That makes ONE worker correct and it is why there is not a pool: N workers
+    // would serialise on that mutex anyway, and the contention would be paid by
+    // the frame.
+    //
+    // The worker touches nothing the frame mutates. The request is COPIED before
+    // it starts -- the ship's state and the epoch by value, the provider,
+    // catalogue and vehicle by pointer to objects that are not written during
+    // flight -- and the result is handed back through a mutex. The planner itself
+    // knows none of this: it takes a `cancelled` callback and a progress
+    // callback, and whether they are backed by a thread is the caller's business.
+    bool start_planning(const godot::String& target_body, double periapsis_altitude_km,
+                        double apoapsis_altitude_km, double search_hours);
+    bool is_planning() const;
+
+    // Counts, and the stage the search is in. Empty when nothing is running.
+    godot::Dictionary get_planning_progress() const;
+
+    // Empty until the worker has finished. Calling it once the worker is done
+    // joins the thread, installs the result and returns the same summary
+    // `plan_transfer` would have. Returns a Dictionary with "cancelled" set when
+    // the search was stopped.
+    godot::Dictionary collect_plan();
+
+    // Asks the search to stop. It stops between candidates, never inside one.
+    void cancel_planning();
+
+    // --- the Solar System map (Milestone 8 rules 26-31) ---------------------
+    //
+    // A SECOND map, and a second frame, declared rather than assumed.
+    //
+    // The orbital map of Milestone 7 draws everything relative to the body the
+    // ship is orbiting, in scene units, through the floating origin. That is the
+    // right frame for a lunar transfer and the wrong one for a heliocentric one:
+    // the Earth moves 12.7 million kilometres in the four days a translunar arc
+    // spans, which is why get_planned_trajectory() anchors its samples at the
+    // origin body -- and over two hundred days it moves 500 million.
+    //
+    // So this is Sun-centred J2000, in METRES, and it says so in the Dictionary
+    // it returns. Metres and not scene units because the floating origin is a
+    // rendering device tied to where the camera is, and a map of the Solar System
+    // is not drawn from the cockpit. Everything below is in that one frame, which
+    // is what rule 31 asks and what Milestone 7's first orbital map got wrong.
+    //
+    // Float resolution at Neptune's distance is 270 km. That is stated rather
+    // than worried about: it is a map, and 270 km at 4.5e12 m is a fifth of a
+    // pixel at any zoom that shows Neptune at all.
+    godot::Dictionary get_system_map() const;
+
+    // The planet tracks, sampled from the EPHEMERIS rather than drawn as
+    // ellipses (rule 29). Separate from get_system_map() because they cost a
+    // thousand ephemeris calls and do not change from frame to frame: the caller
+    // asks once when the map opens.
+    godot::Dictionary get_system_orbit_paths(int samples_per_body) const;
 
     // Installs the last planned transfer. False, with a reason in
     // get_last_error(), if there is nothing to arm or if the departure has
@@ -354,6 +440,10 @@ private:
     std::unique_ptr<sf::ephemeris::SpiceEphemerisProvider> provider_;
     std::unique_ptr<sf::ephemeris::SpiceTimeConverter> time_converter_;
     std::unique_ptr<sf::celestial::BodyCatalog> catalog_;
+    // The directory: what EXISTS, as opposed to whose mass is in the force
+    // model. Resolved once at configure() against the loaded kernels, because
+    // availability is a property of those and not of the code.
+    std::unique_ptr<sf::celestial::SolarSystem> system_;
     std::unique_ptr<sf::gravity::CompositeForceModel> forces_;
     std::unique_ptr<sf::propagation::DormandPrince54Propagator> propagator_;
     std::unique_ptr<sf::simulation::SnapshotBuilder> builder_;
@@ -393,6 +483,23 @@ private:
     sf::render::RenderTransform transform_{1.0e-6};
 
     std::string last_error_;
+
+    // --- the planning worker ------------------------------------------------
+    struct PlanningJob {
+        std::thread worker;
+        std::atomic<bool> running{false};
+        std::atomic<bool> cancel{false};
+
+        std::mutex mutex;
+        sf::navigation::SearchProgress progress{};
+        sf::navigation::MissionPlanResult result{};
+        std::string error;
+        bool have_result{false};
+        double wall_seconds{0.0};
+    };
+    std::unique_ptr<PlanningJob> job_;
+
+    void join_worker();
 };
 
 }  // namespace spaceflight_godot

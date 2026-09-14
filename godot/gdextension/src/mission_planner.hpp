@@ -12,7 +12,7 @@
 // two-stage differential corrector, a B-plane aim point, an insertion burn, and
 // a cost rule that chose between candidates by flying them.
 //
-// Every one of those had a counterpart in core/navigation/lunar_transfer.hpp,
+// Every one of those had a counterpart in core/navigation/transfer_planner.hpp,
 // and the two were not the same code.  The counterpart is what the 365-epoch
 // campaign measured; this was what the game flew.  A validation report about
 // software the player never runs is not a validation report.
@@ -20,8 +20,8 @@
 // So the astrodynamics is gone -- deleted, not moved -- and what is left is a
 // translation:
 //
-//     scene objects  ->  navigation::SimulationState + LunarTransferRequest
-//     plan_lunar_transfer(...)
+//     scene objects  ->  navigation::SimulationState + MissionRequest
+//     plan_mission(...)
 //     navigation::MissionPlanResult  ->  the caller
 //
 // There is no arithmetic here that decides anything about a trajectory.  If a
@@ -57,6 +57,7 @@
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/time/coordinate_time.hpp"
 
+#include <functional>
 #include <vector>
 
 namespace spaceflight_godot {
@@ -99,6 +100,13 @@ struct SceneTransferRequest {
     // The cockpit draws the planned arc, so it asks for one.
     bool want_trajectory{true};
     int trajectory_samples{256};
+
+    // Asked between candidates, so that a search the pilot has given up on stops
+    // (rule 120), and called with counts as it goes, so that the screen can say
+    // what is happening (rule 48). Both are plain callbacks: the core does not
+    // learn that a thread exists.
+    std::function<bool()> cancelled{};
+    std::function<void(const sf::navigation::SearchProgress&)> on_progress{};
 };
 
 // The translation, in two halves, EXPOSED.
@@ -113,7 +121,7 @@ struct SceneTransferRequest {
 // Splitting them also says what the bridge computes: `state_for` subtracts the
 // origin body's state, and that is the only piece of geometry in this file.
 [[nodiscard]] sf::navigation::SimulationState state_for(const SceneTransferRequest& request);
-[[nodiscard]] sf::navigation::LunarTransferRequest request_for(const SceneTransferRequest& request);
+[[nodiscard]] sf::navigation::MissionRequest request_for(const SceneTransferRequest& request);
 
 // Translates, calls the core, returns what the core returned.
 //

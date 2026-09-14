@@ -31,6 +31,20 @@ struct CelestialBodySnapshot {
     math::Vec3 velocity{};   // [m/s]
     double gm{0.0};          // [m^3/s^2]
     double radius{0.0};      // [m], 0 for barycentres
+
+    // Which id was actually asked for a position.  Equal to `id` except when a
+    // system barycentre is standing in for a planet whose own SPK segment is not
+    // loaded (core/celestial/solar_system.hpp).
+    //
+    // Carried on the snapshot rather than resolved again downstream, because
+    // everything that asks the ephemeris a SECOND question about this body --
+    // its light time, its apparent position, its orientation -- has to ask about
+    // the same id the position came from.  Milestone 8 found that out by drawing
+    // Jupiter and then asking SPICE where Jupiter appears, which is a body the
+    // loaded kernels cannot place.
+    celestial::BodyId ephemeris_source{};
+
+    [[nodiscard]] bool position_substituted() const { return ephemeris_source != id; }
 };
 
 struct SpacecraftSnapshot {
@@ -122,6 +136,16 @@ struct SimulationSnapshot {
     [[nodiscard]] std::string describe() const;
 };
 
+// One body as the display is told about it.  `ephemeris_source` is the id
+// actually queried for a position; see CelestialBodySnapshot::position_substituted.
+struct DisplayBody {
+    celestial::BodyId id{};
+    std::string name;
+    celestial::BodyId ephemeris_source{};
+    double gm{0.0};
+    double radius{0.0};
+};
+
 // Builds snapshots from the authoritative state.  Holds references to the
 // provider, the catalogue and the force model, all of which must outlive it.
 //
@@ -135,6 +159,24 @@ public:
                     celestial::BodyId reference,
                     time::CoordinateTime epoch,
                     coordinates::ReferenceFrame frame = coordinates::ReferenceFrame::ssb_j2000());
+
+    // What the DISPLAY is told exists.
+    //
+    // A different question from whose mass is in the force model, and the two
+    // answers genuinely differ: the gravity catalogue holds Mars *Barycenter*
+    // because that is the GM a point-mass term 200 million kilometres away needs,
+    // and it holds nothing at all for Phobos, whose mass perturbs nothing. A
+    // renderer driven by the gravity catalogue can therefore neither draw Mars
+    // nor draw a moon, which is exactly where Milestone 8 found it.
+    //
+    // Left empty the builder uses the gravity catalogue, which is what every
+    // caller before Milestone 8 wanted and still gets.
+    void set_display_bodies(std::vector<DisplayBody> bodies) {
+        display_ = std::move(bodies);
+    }
+    [[nodiscard]] const std::vector<DisplayBody>& display_bodies() const noexcept {
+        return display_;
+    }
 
     void set_reference(celestial::BodyId body) { reference_ = body; }
     void set_target(std::optional<celestial::BodyId> body) { target_ = body; }
@@ -160,6 +202,7 @@ private:
     double dry_mass_{0.0};
     double effective_exhaust_velocity_{0.0};
     std::string name_{"spacecraft"};
+    std::vector<DisplayBody> display_{};
 };
 
 }  // namespace sf::simulation

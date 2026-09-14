@@ -41,5 +41,26 @@ if (( NEEDS_SCAN )); then
     "${GODOT}" --headless --path "${PROJECT}" --import >/dev/null 2>&1 || true
 fi
 
-"${GODOT}" --headless --path "${PROJECT}" --script res://tests/test_m7.gd
-exit $?
+# Qual suíte. Sem argumento, TODAS -- porque a pergunta "o M7 continua de pé?"
+# é exatamente a que um milestone que generaliza o planejador tem de responder.
+SUITES=("$@")
+if (( ${#SUITES[@]} == 0 )); then
+    SUITES=(m7 m8)
+fi
+
+status=0
+for suite in "${SUITES[@]}"; do
+    script="res://tests/test_${suite}.gd"
+    echo "=== ${suite} ==="
+    "${GODOT}" --headless --path "${PROJECT}" --script "${script}"
+    rc=$?
+    # 77 (Skipped) não sobrescreve uma falha real de outra suíte.
+    if (( rc != 0 )); then
+        if (( rc == SKIP && status == 0 )); then
+            status=${SKIP}
+        elif (( rc != SKIP )); then
+            status=${rc}
+        fi
+    fi
+done
+exit ${status}

@@ -14,6 +14,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -49,7 +51,16 @@ Vector3 to_godot(const sf::render::RenderVec3& v) { return Vector3{v.x, v.y, v.z
 }  // namespace
 
 SpaceflightSimulation::SpaceflightSimulation() = default;
-SpaceflightSimulation::~SpaceflightSimulation() = default;
+SpaceflightSimulation::~SpaceflightSimulation() {
+    // A worker still holding pointers into members that are about to be
+    // destroyed is the one way this class can crash the editor. Ask it to stop,
+    // then WAIT: cancellation is checked between candidates, so the wait is at
+    // most one flight long.
+    if (job_ != nullptr) {
+        job_->cancel.store(true);
+        join_worker();
+    }
+}
 
 void SpaceflightSimulation::_bind_methods() {
     godot::ClassDB::bind_method(D_METHOD("configure", "kernel_directory", "epoch_utc"),
@@ -162,6 +173,22 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_body_orientation);
     godot::ClassDB::bind_method(D_METHOD("get_selectable_targets"),
                                 &SpaceflightSimulation::get_selectable_targets);
+    godot::ClassDB::bind_method(D_METHOD("get_body_directory"),
+                                &SpaceflightSimulation::get_body_directory);
+    godot::ClassDB::bind_method(
+        D_METHOD("start_planning", "target_body", "periapsis_altitude_km",
+                 "apoapsis_altitude_km", "search_hours"),
+        &SpaceflightSimulation::start_planning);
+    godot::ClassDB::bind_method(D_METHOD("is_planning"), &SpaceflightSimulation::is_planning);
+    godot::ClassDB::bind_method(D_METHOD("get_planning_progress"),
+                                &SpaceflightSimulation::get_planning_progress);
+    godot::ClassDB::bind_method(D_METHOD("collect_plan"), &SpaceflightSimulation::collect_plan);
+    godot::ClassDB::bind_method(D_METHOD("cancel_planning"),
+                                &SpaceflightSimulation::cancel_planning);
+    godot::ClassDB::bind_method(D_METHOD("get_system_map"),
+                                &SpaceflightSimulation::get_system_map);
+    godot::ClassDB::bind_method(D_METHOD("get_system_orbit_paths", "samples_per_body"),
+                                &SpaceflightSimulation::get_system_orbit_paths);
     godot::ClassDB::bind_method(D_METHOD("set_target_body", "name"),
                                 &SpaceflightSimulation::set_target_body);
     godot::ClassDB::bind_method(D_METHOD("get_target_body"),
@@ -256,6 +283,24 @@ bool SpaceflightSimulation::configure(const godot::String& kernel_directory,
 
         builder_ = std::make_unique<sf::simulation::SnapshotBuilder>(
             *provider_, *catalog_, *forces_, sf::celestial::bodies::earth, epoch_time, frame);
+
+        // What EXISTS, as opposed to whose mass is in the force model above.
+        // Resolved at the scenario epoch because availability is a statement
+        // about a time span: mar099s.bsp covers 1995-2050 and a game set in 2075
+        // has to be told that now rather than when the pilot selects Mars.
+        system_ = std::make_unique<sf::celestial::SolarSystem>(
+            sf::celestial::SolarSystem::resolve(*provider_, epoch_time));
+
+        std::vector<sf::simulation::DisplayBody> display;
+        for (const auto id : system_->renderable()) {
+            const auto* body = system_->find(id);
+            display.push_back(sf::simulation::DisplayBody{body->entry.id,
+                                                          std::string{body->entry.name},
+                                                          body->ephemeris_source, body->gm,
+                                                          body->radius});
+        }
+        builder_->set_display_bodies(std::move(display));
+
         builder_->set_target(sf::celestial::bodies::moon);
         // 900 kg dry + 100 kg of RCS propellant, burnt through the thruster's own
         // v_eff. Without this the propellant readout would sit at zero while the
@@ -550,7 +595,7 @@ godot::Vector3 SpaceflightSimulation::get_body_observed_position(int index, bool
     sf::math::Vec3 relative = body.position - observer.position;
     if (retarded) {
         relative = sf::relativity::apparent_position(
-                       *provider_, body.id, observer.position, snapshot_.time,
+                       *provider_, body.ephemeris_source, observer.position, snapshot_.time,
                        sf::coordinates::ReferenceFrame::ssb_j2000())
                        .relative_position;
     }
@@ -574,7 +619,8 @@ double SpaceflightSimulation::get_body_light_time(int index) const {
         return 0.0;
     }
     const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
-    return sf::relativity::apparent_position(*provider_, body.id, snapshot_.spacecraft.position,
+    return sf::relativity::apparent_position(*provider_, body.ephemeris_source,
+                                             snapshot_.spacecraft.position,
                                              snapshot_.time,
                                              sf::coordinates::ReferenceFrame::ssb_j2000())
         .light_time;
@@ -722,6 +768,179 @@ void SpaceflightSimulation::set_throttle(double throttle) {
 
 double SpaceflightSimulation::get_throttle() const {
     return main_engine_ != nullptr ? main_engine_->throttle() : 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// Planning on a worker thread.  See the note in simulation_node.hpp for why
+// there is exactly one of them and what it is allowed to touch.
+// ---------------------------------------------------------------------------
+
+bool SpaceflightSimulation::start_planning(const godot::String& target_body,
+                                           double periapsis_altitude_km,
+                                           double apoapsis_altitude_km, double search_hours) {
+    if (builder_ == nullptr) {
+        last_error_ = "start_planning: configure() first";
+        return false;
+    }
+    if (job_ != nullptr && job_->running.load()) {
+        last_error_ = "start_planning: a search is already running";
+        return false;
+    }
+    join_worker();
+
+    const std::string name{target_body.utf8().get_data()};
+    const auto lookup = sf::celestial::body_from_name(name);
+    if (!lookup.ok) {
+        last_error_ = "start_planning: no body named \"" + name + "\"";
+        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+        return false;
+    }
+
+    job_ = std::make_unique<PlanningJob>();
+
+    // The request is built HERE, on the frame's thread, from state the frame
+    // owns -- and everything that can change while the search runs is copied by
+    // value. `initial` is the ship's state and `epoch` its coordinate time, both
+    // values; the provider, the catalogue and the vehicle are pointers to objects
+    // that configure() created and nothing mutates during flight.
+    SceneTransferRequest request{};
+    request.provider = provider_.get();
+    request.orientation = provider_.get();
+    request.catalog = catalog_.get();
+    request.craft = craft_.get();
+    request.j2_bodies = {sf::celestial::bodies::earth};
+    request.integrator = propagator_->config();
+    request.initial = state_;
+    request.epoch = clock_->coordinate_time();
+    request.center = sf::celestial::bodies::earth;
+    request.target = lookup.id;
+    request.target_periapsis_altitude_m = periapsis_altitude_km * 1000.0;
+    request.target_apoapsis_altitude_m = apoapsis_altitude_km * 1000.0;
+    request.search_window_s = search_hours * 3600.0;
+    request.execution = execution_;
+    request.pointing = pointing_->gains();
+
+    PlanningJob* job = job_.get();
+    request.cancelled = [job] { return job->cancel.load(); };
+    request.on_progress = [job](const sf::navigation::SearchProgress& progress) {
+        const std::lock_guard lock{job->mutex};
+        job->progress = progress;
+    };
+
+    job->running.store(true);
+    job->worker = std::thread([job, request] {
+        const auto started = std::chrono::steady_clock::now();
+        try {
+            auto result = spaceflight_godot::plan_transfer(request);
+            const std::lock_guard lock{job->mutex};
+            job->result = std::move(result);
+            job->have_result = true;
+        } catch (const std::exception& e) {
+            const std::lock_guard lock{job->mutex};
+            job->error = e.what();
+        } catch (...) {
+            const std::lock_guard lock{job->mutex};
+            job->error = "unknown error while planning";
+        }
+        {
+            const std::lock_guard lock{job->mutex};
+            job->wall_seconds =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        }
+        job->running.store(false);
+    });
+    return true;
+}
+
+bool SpaceflightSimulation::is_planning() const {
+    return job_ != nullptr && job_->running.load();
+}
+
+godot::Dictionary SpaceflightSimulation::get_planning_progress() const {
+    godot::Dictionary out;
+    if (job_ == nullptr) {
+        return out;
+    }
+    const std::lock_guard lock{job_->mutex};
+    out["running"] = job_->running.load();
+    out["cancelled"] = job_->cancel.load();
+    out["stage"] = godot::String{job_->progress.stage.c_str()};
+    out["candidates_considered"] = job_->progress.candidates_considered;
+    out["candidates_screened"] = job_->progress.candidates_screened;
+    out["candidates_flown"] = job_->progress.candidates_flown;
+    out["candidates_succeeded"] = job_->progress.candidates_succeeded;
+    out["best_total_delta_v"] = job_->progress.best_total_delta_v;
+    out["integrator_steps"] = static_cast<int64_t>(job_->progress.integrator_steps);
+    out["wall_seconds"] = job_->wall_seconds;
+    return out;
+}
+
+void SpaceflightSimulation::cancel_planning() {
+    if (job_ != nullptr) {
+        job_->cancel.store(true);
+    }
+}
+
+void SpaceflightSimulation::join_worker() {
+    if (job_ == nullptr) {
+        return;
+    }
+    if (job_->worker.joinable()) {
+        job_->worker.join();
+    }
+}
+
+godot::Dictionary SpaceflightSimulation::collect_plan() {
+    plan_summary_ = godot::Dictionary{};
+    if (job_ == nullptr || job_->running.load()) {
+        return plan_summary_;
+    }
+    join_worker();
+
+    bool cancelled = job_->cancel.load();
+    std::string error;
+    sf::navigation::MissionPlanResult result{};
+    bool have_result = false;
+    {
+        const std::lock_guard lock{job_->mutex};
+        error = job_->error;
+        have_result = job_->have_result;
+        if (have_result) {
+            result = std::move(job_->result);
+        }
+    }
+    job_.reset();
+
+    if (!error.empty()) {
+        last_error_ = "plan_transfer: " + error;
+        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+        return plan_summary_;
+    }
+    if (!have_result) {
+        last_error_ = "plan_transfer: the search produced nothing";
+        return plan_summary_;
+    }
+    if (result.status == sf::navigation::MissionPlanStatus::Cancelled) {
+        last_error_ = "search cancelled";
+        plan_summary_["cancelled"] = true;
+        return plan_summary_;
+    }
+    if (!result.ok()) {
+        last_error_ = result.failure.has_value()
+                          ? std::string{result.failure->name()} + ": " + result.failure->detail
+                          : std::string{sf::navigation::to_string(result.status)};
+        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+        if (cancelled) {
+            plan_summary_["cancelled"] = true;
+        }
+        return plan_summary_;
+    }
+
+    // Installed on the FRAME's thread and nowhere else. The worker never writes
+    // into planned_, because the cockpit reads it every frame.
+    planned_ = std::move(result);
+    plan_summary_ = get_plan();
+    return plan_summary_;
 }
 
 godot::Dictionary SpaceflightSimulation::plan_transfer(const godot::String& target_body,
@@ -877,12 +1096,14 @@ godot::Array SpaceflightSimulation::get_plan_alternatives() const {
         entry["feasible"] = alternative.feasible;
         entry["departure_tdb_s"] = alternative.departure.seconds_since_j2000();
         entry["time_of_flight_days"] = alternative.time_of_flight_s / 86400.0;
+        entry["time_of_flight_s"] = alternative.time_of_flight_s;
         entry["branch"] =
             godot::String{alternative.branch == sf::trajectory::TransferDirection::Prograde
                               ? "prograde"
                               : "retrograde"};
         entry["injection_delta_v"] = alternative.injection_delta_v;
         entry["insertion_delta_v"] = alternative.capture_delta_v;
+        entry["capture_delta_v"] = alternative.capture_delta_v;
         entry["total_delta_v"] = alternative.total_delta_v;
         entry["predicted_periapsis_m"] = alternative.predicted_periapsis_altitude;
         entry["predicted_apoapsis_m"] = alternative.predicted_apoapsis_altitude;
@@ -985,6 +1206,10 @@ godot::Basis SpaceflightSimulation::get_body_orientation(int index) const {
     const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
     sf::math::Mat3 rotation = sf::math::Mat3::identity();
     try {
+        // The BODY's own id and not its ephemeris source: a body-fixed frame comes
+        // from the text PCK, which knows IAU_JUPITER whether or not any SPK can
+        // say where Jupiter is. Rotating a planet by its barycentre's frame would
+        // be asking a different question and getting the identity for an answer.
         rotation = provider_->body_fixed_rotation(body.id, snapshot_.time,
                                                   sf::coordinates::FrameAxes::J2000);
     } catch (const std::exception&) {
@@ -1020,19 +1245,41 @@ godot::Basis SpaceflightSimulation::get_body_orientation(int index) const {
 
 godot::Array SpaceflightSimulation::get_selectable_targets() const {
     godot::Array out;
-    if (catalog_ == nullptr) {
+    if (system_ == nullptr) {
         return out;
     }
-    for (const auto& body : catalog_->bodies()) {
-        // Barycentres are in the catalogue because their GM is what the gravity
-        // model needs; they are not places, and offering "Mars Barycenter" as a
-        // destination would offer a point in empty space. A body with no radius
-        // is exactly that test, and it is the catalogue's own field rather than
-        // a list of names kept in the user interface.
-        if (body.radius <= 0.0) {
-            continue;
-        }
-        out.append(godot::String{body.name.c_str()});
+    // Everything the display can DRAW, which is what a navigation target is:
+    // somewhere to measure a distance and a relative speed against. Wider than
+    // the set of destinations -- the Sun is a perfectly good thing to point the
+    // camera at and a very poor thing to capture into orbit around -- and the
+    // two lists are separate for exactly that reason.
+    for (const auto id : system_->renderable()) {
+        out.append(godot::String{system_->find(id)->entry.name.data()});
+    }
+    return out;
+}
+
+godot::Array SpaceflightSimulation::get_body_directory() const {
+    godot::Array out;
+    if (system_ == nullptr) {
+        return out;
+    }
+    for (const auto& body : system_->bodies()) {
+        godot::Dictionary entry;
+        entry["name"] = godot::String{body.entry.name.data()};
+        entry["naif_id"] = body.entry.id.naif_id();
+        entry["type"] = godot::String{sf::celestial::to_string(body.entry.type).data()};
+        entry["parent"] = body.entry.parent.naif_id();
+        const auto* parent = system_->find(body.entry.parent);
+        entry["parent_name"] =
+            parent != nullptr ? godot::String{parent->entry.name.data()} : godot::String{"Sun"};
+        entry["radius_m"] = body.radius;
+        entry["gm"] = body.gm;
+        entry["has_ephemeris"] = body.has_ephemeris;
+        entry["position_substituted"] = body.position_from_barycenter;
+        entry["can_be_destination"] = body.can_be_destination();
+        entry["mission_support"] = godot::String{sf::celestial::to_string(body.support).data()};
+        out.append(entry);
     }
     return out;
 }
@@ -1048,9 +1295,10 @@ bool SpaceflightSimulation::set_target_body(const godot::String& name) {
         rebuild_snapshot();
         return true;
     }
-    for (const auto& body : catalog_->bodies()) {
-        if (body.name == wanted && body.radius > 0.0) {
-            builder_->set_target(body.id);
+    if (system_ != nullptr) {
+        if (const auto* body = system_->find(wanted);
+            body != nullptr && body->has_ephemeris && body->radius > 0.0) {
+            builder_->set_target(body->entry.id);
             rebuild_snapshot();
             return true;
         }
@@ -1263,6 +1511,216 @@ godot::Array SpaceflightSimulation::get_maneuvers() const {
             entry["position"] = Vector3{};
         }
         out.append(entry);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// The Solar System map.  Sun-centred J2000, in metres, and it says so.
+// ---------------------------------------------------------------------------
+namespace {
+
+godot::Vector3 to_metres(const sf::math::Vec3& v) {
+    return godot::Vector3{static_cast<float>(v.x), static_cast<float>(v.y),
+                          static_cast<float>(v.z)};
+}
+
+}  // namespace
+
+godot::Dictionary SpaceflightSimulation::get_system_map() const {
+    godot::Dictionary out;
+    if (builder_ == nullptr || provider_ == nullptr) {
+        return out;
+    }
+
+    // The frame, named, in the payload. Not a comment: a layer that arrives on
+    // this map without knowing which frame it is in is the bug Milestone 7 spent
+    // a day on, and a string the consumer can read is cheap insurance.
+    out["frame"] = godot::String{"Sun-centred J2000, metres"};
+    out["units"] = godot::String{"m"};
+
+    const auto* sun = snapshot_.find(sf::celestial::bodies::sun);
+    const sf::math::Vec3 centre = sun != nullptr ? sun->position : sf::math::Vec3{};
+    out["centre"] = godot::String{"Sun"};
+
+    godot::Array bodies;
+    for (const auto& body : snapshot_.bodies) {
+        // Moons are left off the heliocentric map: at this zoom the Moon and the
+        // Earth are the same pixel, and Phobos is a label on top of Mars
+        // (rule 27). They are still in the snapshot, still selectable, and the
+        // LOCAL map draws them.
+        const auto* entry = system_ != nullptr ? system_->find(body.id) : nullptr;
+        if (entry != nullptr && entry->entry.type == sf::celestial::BodyType::Moon) {
+            continue;
+        }
+        godot::Dictionary row;
+        row["name"] = godot::String{body.name.c_str()};
+        row["naif_id"] = body.id.naif_id();
+        row["position"] = to_metres(body.position - centre);
+        row["radius_m"] = body.radius;
+        row["is_sun"] = body.id == sf::celestial::bodies::sun;
+        row["is_origin"] = planned_.ok() && body.id == planned_.metrics.origin;
+        row["is_destination"] =
+            snapshot_.spacecraft.target.has_value() && body.id == *snapshot_.spacecraft.target;
+        bodies.append(row);
+    }
+    out["bodies"] = bodies;
+
+    out["ship_position"] = to_metres(snapshot_.spacecraft.position - centre);
+    out["ship_velocity"] = to_metres(snapshot_.spacecraft.velocity);
+
+    // The planned arc, in the SAME frame, and rebuilt in absolute coordinates on
+    // purpose: each sample is placed where the origin body was at that sample's
+    // own epoch. That is exactly what get_planned_trajectory() must NOT do for a
+    // planet-centred map and exactly what this one needs -- the Earth really does
+    // move half a billion kilometres while the ship is in transit, and a
+    // heliocentric map that anchored the arc at today's Earth would draw a
+    // transfer that never happened.
+    godot::PackedVector3Array arc;
+    if (planned_.ok() && !planned_.trajectory.empty()) {
+        arc.resize(static_cast<int64_t>(planned_.trajectory.samples.size()));
+        int64_t index = 0;
+        const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+        for (const auto& sample : planned_.trajectory.samples) {
+            sf::math::Vec3 absolute{};
+            try {
+                absolute = provider_->position(planned_.metrics.origin, sample.time, frame) +
+                           sample.from_origin;
+            } catch (const std::exception&) {
+                continue;
+            }
+            // The Sun moves too -- about one solar radius over a couple of
+            // centuries -- so it is read at the SAMPLE's epoch and not at now.
+            sf::math::Vec3 sun_then = centre;
+            try {
+                sun_then = provider_->position(sf::celestial::bodies::sun, sample.time, frame);
+            } catch (const std::exception&) {
+            }
+            arc[index++] = to_metres(absolute - sun_then);
+        }
+        arc.resize(index);
+    }
+    out["planned_trajectory"] = arc;
+
+    // The burns, each where the ship will be when it lights.
+    godot::Array maneuvers;
+    if (clock_ != nullptr) {
+        const auto now = clock_->coordinate_time();
+        for (const auto& maneuver : mission_.plan().maneuvers()) {
+            godot::Dictionary row;
+            row["name"] = godot::String{maneuver.name.c_str()};
+            row["seconds_to_ignition"] = (maneuver.ignition - now).seconds();
+            row["done"] = now >= maneuver.cutoff();
+            row["active"] = maneuver.active_at(now);
+            // Located by walking the planned arc to the ignition epoch, which is
+            // the only place a future position exists: the map does not propagate.
+            bool located = false;
+            godot::Vector3 at{};
+            const auto& samples = planned_.trajectory.samples;
+            for (std::size_t i = 1; i < samples.size(); ++i) {
+                if (samples[i].time >= maneuver.ignition) {
+                    if (static_cast<int64_t>(i) < arc.size()) {
+                        at = arc[static_cast<int64_t>(i)];
+                        located = true;
+                    }
+                    break;
+                }
+            }
+            row["located"] = located;
+            row["position"] = at;
+            maneuvers.append(row);
+        }
+    }
+    out["maneuvers"] = maneuvers;
+
+    out["destination"] = get_target_body();
+    out["phase"] = get_mission_phase();
+    return out;
+}
+
+godot::Dictionary SpaceflightSimulation::get_system_orbit_paths(int samples_per_body) const {
+    godot::Dictionary out;
+    if (builder_ == nullptr || provider_ == nullptr || system_ == nullptr) {
+        return out;
+    }
+    const int samples = std::clamp(samples_per_body, 8, 512);
+    const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+    const auto now = clock_->coordinate_time();
+    const double gm_sun = provider_->gravitational_parameter(sf::celestial::bodies::sun);
+
+    for (const auto& body : snapshot_.bodies) {
+        const auto* entry = system_->find(body.id);
+        if (entry == nullptr || entry->entry.type != sf::celestial::BodyType::Planet) {
+            continue;
+        }
+
+        // ONE revolution, from the body's own osculating period about the Sun.
+        // Not a table of orbital periods: the same call works for anything in the
+        // directory, and a constant here would be a fact about Mars written down
+        // where nothing checks it.
+        double period = 0.0;
+        try {
+            const auto heliocentric = provider_->state(
+                body.id, now, sf::coordinates::ReferenceFrame::centered_on(
+                                  sf::celestial::bodies::sun));
+            period = sf::trajectory::elements_from_state(heliocentric.state, gm_sun).period;
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!(period > 0.0) || !std::isfinite(period)) {
+            continue;
+        }
+
+        // Centred on now, and CLAMPED to what the kernels actually cover.
+        // Neptune's year is 165 of ours: half of it forward from 2026 lands in
+        // 2108, which de440s covers, and a naive "now to now + period" would land
+        // in 2191, which it does not -- and the honest answer to that is a
+        // shorter arc, not an extrapolation.
+        double from = now.seconds_since_j2000() - 0.5 * period;
+        double to = now.seconds_since_j2000() + 0.5 * period;
+        const auto coverage = provider_->coverage(entry->ephemeris_source);
+        bool clipped = false;
+        if (coverage.valid) {
+            const double low = coverage.begin.seconds_since_j2000();
+            const double high = coverage.end.seconds_since_j2000();
+            if (from < low) {
+                from = low;
+                clipped = true;
+            }
+            if (to > high) {
+                to = high;
+                clipped = true;
+            }
+        }
+        if (!(to > from)) {
+            continue;
+        }
+
+        godot::PackedVector3Array path;
+        path.resize(samples);
+        int64_t written = 0;
+        for (int i = 0; i < samples; ++i) {
+            const double fraction = static_cast<double>(i) / static_cast<double>(samples - 1);
+            const auto t = sf::time::CoordinateTime::from_seconds_since_j2000(
+                from + fraction * (to - from));
+            try {
+                const auto p = provider_->position(entry->ephemeris_source, t, frame);
+                const auto sun_then = provider_->position(sf::celestial::bodies::sun, t, frame);
+                path[written++] = to_metres(p - sun_then);
+            } catch (const std::exception&) {
+                break;
+            }
+        }
+        path.resize(written);
+        if (written < 3) {
+            continue;
+        }
+
+        godot::Dictionary row;
+        row["path"] = path;
+        row["period_s"] = period;
+        row["clipped"] = clipped;
+        out[godot::String{body.name.c_str()}] = row;
     }
     return out;
 }

@@ -4,7 +4,7 @@
 // What this test is for
 //
 // Milestone 6.1 measured a 365-epoch campaign against
-// core/navigation/lunar_transfer.hpp and got 365 captures.  The game, when a
+// core/navigation/transfer_planner.hpp and got 365 captures.  The game, when a
 // pilot pressed J, ran a completely different program: its own departure scan,
 // its own Lambert screen, its own two-stage corrector, its own cost rule, all of
 // it inside the GDExtension.  The campaign therefore certified software nobody
@@ -91,9 +91,9 @@ propagation::IntegratorConfig make_integrator() {
 // ship.  Everything else is left at the type's defaults, which is the whole
 // point -- those defaults are the qualified configuration and both callers get
 // them by not overriding them.
-navigation::LunarTransferRequest campaign_request(const spacecraft::Spacecraft& craft,
+navigation::MissionRequest campaign_request(const spacecraft::Spacecraft& craft,
                                                   navigation::ExecutionModel execution) {
-    navigation::LunarTransferRequest request{};
+    navigation::MissionRequest request{};
     request.origin = celestial::bodies::earth;
     request.destination = celestial::bodies::moon;
     request.target_orbit.periapsis_altitude = 100.0e3;
@@ -321,7 +321,7 @@ TEST(the_game_and_the_campaign_plan_the_same_transfer) {
     state.epoch = epoch;
     state.integrator = make_integrator();
 
-    const auto campaign = navigation::plan_lunar_transfer(state, request);
+    const auto campaign = navigation::plan_mission(state, request);
     const auto game = spaceflight_godot::plan_transfer(scene);
 
     REQUIRE(campaign.ok());

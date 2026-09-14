@@ -42,10 +42,10 @@ sf::navigation::SimulationState state_for(const SceneTransferRequest& request) {
     return state;
 }
 
-sf::navigation::LunarTransferRequest request_for(const SceneTransferRequest& request) {
+sf::navigation::MissionRequest request_for(const SceneTransferRequest& request) {
     require_complete(request);
 
-    sf::navigation::LunarTransferRequest plan{};
+    sf::navigation::MissionRequest plan{};
     plan.origin = request.center;
     plan.destination = request.target;
     plan.target_orbit.periapsis_altitude = request.target_periapsis_altitude_m;
@@ -71,11 +71,27 @@ sf::navigation::LunarTransferRequest request_for(const SceneTransferRequest& req
 
     plan.want_trajectory = request.want_trajectory;
     plan.trajectory_samples = request.trajectory_samples;
+
+    // The search space the two bodies actually need. Not a constant and not a
+    // cockpit dial: derived from their own orbits, so the same call gives a
+    // lunar grid for the Moon and a two-hundred-day sweep for Mars
+    // (core/navigation/mission_planner.hpp, rules 37-39).
+    const auto space = sf::navigation::default_search_space(*request.provider, request.center,
+                                                            request.target, request.epoch);
+    plan.time_of_flight = space.time_of_flight;
+    // The window's LENGTH is the scene's, because it is the one search parameter
+    // the pilot legitimately owns -- how far ahead to look for a departure. Its
+    // sampling is the search space's, because how finely a parking orbit has to
+    // be walked is a property of the geometry and not of the pilot's patience.
+    plan.departure_window.samples = space.departure_window.samples;
+
+    plan.effort.cancelled = request.cancelled;
+    plan.effort.on_progress = request.on_progress;
     return plan;
 }
 
 sf::navigation::MissionPlanResult plan_transfer(const SceneTransferRequest& request) {
-    return sf::navigation::plan_lunar_transfer(state_for(request), request_for(request));
+    return sf::navigation::plan_mission(state_for(request), request_for(request));
 }
 
 }  // namespace spaceflight_godot

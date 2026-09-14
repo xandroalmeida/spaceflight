@@ -11,12 +11,12 @@
 // ---------------------------------------------------------------------------
 // Milestone 6.2 section 7: what changed, and why it matters
 //
-// This tool used to call core/navigation/lunar_transfer.hpp directly, while the
+// This tool used to call core/navigation/transfer_planner.hpp directly, while the
 // game called a second planner of its own.  The campaign therefore measured a
 // code path the player never executed, which is the one thing a validation
 // campaign must not do.
 //
-// It now goes through navigation::plan_lunar_transfer -- the same public entry
+// It now goes through navigation::plan_mission -- the same public entry
 // point, with the same request type, that godot/gdextension/src/mission_planner
 // calls when a pilot presses J.  The 365/365 is a statement about the shipped
 // planner or it is a statement about nothing.
@@ -155,9 +155,9 @@ Context make_context(const Args& args) {
 // point: the game and the campaign share those defaults because they share the
 // struct.
 // ---------------------------------------------------------------------------
-navigation::LunarTransferRequest request_from(const Args& args,
+navigation::MissionRequest request_from(const Args& args,
                                               const orbitcli::Scenario& scenario) {
-    navigation::LunarTransferRequest request{};
+    navigation::MissionRequest request{};
     request.origin = scenario.relative_to;
     request.destination = celestial::bodies::moon;
 
@@ -442,7 +442,7 @@ int run_campaign(const Args& args, const Context& ctx, orbitcli::Scenario scenar
     const auto request = request_from(args, scenario);
     const auto t0 = ctx.time->parse(scenario.epoch_text);
 
-    std::cout << "Earth-Moon campaign  (through navigation::plan_lunar_transfer)\n"
+    std::cout << "Earth-Moon campaign  (through navigation::plan_mission)\n"
               << "  scenario        : " << scenario.name << "\n"
               << "  first epoch     : " << ctx.time->to_utc_string(t0, 0) << "\n"
               << "  epochs          : " << epochs << ", one every " << spacing_days << " day(s)\n"
@@ -493,7 +493,7 @@ int run_campaign(const Args& args, const Context& ctx, orbitcli::Scenario scenar
             const auto state = state_from(ctx, scenario, epoch);
             navigation::TransferRecord record{};
             try {
-                record = navigation::plan_lunar_transfer(state, request).diagnostics;
+                record = navigation::plan_mission(state, request).diagnostics;
             } catch (const std::exception& e) {
                 record.requested_epoch = epoch;
                 record.failure = navigation::TransferFailure::NumericalFailure;
@@ -706,7 +706,7 @@ int run_oberth_sweep(const Args& args, const Context& ctx, orbitcli::Scenario sc
 
     for (const double offset : offsets) {
         request.effort.capture_burn_offset_seconds = offset;
-        const auto record = navigation::plan_lunar_transfer(state, request).diagnostics;
+        const auto record = navigation::plan_mission(state, request).diagnostics;
         if (csv.is_open()) {
             csv << record.csv_row() << "\n";
         }
@@ -732,15 +732,15 @@ int run_oberth_sweep(const Args& args, const Context& ctx, orbitcli::Scenario sc
 // this: let each model run its own search and they differ in departure point,
 // flight time and arrival v_infinity, and the comparison stops being one.
 // ---------------------------------------------------------------------------
-std::optional<navigation::LunarTransferConfig::PinnedDeparture> pin_for(
-    const navigation::SimulationState& state, navigation::LunarTransferRequest request) {
+std::optional<navigation::TransferConfig::PinnedDeparture> pin_for(
+    const navigation::SimulationState& state, navigation::MissionRequest request) {
     request.pinned = {};
     request.spacecraft.execution = navigation::ExecutionModel::FiniteBurn;
-    const auto search = navigation::plan_lunar_transfer(state, request);
+    const auto search = navigation::plan_mission(state, request);
     if (!search.ok()) {
         return std::nullopt;
     }
-    navigation::LunarTransferConfig::PinnedDeparture pinned{};
+    navigation::TransferConfig::PinnedDeparture pinned{};
     pinned.active = true;
     pinned.coast_s = search.diagnostics.departure_coast_s;
     pinned.time_of_flight_days = search.diagnostics.time_of_flight_s / 86400.0;
@@ -795,7 +795,7 @@ int run_compare(const Args& args, const Context& ctx, orbitcli::Scenario scenari
                                                       navigation::ExecutionModel::Autopilot};
         for (int m = 0; m < 3; ++m) {
             request.spacecraft.execution = models[m];
-            results[m] = navigation::plan_lunar_transfer(state, request).diagnostics;
+            results[m] = navigation::plan_mission(state, request).diagnostics;
             if (csv.is_open()) {
                 csv << results[m].csv_row() << "\n";
             }
@@ -942,7 +942,7 @@ int run_autopilot_sweep(const Args& args, const Context& ctx, orbitcli::Scenario
 
         for (std::size_t g = 0; g < gains.size(); ++g) {
             request.spacecraft.pointing.natural_frequency = gains[g];
-            const auto record = navigation::plan_lunar_transfer(state, request).diagnostics;
+            const auto record = navigation::plan_mission(state, request).diagnostics;
             auto& row = rows[g];
             ++row.flown;
             if (record.success) {
@@ -1170,7 +1170,7 @@ int run_execution_campaign(const Args& args, const Context& ctx, orbitcli::Scena
                     // ---- planning: ideal impulses, no control error at all ---
                     request.pinned = {};
                     request.spacecraft.execution = navigation::ExecutionModel::Impulsive;
-                    const auto planned = navigation::plan_lunar_transfer(state, request);
+                    const auto planned = navigation::plan_mission(state, request);
 
                     navigation::MissionPlanResult flown{};
                     if (planned.ok()) {
@@ -1181,7 +1181,7 @@ int run_execution_campaign(const Args& args, const Context& ctx, orbitcli::Scena
                             planned.diagnostics.time_of_flight_s / 86400.0;
                         request.pinned.direction = planned.diagnostics.lambert_direction;
                         request.spacecraft.execution = navigation::ExecutionModel::Autopilot;
-                        flown = navigation::plan_lunar_transfer(state, request);
+                        flown = navigation::plan_mission(state, request);
                     }
 
                     // The three questions.  "Execution" asks whether the flight

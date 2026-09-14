@@ -89,7 +89,7 @@ TEST(the_golden_mission_reaches_a_hundred_kilometre_lunar_orbit) {
     state.integrator.initial_step = time::Duration::seconds(1.0);
     state.integrator.max_step = time::Duration::seconds(3600.0);
 
-    navigation::LunarTransferRequest request{};
+    navigation::MissionRequest request{};
     request.origin = celestial::bodies::earth;
     request.destination = celestial::bodies::moon;
     request.target_orbit.periapsis_altitude = 100.0e3;
@@ -124,7 +124,7 @@ TEST(the_golden_mission_reaches_a_hundred_kilometre_lunar_orbit) {
     // is re-searching a grid whose answer step 1 already produced.
     request.spacecraft.execution = navigation::ExecutionModel::FiniteBurn;
     request.want_trajectory = false;
-    const auto search = navigation::plan_lunar_transfer(state, request);
+    const auto search = navigation::plan_mission(state, request);
     if (!search.ok()) {
         SFT_FAIL_FATAL("PLANNER FAULT -- the search found nothing under ideal guidance: " +
                        std::string{search.failure.has_value()
@@ -146,7 +146,7 @@ TEST(the_golden_mission_reaches_a_hundred_kilometre_lunar_orbit) {
     request.want_trajectory = true;
     request.trajectory_samples = 2000;
 
-    const auto plan = navigation::plan_lunar_transfer(state, request);
+    const auto plan = navigation::plan_mission(state, request);
 
     // ---- CAPTURED ---------------------------------------------------------
     if (!plan.ok()) {
@@ -285,7 +285,7 @@ TEST(the_execution_monitor_records_predicted_against_actual) {
     state.integrator.absolute_tolerance_velocity = 1.0e-6;
     state.integrator.max_step = time::Duration::seconds(3600.0);
 
-    navigation::LunarTransferRequest request{};
+    navigation::MissionRequest request{};
     request.spacecraft.vehicle = &craft;
     request.spacecraft.execution = navigation::ExecutionModel::FiniteBurn;
     request.want_trajectory = true;
@@ -296,7 +296,7 @@ TEST(the_execution_monitor_records_predicted_against_actual) {
     request.effort.screened_candidates = 4;
     request.effort.flown_candidates = 2;
 
-    const auto plan = navigation::plan_lunar_transfer(state, request);
+    const auto plan = navigation::plan_mission(state, request);
     if (!plan.ok()) {
         SKIP("the cheap search found nothing to watch: " +
              std::string{plan.failure.has_value() ? plan.failure->name() : "?"});

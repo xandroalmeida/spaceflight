@@ -6,7 +6,7 @@
 // Why this file exists (Milestone 6.2, sections 1-5)
 //
 // Until this milestone there were two planners.  The campaign that got 365
-// departure epochs out of 365 called core/navigation/lunar_transfer.hpp; the
+// departure epochs out of 365 called core/navigation/transfer_planner.hpp; the
 // scene, when a pilot pressed J, called a second implementation living inside
 // the GDExtension -- its own departure search, its own time-of-flight sweep, its
 // own Lambert screen, its own B-plane corrector, its own cost rule.  Five hundred
@@ -18,7 +18,7 @@
 // campaign against a code path nobody executes is not evidence of anything.
 //
 // So: one authoritative implementation, and this is its front door.  The search,
-// the correctors, the flight and the classification all live in lunar_transfer;
+// the correctors, the flight and the classification all live in transfer_planner;
 // this file is the vocabulary a caller uses to ask, and the vocabulary the answer
 // comes back in.  The campaign goes through here.  The GDExtension goes through
 // here.  tests/scientific/test_planner_equivalence.cpp exists to make sure they
@@ -45,7 +45,7 @@
 #include "core/coordinates/state_vector.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/navigation/b_plane.hpp"
-#include "core/navigation/lunar_transfer.hpp"
+#include "core/navigation/transfer_planner.hpp"
 #include "core/navigation/maneuver.hpp"
 #include "core/propagation/spacecraft_propagator.hpp"
 #include "core/spacecraft/spacecraft.hpp"
@@ -54,6 +54,7 @@
 #include "core/trajectory/lambert.hpp"
 #include "core/units/angle.hpp"
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -107,6 +108,55 @@ struct DurationRange {
     // think in bounds; it produces the same kind of list.
     [[nodiscard]] static DurationRange linear(double from_days, double to_days, int samples);
 };
+
+// ---------------------------------------------------------------------------
+// The grid a transfer between two particular bodies has to be searched over
+// (Milestone 8 rules 37-39).
+//
+// Not a constant, and not a switch on a body name: it is derived from the two
+// bodies' own orbits, so the same code produces three days for the Moon and
+// three hundred for Mars, and would produce something sensible for Titan without
+// anyone writing Titan down.
+//
+// ---------------------------------------------------------------------------
+// Why the DEPARTURE window stays short even for Mars
+//
+// The textbook answer is a synodic period -- 780 days for Earth and Mars -- because
+// a chemical rocket can only afford the transfer near an opposition.  This ship
+// is not a chemical rocket.  Measured on this codebase, departing 2026-01-01,
+// which is a thoroughly unfavourable date:
+//
+//     time of flight     v_inf departure    v_inf arrival     total
+//        60 d              61.9 km/s          55.0 km/s      116.9 km/s
+//       150 d              33.6               18.5            52.0
+//       260 d              34.0               20.6            54.6
+//       400 d              23.3               14.5            37.8
+//
+// against a budget of 26 900 km/s in IMPULSE mode (config/engines/torch-mk3.json).
+// Every one of those is affordable by three orders of magnitude.  There is no
+// launch window to wait for, so the search does not look for one -- and rule 40
+// is explicit that the ship must not be artificially confined to the
+// trajectories a chemical stage could fly.
+//
+// What the window IS, in both geometries, is one revolution of the PARKING
+// ORBIT: where the ship is when it leaves decides which way the departure
+// hyperbola can point, and that is a question with a 92-minute period.  The
+// field stays configurable so that a scenario with a chemical budget can ask
+// for a synodic sweep; it would cost a very long parking coast, which is why it
+// is not the default.
+// ---------------------------------------------------------------------------
+struct SearchSpace {
+    TimeWindow departure_window{};
+    DurationRange time_of_flight{};
+    TransferGeometry geometry{TransferGeometry::Local};
+};
+
+// Throws std::invalid_argument when the two bodies have no common primary, which
+// is a question that cannot be posed rather than a search that finds nothing.
+[[nodiscard]] SearchSpace default_search_space(const ephemeris::EphemerisProvider& provider,
+                                               celestial::BodyId origin,
+                                               celestial::BodyId destination,
+                                               time::CoordinateTime epoch);
 
 // What "best" means, as a choice the caller makes rather than a rule buried in
 // the cost function (section 8 of the Milestone 6.1 brief, section 14 of 6.2).
@@ -201,9 +251,34 @@ struct SearchEffort {
     std::size_t step_budget{2'000'000};               // Impulsive, FiniteBurn
     std::size_t autopilot_step_budget{150'000'000};   // Autopilot
 
-    // Whichever applies to `execution`.
+    // And a third, for an interplanetary search, because none of the reasoning
+    // above transfers to one.
+    //
+    // A lunar flight is four days long and a Mars flight is two hundred; a lunar
+    // search flies about four hundred of them and an interplanetary one flies a
+    // similar number of arcs that are each fifty times longer. Measured on the
+    // first Earth-Mars search that reached a capture: 2 314 362 steps for a
+    // SINGLE attempt -- the 2 000 000 budget exhausted before the second
+    // candidate was reached, and reported as TIMEOUT, which said nothing about
+    // what had actually happened.
+    //
+    // 50e6 is about twenty attempts at that cost. It is a budget and not a
+    // target: the search that ships uses a fraction of it, and the number exists
+    // so that a run which has genuinely gone wrong is stopped and SAID to have
+    // been stopped, rather than grinding.
+    std::size_t interplanetary_step_budget{50'000'000};
+
+    // Whichever applies.
     [[nodiscard]] std::size_t budget_for(ExecutionModel execution) const {
         return execution == ExecutionModel::Autopilot ? autopilot_step_budget : step_budget;
+    }
+    [[nodiscard]] std::size_t budget_for(ExecutionModel execution,
+                                         TransferGeometry geometry) const {
+        if (execution == ExecutionModel::Autopilot) {
+            return autopilot_step_budget;
+        }
+        return geometry == TransferGeometry::Interplanetary ? interplanetary_step_budget
+                                                            : step_budget;
     }
 
     // How close the flyby has to be aimed, in metres of PERIAPSIS (the corrector
@@ -226,12 +301,18 @@ struct SearchEffort {
 
     // Where the pointing error has to fall below for a slew to count as settled.
     units::Angle settling_threshold{units::Angle::degrees(0.5)};
+
+    // Passed straight through to the search (rules 48 and 120). Null by default,
+    // which is a search nobody can stop and that reports nothing -- correct for a
+    // campaign tool and wrong for a cockpit.
+    std::function<bool()> cancelled{};
+    std::function<void(const SearchProgress&)> on_progress{};
 };
 
 // ---------------------------------------------------------------------------
 // The request (section 4).
 // ---------------------------------------------------------------------------
-struct LunarTransferRequest {
+struct MissionRequest {
     celestial::BodyId origin{celestial::bodies::earth};
     celestial::BodyId destination{celestial::bodies::moon};
 
@@ -251,7 +332,7 @@ struct LunarTransferRequest {
     // execution models are compared: let each run its own search and they differ
     // in departure point, flight time and arrival geometry, and the comparison
     // stops being a comparison.
-    LunarTransferConfig::PinnedDeparture pinned{};
+    TransferConfig::PinnedDeparture pinned{};
 };
 
 // ---------------------------------------------------------------------------
@@ -284,7 +365,11 @@ enum class MissionPlanStatus {
     NoSolution,                // nothing in the searched grid survives
     InsufficientPropellant,    // a transfer exists and the ship cannot pay (section 21)
     ExecutionFailed,           // the trajectory is right and the flight of it was not
-    Invalid                    // the request is not a question (no vehicle, empty grid)
+    Invalid,                   // the request is not a question (no vehicle, empty grid)
+
+    // Whoever asked stopped asking (rule 120).  Not a failure: nothing was found
+    // wanting, the search simply did not finish.
+    Cancelled
 };
 
 [[nodiscard]] std::string_view to_string(MissionPlanStatus status);
@@ -424,8 +509,8 @@ struct MissionPlanResult {
 // Never throws for a physical refusal: an unflyable geometry, an unaffordable
 // burn and an orbit that came out wrong are RESULTS with a reason on them.
 // Throws std::invalid_argument only for a request that is not a question.
-[[nodiscard]] MissionPlanResult plan_lunar_transfer(const SimulationState& state,
-                                                    const LunarTransferRequest& request);
+[[nodiscard]] MissionPlanResult plan_mission(const SimulationState& state,
+                                                    const MissionRequest& request);
 
 // The translation, exposed.
 //
@@ -433,8 +518,8 @@ struct MissionPlanResult {
 // tests/scientific/test_planner_equivalence.cpp can prove there is only one
 // door.  A test that compares two pipelines by re-deriving the configuration
 // itself proves that the test author can add, not that the code agrees.
-[[nodiscard]] LunarTransferConfig config_for(const LunarTransferRequest& request);
+[[nodiscard]] TransferConfig config_for(const MissionRequest& request);
 [[nodiscard]] TransferInputs inputs_for(const SimulationState& state,
-                                        const LunarTransferRequest& request);
+                                        const MissionRequest& request);
 
 }  // namespace sf::navigation

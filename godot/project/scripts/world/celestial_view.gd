@@ -126,6 +126,21 @@ func _apply_surface(name: String, material: ShaderMaterial) -> void:
 			if relief != null:
 				material.set_shader_parameter("normal_map", relief)
 				material.set_shader_parameter("use_normal_map", true)
+		"Mars":
+			material.set_shader_parameter("albedo_map",
+				_texture_or("res://assets/textures/mars/mars_albedo.png",
+					func() -> Texture2D: return PlanetTextures.mars_albedo()))
+			material.set_shader_parameter("use_albedo_map", true)
+			# A atmosfera de Marte tem 0,6 % da pressão da terrestre e o limbo que
+			# ela produz é um fio ocre, não um halo azul. 0,12 e não 0,55: é
+			# visível na silhueta e some no disco, que é o que a imagem mostra.
+			#
+			# ⚠️ Isto é DESENHO e não física. Não há modelo atmosférico neste
+			# projeto e a regra 56 diz que não há aerocaptura: a captura em Marte
+			# é exclusivamente propulsiva, e este parâmetro não toca em nada
+			# além do shader.
+			material.set_shader_parameter("atmosphere_strength", 0.12)
+			material.set_shader_parameter("atmosphere_colour", Color(0.85, 0.62, 0.45))
 
 
 func _texture(path: String) -> Texture2D:
@@ -238,11 +253,22 @@ func index_of(name: String) -> int:
 static func _colour_for(name: String) -> Color:
 	## A cor de base, usada onde não há textura. Com textura ela ainda serve ao
 	## `reflectance` do shader nos corpos sem mapa.
+	##
+	## Regra 69: os gigantes e os planetas interiores usam material simples com
+	## cores plausíveis. Elas não são inventadas -- são a cor média do disco em
+	## imagens de sonda -- mas também não são medidas fotometricamente, e nenhuma
+	## delas bloqueia o Milestone 8.
 	match name:
 		"Sun": return Color(1.0, 0.92, 0.6)
+		"Mercury": return Color(0.55, 0.52, 0.49)
+		"Venus": return Color(0.90, 0.80, 0.55)
 		"Earth": return Color(0.25, 0.45, 0.85)
 		"Moon": return Color(0.72, 0.72, 0.70)
-		"Mars Barycenter": return Color(0.80, 0.40, 0.28)
-		"Venus Barycenter": return Color(0.90, 0.80, 0.55)
-		"Jupiter Barycenter": return Color(0.85, 0.72, 0.55)
+		"Mars": return Color(0.72, 0.44, 0.28)
+		"Phobos", "Deimos": return Color(0.42, 0.38, 0.35)
+		"Jupiter": return Color(0.85, 0.72, 0.55)
+		"Saturn": return Color(0.89, 0.81, 0.62)
+		"Uranus": return Color(0.62, 0.84, 0.86)
+		"Neptune": return Color(0.30, 0.44, 0.78)
+		"Pluto": return Color(0.68, 0.60, 0.52)
 		_: return Color(0.6, 0.6, 0.65)

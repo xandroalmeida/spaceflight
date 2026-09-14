@@ -62,6 +62,11 @@ static func speed(ms: float) -> String:
 
 
 ## Uma duração que vai de segundos a anos sem trocar de instrumento.
+##
+## Acima de duas horas ela passa a DUAS unidades -- `92d 14h`, não `92.58 d`
+## (regra 96). A fração decimal de um dia é um número que ninguém lê: "0,58 dia"
+## obriga quem olha a multiplicar por 24 de cabeça, e um cruzeiro interplanetário
+## é exatamente onde esse cálculo aparece em todo mostrador.
 static func duration(seconds: float) -> String:
 	if not is_finite(seconds) or seconds <= 0.0:
 		return "--"
@@ -69,11 +74,27 @@ static func duration(seconds: float) -> String:
 		return "%.1f s" % seconds
 	if seconds < 7200.0:
 		return "%.1f min" % (seconds / 60.0)
-	if seconds < 172800.0:
-		return "%.2f h" % (seconds / 3600.0)
+	var total := int(seconds)
+	if seconds < 86400.0:
+		return "%dh %02dm" % [total / 3600, (total % 3600) / 60]
 	if seconds < 3.15576e7:
-		return "%.2f d" % (seconds / 86400.0)
-	return "%.3f yr" % (seconds / 3.15576e7)
+		return "%dd %02dh" % [total / 86400, (total % 86400) / 3600]
+	var years := int(seconds / 3.15576e7)
+	var days := int((seconds - float(years) * 3.15576e7) / 86400.0)
+	return "%dy %dd" % [years, days]
+
+
+## Uma contagem grande, legível de relance: `213k`, `2.4M`.
+##
+## Para os contadores da busca (regra 51). O número exato importa num CSV e não
+## num mostrador que se atualiza dez vezes por segundo.
+static func count(value: int) -> String:
+	var v := absf(float(value))
+	if v < 1000.0:
+		return str(value)
+	if v < 1.0e6:
+		return "%.0fk" % (float(value) / 1000.0)
+	return "%.1fM" % (float(value) / 1.0e6)
 
 
 ## Contagem regressiva de missão: `T-01:42:17`. Dias entram só quando existem,

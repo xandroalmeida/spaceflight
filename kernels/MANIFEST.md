@@ -18,10 +18,22 @@ Origem: <https://naif.jpl.nasa.gov/pub/naif/generic_kernels/>
 | `pck/gm_de440.tpc` | PCK texto | `GM` consistentes com DE440 | — |
 | `spk/de440s.bsp` | SPK binário | efemérides planetárias DE440 (span curto) | 1849-12-26 a 2150-01-21 |
 | `spk/de440.bsp` | SPK binário | DE440 completo (opcional) | 1550-01-01 a 2650-01-25 |
+| `spk/mar099s.bsp` | SPK binário | Marte (499), Fobos (401), Deimos (402) | 1995-01-01 a 2050-01-01 |
 
 A ordem de carregamento importa quando há sobreposição: o **último** kernel
 carregado tem precedência. `SpiceKernelSet` carrega em ordem determinística
 (LSK, PCK, SPK) e registra o que carregou.
+
+Dentro dos SPK a ordem é alfabética, então `mar099s.bsp` carrega **depois** de
+`de440s.bsp` e tem precedência sobre os segmentos que os dois compartilham (Sol,
+Terra, baricentros 3 e 4). Isso foi **medido** e não presumido: a posição
+baricêntrica da Terra em 2026-01-01 sai idêntica ao último dígito impresso com e
+sem o `mar099s.bsp` carregado — MAR099 é ajustado ao DE440. O DE440 continua
+sendo a efeméride planetária.
+
+Sem `mar099s.bsp` o corpo 499 não existe para o SPICE (`SPKINSUFFDATA`) e Marte
+deixa de ser um destino: o baricentro 4 é um ponto, não um lugar. A distância
+entre os dois, medida no mesmo instante, é de **10 cm**.
 
 ## Checksums
 
