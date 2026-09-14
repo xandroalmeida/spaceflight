@@ -52,9 +52,29 @@ public:
     [[nodiscard]] const std::vector<RcsThruster>& thrusters() const noexcept { return thrusters_; }
     [[nodiscard]] std::size_t size() const noexcept { return thrusters_.size(); }
 
-    // Largest torque available about each body axis, for the controller to
-    // saturate against.
+    // Largest torque ACHIEVABLE about each body axis, for the controller to
+    // saturate against (Milestone 6.2 section 11).
+    //
+    // Achievable, not "the sum of every thruster's contribution": in the couples
+    // layout four thrusters produce torque along x, but two of them produce it
+    // along +x and two along -x, and firing all four produces nothing.  The first
+    // version of this summed |torque.x| over all twelve and reported 4*a*F where
+    // the ship can deliver 2*a*F.  As a diagnostic string that was merely wrong;
+    // as the limit a controller clamps its demand against it would have let the
+    // controller ask for twice the torque that exists and call it unsaturated.
     [[nodiscard]] math::Vec3 max_torque() const noexcept { return max_torque_; }
+
+    // The same question for an arbitrary direction: how much torque this layout
+    // can produce along `axis`, with every thruster that helps wide open and
+    // every thruster that hinders shut.  This is the bound the greedy allocator
+    // actually respects, so it is the bound the controller is clamped to.
+    [[nodiscard]] double max_torque_about(const math::Vec3& axis) const;
+
+    // Angular acceleration ceiling [rad/s^2] about `axis`, given an inertia:
+    // tau_max / I.  Section 11's "angular acceleration limit", derived from the
+    // thrust, the lever arm and the moments rather than asserted.
+    [[nodiscard]] double max_angular_acceleration(const InertiaTensor& inertia,
+                                                  const math::Vec3& axis) const;
 
     // Greedy allocation: each thruster opens in proportion to how much its own
     // torque direction agrees with what was asked for.

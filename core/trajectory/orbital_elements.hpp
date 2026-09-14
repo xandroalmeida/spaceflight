@@ -52,6 +52,22 @@ struct OrbitalElements {
 // its gravitational parameter [m^3/s^2].
 OrbitalElements elements_from_state(const coordinates::StateVector& state, double gm);
 
+// The inverse.  Relative to the same central body, in the same frame.
+//
+// Here because Milestone 6.2 section 20 asks the campaign to be run from a
+// MATRIX of parking orbits -- four altitudes crossed with three inclinations --
+// and "a 400 km orbit at 51.6 degrees" is a statement about elements that has to
+// become a state vector before anything can be propagated from it.  Writing that
+// rotation in the campaign tool would put orbital mechanics in a command line
+// parser; writing it here means elements_from_state(state_from_elements(e)) is a
+// round trip a test can check, which tests/unit/test_orbital_elements.cpp does.
+//
+// Only the six classical elements are read: a, e, i, RAAN, argp, nu.  A negative
+// semi-major axis with e > 1 is a hyperbola and is accepted; the degenerate
+// cases (e = 0, i = 0) are not refused, they simply make RAAN and argp arbitrary
+// in exactly the way elements_from_state reports them as such.
+coordinates::StateVector state_from_elements(const OrbitalElements& elements, double gm);
+
 // Circular orbit speed and period, used by tests and scenario setup.
 double circular_speed(double gm, double radius);
 double circular_period(double gm, double radius);

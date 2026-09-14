@@ -147,12 +147,19 @@ const HUD_FONT_MIN := 10.0
 const HUD_FONT_MAX := 22.0
 const HUD_MODES := ["full", "compact", "off"]
 
-## A lunar mission, as the scene offers it. The altitude is what the B-plane
-## targeting aims the flyby at; the flight time is a starting guess that the
-## planner varies around (docs/physics/b-plane.md).
+## A lunar mission, as the scene offers it: a destination and the orbit to end up
+## in. Everything else -- when to leave, how long to fly, which Lambert branch,
+## where to aim the flyby, how long each burn runs -- is the core planner's, and
+## the cockpit has no dial for any of it (docs/architecture/navigation-integration.md).
+##
+## The flight time in particular is NOT offered here, and its absence is the
+## lesson of Milestone 6: with the departure point and the flight time both
+## fixed, the transfer angle is whatever the calendar says, and 82.5 % of the
+## geometries that produces are unflyable from a 400 km parking orbit. Putting it
+## back on the HUD would put the defect back in the game.
 const MISSION_TARGET := "Moon"
-const MISSION_FLYBY_ALTITUDE_KM := 100.0
-const MISSION_TIME_OF_FLIGHT_DAYS := 4.5
+const MISSION_PERIAPSIS_KM := 100.0
+const MISSION_APOAPSIS_KM := 100.0
 ## How far ahead to look for a departure. Most points in a parking orbit are a bad
 ## place to leave from, and one full revolution is enough to find a good one.
 const MISSION_SEARCH_HOURS := 2.0
@@ -972,24 +979,70 @@ func _plan_mission() -> void:
 	if simulation == null or not simulation.is_ready():
 		return
 	print("[mission] planning a transfer to %s -- this blocks for a moment" % MISSION_TARGET)
-	var plan := simulation.plan_transfer(MISSION_TARGET, MISSION_FLYBY_ALTITUDE_KM,
-		MISSION_TIME_OF_FLIGHT_DAYS, MISSION_SEARCH_HOURS)
+	var plan := simulation.plan_transfer(MISSION_TARGET, MISSION_PERIAPSIS_KM,
+		MISSION_APOAPSIS_KM, MISSION_SEARCH_HOURS)
 	if plan.is_empty() or not plan.get("valid", false):
 		push_warning("could not plan the transfer: %s" % simulation.get_last_error())
 		return
 	# The throttle is the pilot's and the plan is the computer's; both pushing at
 	# once is how a corrected trajectory stops being corrected.
 	_set_throttle(0.0)
-	print("[mission] %d burns: injection %.1f m/s in %s, insertion %.1f m/s, flyby %.1f km"
-		% [plan["burns"], plan["injection_delta_v"],
-		   _format_duration(plan["seconds_to_ignition"]), plan["insertion_delta_v"],
-		   float(plan["flyby_altitude_m"]) / 1000.0])
-	print("[mission] transfer angle %.1f deg, tof %.2f d, lambert %.1f m/s"
-		% [plan.get("transfer_angle_deg", 0.0), plan.get("time_of_flight_days", 0.0),
-		   plan.get("lambert_delta_v", 0.0)])
-	print("[mission] stage 1 %s (%d iter)   stage 2 %s"
-		% [plan.get("reach_message", "?"), plan.get("reach_iterations", 0),
-		   plan.get("shape_message", "?")])
+	print("[mission] %d burns: injection %.1f m/s in %s, insertion %.1f m/s"
+		% [plan.get("burns", 0), plan["injection_delta_v"],
+		   _format_duration(plan["seconds_to_ignition"]), plan["insertion_delta_v"]])
+	print("[mission] %s branch, tof %.2f d, transfer angle %.1f deg, total %.1f m/s of %.0f available"
+		% [plan.get("branch", "?"), plan.get("time_of_flight_days", 0.0),
+		   plan.get("transfer_angle_deg", 0.0), plan.get("total_delta_v", 0.0),
+		   plan.get("delta_v_available", 0.0)])
+	print("[mission] predicted orbit %.1f x %.1f km, e %.4f, i %.2f deg, RAAN %.1f deg"
+		% [float(plan.get("predicted_periapsis_m", 0.0)) / 1000.0,
+		   float(plan.get("predicted_apoapsis_m", 0.0)) / 1000.0,
+		   plan.get("predicted_eccentricity", 0.0),
+		   plan.get("predicted_inclination_deg", 0.0),
+		   plan.get("predicted_raan_deg", 0.0)])
+	# Section 13: the alternatives the search actually flew, each with the orbit
+	# it would have arrived in. Printed rather than hidden, because the planner
+	# does not steer towards an inclination and the spread is the evidence.
+	for alternative in simulation.get_plan_alternatives():
+		print("[mission]   alt %-28s %s  %.2f d  %.0f m/s  ->  %.0f x %.0f km, e %.4f, i %.1f deg"
+			% [alternative["label"],
+			   "ok     " if alternative["feasible"] else alternative["failure"],
+			   alternative["time_of_flight_days"], alternative["total_delta_v"],
+			   float(alternative["predicted_periapsis_m"]) / 1000.0,
+			   float(alternative["predicted_apoapsis_m"]) / 1000.0,
+			   alternative["predicted_eccentricity"],
+			   alternative["predicted_inclination_deg"]])
+
+
+func _point(mode: String) -> void:
+	## An armed mission steers the ship, and the simulation refuses the command
+	## rather than accepting it and overwriting it on the next frame. Saying so
+	## out loud is the difference between a cockpit that ignores you and one that
+	## tells you who has the controls.
+	if simulation == null:
+		return
+	if not simulation.set_pointing_mode(mode):
+		print("[attitude] %s" % simulation.get_last_error())
+
+
+func _cycle_execution_model() -> void:
+	## Which execution model the planner corrects against. A real choice, offered
+	## rather than buried:
+	##
+	##   FINITE_BURN  ideal guidance; e ~ 0.0017 over 365 epochs, plans in ~7 s
+	##   AUTOPILOT    the attitude controller is inside the corrected map, so the
+	##                pointing lag is part of the trajectory instead of being
+	##                assumed away -- better physics, and minutes per plan
+	##
+	## docs/validation/autopilot-hardening.md has the measurements behind both.
+	if simulation == null:
+		return
+	var wanted := "autopilot" if simulation.get_execution_model() == "FINITE_BURN" else "finite"
+	if simulation.set_execution_model(wanted):
+		print("[mission] planner will correct against %s%s"
+			% [simulation.get_execution_model(),
+			   "  (this makes planning take minutes, not seconds)"
+			   if wanted == "autopilot" else ""])
 
 
 func _abandon_mission() -> void:
@@ -1018,34 +1071,85 @@ func _mission_lines() -> Array:
 		lines.append("")
 
 	if simulation == null or not simulation.has_plan():
-		lines.append_array(["mission        none   (J: plan a transfer to the Moon)", ""])
+		lines.append_array(["mission        none   (J: plan a transfer to the Moon, N: %s)"
+			% simulation.get_execution_model(), ""])
 		return lines
 	var p := simulation.get_plan()
 	if p.is_empty():
 		return lines
-	var phase := "coasting"
-	if p.get("burning", false):
-		phase = "BURNING"
-	elif p.get("done", false):
-		phase = "arrived"
+
+	## Section 15: everything the computer shows BEFORE execution, and every
+	## number of it out of the core's MissionMetrics. Nothing on this panel is
+	## computed in GDScript -- the HUD renames fields and formats them, which is
+	## the whole of what the renderer is allowed to do with a trajectory.
 	var to_ignition: float = p["seconds_to_ignition"]
 	var to_insertion: float = p["seconds_to_insertion"]
 	lines.append_array([
-		"mission        %s to %s   (K: abandon)" % [phase, p["target"]],
-		"injection      %.1f m/s   %s" % [p["injection_delta_v"],
-			("in " + _format_duration(to_ignition)) if to_ignition > 0.0 else "done"],
-		"insertion      %.1f m/s   %s" % [p["insertion_delta_v"],
-			("in " + _format_duration(to_insertion)) if to_insertion > 0.0 else "done"],
-		"planned flyby  %.2f km altitude, v_inf %.1f m/s, orbit %s"
-			% [float(p["flyby_altitude_m"]) / 1000.0, p["v_infinity"],
-			   _format_duration(p["orbit_period_s"])],
-		"targeting      %s km -> %s km, then %s km in the B-plane"
-			% [_sci(float(p["reach_miss_initial_m"]) / 1000.0),
-			   _sci(float(p["reach_miss_final_m"]) / 1000.0),
-			   _sci(float(p["b_plane_miss_m"]) / 1000.0)],
-		"",
+		"mission        %s to %s   (K: abandon)" % [p.get("phase", "?"), p["target"]],
+		"departure      %s   %s branch, %.2f d of flight"
+			% [("in " + _format_duration(to_ignition)) if to_ignition > 0.0 else "past",
+			   p.get("branch", "?"), p.get("time_of_flight_days", 0.0)],
+		"arrival        %s"
+			% [("in " + _format_duration(to_insertion)) if to_insertion > 0.0 else "past"],
+		"injection      %.1f m/s over %s"
+			% [p["injection_delta_v"], _format_duration(p.get("injection_duration_s", 0.0))],
+		"midcourse      %.1f m/s   (folded into the injection, not a separate burn)"
+			% p.get("midcourse_delta_v", 0.0),
+		"capture        %.1f m/s over %s"
+			% [p["insertion_delta_v"], _format_duration(p.get("insertion_duration_s", 0.0))],
+		"total dv       %.1f m/s of %.0f available"
+			% [p.get("total_delta_v", 0.0), p.get("delta_v_available", 0.0)],
+		"predicted      %.1f x %.1f km, e %.4f, i %.2f deg, RAAN %.1f deg"
+			% [float(p.get("predicted_periapsis_m", 0.0)) / 1000.0,
+			   float(p.get("predicted_apoapsis_m", 0.0)) / 1000.0,
+			   p.get("predicted_eccentricity", 0.0),
+			   p.get("predicted_inclination_deg", 0.0),
+			   p.get("predicted_raan_deg", 0.0)],
+		"propellant     %.2f kg required, %.2f kg left after"
+			% [p.get("propellant_required_kg", 0.0), p.get("propellant_remaining_kg", 0.0)],
+		"autopilot      lag %.2f deg mean / %.2f deg peak, RCS %.1f g, duty %.3f"
+			% [p.get("pointing_error_mean_deg", 0.0), p.get("pointing_error_peak_deg", 0.0),
+			   float(p.get("rcs_propellant_kg", 0.0)) * 1000.0,
+			   p.get("rcs_duty_cycle", 0.0)],
 	])
+
+	## Section 17: predicted against actual, once the orbit has settled. This is
+	## the line that says whether the simulator predicts its own physics, and it
+	## only exists after the fact -- which is why it is below the plan and not
+	## inside it.
+	var outcome := simulation.get_mission_outcome()
+	if not outcome.is_empty():
+		lines.append("")
+		lines.append("               %14s %14s %14s" % ["predicted", "actual", "difference"])
+		lines.append_array([
+			_outcome_line("periapsis km", outcome.get("periapsis_m", {}), 1.0e-3),
+			_outcome_line("apoapsis km", outcome.get("apoapsis_m", {}), 1.0e-3),
+			_outcome_line("eccentricity", outcome.get("eccentricity", {}), 1.0),
+			_outcome_line("inclination", outcome.get("inclination_deg", {}), 1.0),
+			_outcome_line("propellant kg", outcome.get("propellant_kg", {}), 1.0),
+			_outcome_line("capture dv", outcome.get("capture_delta_v", {}), 1.0),
+		])
+		# Arrival as a DIFFERENCE only. The absolute epochs are 8.2e8 s since
+		# J2000 and printing them in a 14-column field would show nine digits of
+		# agreement and hide the number anybody wants.
+		var arrival: Dictionary = outcome.get("arrival_tdb_s", {})
+		if not arrival.is_empty() and arrival.get("recorded", false):
+			lines.append("  %-12s %14s %14s %14.1f" % ["arrival s", "-", "-",
+				float(arrival["difference"])])
+		if outcome.get("note", "") != "":
+			lines.append("  note: %s" % outcome["note"])
+	lines.append("")
 	return lines
+
+
+func _outcome_line(label: String, row: Dictionary, scale: float) -> String:
+	## A row that was never recorded prints as such rather than as three zeroes.
+	## A zero difference is a claim; "not recorded" is the truth when the flight
+	## never went through the phase that would have measured it.
+	if row.is_empty() or not row.get("recorded", false):
+		return "  %-12s %14s" % [label, "not recorded"]
+	return "  %-12s %14.4f %14.4f %14.4f" % [label, float(row["predicted"]) * scale,
+		float(row["actual"]) * scale, float(row["difference"]) * scale]
 
 
 func _sky_lines() -> Array:
@@ -1277,7 +1381,7 @@ func _hud_lines(compact: bool) -> Array:
 		"(I aberration   O Doppler   U beaming   L retarded-time)",
 		"(WASD / right-drag: orbit   +Shift: look around   [ ] wheel: zoom)",
 		"(V: ship/prograde/retrograde frame   H: recentre)",
-		"(J: plan a lunar transfer   K: abandon it)",
+		"(J: plan a lunar transfer   K: abandon it   N: finite/autopilot)",
 		"(TAB: compact HUD / off)",
 	])
 	return lines
@@ -1363,13 +1467,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_warn_if_camera_is_inside_a_body()
 		KEY_R:
 			simulation.start_circular_orbit(ALTITUDE_M, INCLINATION_DEG)
-		KEY_1: simulation.set_pointing_mode("prograde")
-		KEY_2: simulation.set_pointing_mode("retrograde")
-		KEY_3: simulation.set_pointing_mode("normal")
-		KEY_4: simulation.set_pointing_mode("anti_normal")
-		KEY_5: simulation.set_pointing_mode("radial_out")
-		KEY_6: simulation.set_pointing_mode("radial_in")
-		KEY_0: simulation.set_pointing_mode("")
+		KEY_1: _point("prograde")
+		KEY_2: _point("retrograde")
+		KEY_3: _point("normal")
+		KEY_4: _point("anti_normal")
+		KEY_5: _point("radial_out")
+		KEY_6: _point("radial_in")
+		KEY_0: _point("")
 		KEY_E:
 			exposure_index = mini(exposure_index + 1, EXPOSURE_LEVELS.size() - 1)
 			sky.set_half_saturation(EXPOSURE_LEVELS[exposure_index])
@@ -1403,6 +1507,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_H: _recentre_camera()
 		KEY_J: _plan_mission()
 		KEY_K: _abandon_mission()
+		KEY_N: _cycle_execution_model()
 		KEY_TAB:
 			hud_mode = (hud_mode + 1) % HUD_MODES.size()
 			_hud_last_shape = Vector2i.ZERO

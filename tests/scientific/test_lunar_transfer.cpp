@@ -167,17 +167,42 @@ TEST(the_cost_function_is_monotone_in_every_argument) {
     // Section 8 asks for an explicit cost, and the one property it must have is
     // that making any one term worse cannot make the total better -- otherwise
     // the search could prefer a trajectory that is worse in every respect.
-    const navigation::TransferCost cost{};
-    const double base = cost.evaluate(3100.0, 820.0, 100.0, 50.0);
-    CHECK(cost.evaluate(3200.0, 820.0, 100.0, 50.0) > base);
-    CHECK(cost.evaluate(3100.0, 900.0, 100.0, 50.0) > base);
-    CHECK(cost.evaluate(3100.0, 820.0, 200.0, 50.0) > base);
-    CHECK(cost.evaluate(3100.0, 820.0, 100.0, 90.0) > base);
+    navigation::TransferCost cost{};
+    // The terms Milestone 6.2 section 14 added are weighted zero by default, so
+    // turn them on for this test: a term that is priced at zero is trivially
+    // monotone, and checking it that way would prove nothing about the day
+    // somebody prices it.
+    cost.time_of_flight = 10.0;
+    cost.inclination_error = 100.0;
+
+    const navigation::TransferCostTerms nominal{3100.0, 820.0, 100.0, 50.0, 0.0, 4.5, 0.1};
+    const double base = cost.evaluate(nominal);
+
+    const auto worse = [&](auto&& mutate) {
+        auto terms = nominal;
+        mutate(terms);
+        return cost.evaluate(terms);
+    };
+    CHECK(worse([](auto& t) { t.departure_delta_v = 3200.0; }) > base);
+    CHECK(worse([](auto& t) { t.insertion_delta_v = 900.0; }) > base);
+    CHECK(worse([](auto& t) { t.periapsis_error_m = 200.0; }) > base);
+    CHECK(worse([](auto& t) { t.correction_delta_v = 90.0; }) > base);
+    CHECK(worse([](auto& t) { t.conic_deficit_m = 1000.0; }) > base);
+    CHECK(worse([](auto& t) { t.time_of_flight_days = 5.5; }) > base);
+    CHECK(worse([](auto& t) { t.inclination_error_rad = 0.2; }) > base);
 
     // The periapsis error is SIGNED in the record and its cost is not: missing
-    // high and missing low are equally wrong.
-    CHECK_NEAR_ABS(cost.evaluate(3100.0, 820.0, -100.0, 50.0), base, 0.0,
+    // high and missing low are equally wrong.  Same for the inclination error.
+    CHECK_NEAR_ABS(worse([](auto& t) { t.periapsis_error_m = -100.0; }), base, 0.0,
                    "the cost of a periapsis error may not depend on its sign");
+    CHECK_NEAR_ABS(worse([](auto& t) { t.inclination_error_rad = -0.1; }), base, 0.0,
+                   "nor may the cost of an inclination error");
+
+    // The deficit is a ONE-SIDED penalty: a departure conic that clears the
+    // floor by a kilometre is not cheaper than one that clears it exactly.
+    CHECK_NEAR_ABS(worse([](auto& t) { t.conic_deficit_m = -1000.0; }), base, 0.0,
+                   "a negative deficit means the floor was cleared, and clearing it by more "
+                   "buys nothing");
 }
 
 TEST(the_csv_row_matches_its_own_header) {

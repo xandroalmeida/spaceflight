@@ -135,6 +135,75 @@ OrbitalElements elements_from_state(const coordinates::StateVector& sv, double g
     return el;
 }
 
+coordinates::StateVector state_from_elements(const OrbitalElements& el, double gm) {
+    if (gm <= 0.0) {
+        throw std::invalid_argument("state_from_elements: gm must be > 0");
+    }
+    const double e = el.eccentricity;
+    if (!(e >= 0.0) || !std::isfinite(e)) {
+        throw std::invalid_argument("state_from_elements: eccentricity must be finite and >= 0");
+    }
+
+    // The semi-latus rectum is the element the conic equation is actually
+    // written in, and it is finite for every conic including the parabola --
+    // which is why it, and not the semi-major axis, is what gets reconstructed.
+    const double a = el.semi_major_axis;
+    double p = 0.0;
+    if (std::abs(e - 1.0) < kEccentricityTolerance) {
+        // Parabolic: a is infinite and p has to come from somewhere else.  The
+        // periapsis radius is the only element that still means anything.
+        p = 2.0 * el.periapsis_radius;
+    } else {
+        if (!std::isfinite(a) || a == 0.0) {
+            throw std::invalid_argument(
+                "state_from_elements: a non-parabolic orbit needs a finite, non-zero "
+                "semi-major axis");
+        }
+        p = a * (1.0 - e * e);
+    }
+    if (!(p > 0.0)) {
+        throw std::invalid_argument(
+            "state_from_elements: the elements describe no conic (semi-latus rectum <= 0); "
+            "a < 0 with e < 1, or a > 0 with e > 1, is not an orbit");
+    }
+
+    const double nu = el.true_anomaly.radians();
+    const double denominator = 1.0 + e * std::cos(nu);
+    if (!(denominator > 0.0)) {
+        throw std::invalid_argument(
+            "state_from_elements: this true anomaly is past the asymptote of this hyperbola");
+    }
+    const double r = p / denominator;
+
+    // Perifocal frame: x towards periapsis, y along the motion at periapsis.
+    const double mu_over_h = std::sqrt(gm / p);
+    const Vec3 r_pqw{r * std::cos(nu), r * std::sin(nu), 0.0};
+    const Vec3 v_pqw{-mu_over_h * std::sin(nu), mu_over_h * (e + std::cos(nu)), 0.0};
+
+    // 3-1-3 rotation, RAAN then inclination then argument of periapsis, applied
+    // in the order that takes perifocal to inertial.
+    const double cos_raan = std::cos(el.raan.radians());
+    const double sin_raan = std::sin(el.raan.radians());
+    const double cos_i = std::cos(el.inclination.radians());
+    const double sin_i = std::sin(el.inclination.radians());
+    const double cos_argp = std::cos(el.argument_of_periapsis.radians());
+    const double sin_argp = std::sin(el.argument_of_periapsis.radians());
+
+    const auto rotate = [&](const Vec3& pqw) {
+        return Vec3{
+            pqw.x * (cos_raan * cos_argp - sin_raan * sin_argp * cos_i) -
+                pqw.y * (cos_raan * sin_argp + sin_raan * cos_argp * cos_i),
+            pqw.x * (sin_raan * cos_argp + cos_raan * sin_argp * cos_i) -
+                pqw.y * (sin_raan * sin_argp - cos_raan * cos_argp * cos_i),
+            pqw.x * (sin_argp * sin_i) + pqw.y * (cos_argp * sin_i)};
+    };
+
+    coordinates::StateVector state{};
+    state.position = rotate(r_pqw);
+    state.velocity = rotate(v_pqw);
+    return state;
+}
+
 double circular_speed(double gm, double radius) {
     if (gm <= 0.0 || radius <= 0.0) {
         throw std::invalid_argument("circular_speed: gm and radius must be > 0");

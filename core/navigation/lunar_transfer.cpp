@@ -95,12 +95,14 @@ TransferFailure TargetOrbit::check(double periapsis_altitude, double apoapsis_al
     return TransferFailure::None;
 }
 
-double TransferCost::evaluate(double departure_dv, double insertion_dv, double periapsis_error_m,
-                              double correction_dv, double conic_deficit_m) const {
-    return departure_delta_v * departure_dv + insertion_delta_v * insertion_dv +
-           periapsis_error * std::abs(periapsis_error_m) +
-           correction_magnitude * std::abs(correction_dv) +
-           departure_conic_deficit * std::max(0.0, conic_deficit_m);
+double TransferCost::evaluate(const TransferCostTerms& terms) const {
+    return departure_delta_v * terms.departure_delta_v +
+           insertion_delta_v * terms.insertion_delta_v +
+           periapsis_error * std::abs(terms.periapsis_error_m) +
+           correction_magnitude * std::abs(terms.correction_delta_v) +
+           departure_conic_deficit * std::max(0.0, terms.conic_deficit_m) +
+           time_of_flight * terms.time_of_flight_days +
+           inclination_error * std::abs(terms.inclination_error_rad);
 }
 
 namespace {
@@ -140,6 +142,14 @@ struct FlightResult {
     double capture_duration{0.0};
     double pointing_error_mean{0.0};   // [rad]; AUTOPILOT only
     double pointing_error_peak{0.0};   // [rad]; AUTOPILOT only
+    double rcs_propellant{0.0};        // [kg];  AUTOPILOT only, inside the burn
+    double rcs_duty_cycle{0.0};        // [0,1]
+    double torque_saturation{0.0};     // [0,1] share of the burn against the stop
+    double settling_s{0.0};            // [s]   from the guidance switch
+    double angular_rate_peak{0.0};     // [rad/s]
+    // The plan the engine actually flew.  Empty under Impulsive, where no engine
+    // runs and there is nothing to hand a ship.
+    ManeuverPlan plan{};
     bool ok{true};
 };
 
@@ -319,6 +329,11 @@ private:
         const auto rcs = attitude::RcsSystem::couples(config_.autopilot_rcs_arm, thruster);
         attitude::PointingController controller{*inputs_.provider, inertia, ssb_,
                                                 config_.autopilot_gains};
+        // Section 11: the controller does not get to assume infinite torque.  The
+        // limit is read off the layout -- twelve thrusters, the arm, the thrust --
+        // rather than declared, so raising omega_n cannot quietly buy authority
+        // the ship does not have.
+        controller.set_actuator_limits(attitude::limits_of(rcs));
         const attitude::RcsForce rcs_force{rcs, controller};
 
         ManeuverExecutor executor{*inputs_.provider, *inputs_.craft, plan, ssb_};
@@ -374,9 +389,69 @@ private:
             double error_sum = 0.0;
             double error_weight = 0.0;
             double error_peak = 0.0;
+            // Section 10's other columns.  A gain is not allowed to be chosen on
+            // eccentricity alone, so the cost of achieving it is measured in the
+            // same pass: what the thrusters burnt, how open they were, how much of
+            // the time the demand was against the stop, and how fast the hull was
+            // actually turning.
+            double rcs_propellant = 0.0;
+            double duty_sum = 0.0;
+            double duty_weight = 0.0;
+            double saturated_time = 0.0;
+            double rate_peak = 0.0;
+            const double settling_threshold = config_.settling_threshold.radians();
+            double last_unsettled = mission.time.seconds_since_j2000();
+            const double leg_two_start = last_unsettled;
+            const auto thruster_count = static_cast<double>(std::max<std::size_t>(rcs.size(), 1));
+
+            // ONLY on a flight that has a capture burn in it, and that is a
+            // measurement rather than tidiness.
+            //
+            // Every probe flight the two correctors make goes through this same
+            // function -- hundreds of them per epoch -- and the observer below
+            // asks the ephemeris for the target's state twice per accepted step,
+            // once for the pointing error and once for the torque demand.  Left
+            // unguarded it multiplied the cost of an AUTOPILOT epoch by about an
+            // order of magnitude while measuring probe trajectories nobody flies.
+            //
+            // Nothing is lost: every quantity here is about the capture burn or
+            // the slew that precedes it, and neither exists on a probe.
             if (insertion != nullptr) {
                 propagator.set_step_observer([&](const propagation::StepInfo& step) {
-                    if (!step.accepted || !insertion->active_at(step.time)) {
+                    if (!step.accepted) {
+                        return;
+                    }
+                    rate_peak = std::max(rate_peak, step.state.attitude.angular_velocity.norm());
+
+                    // The slew, from the instant the guidance command changed.  This
+                    // is a different question from the lag inside the burn and it is
+                    // measured over a different interval on purpose: acquisition
+                    // happens in the days of coast, tracking happens in the burn.
+                    const double error_now = controller.pointing_error(step.state, step.time);
+                    if (error_now > settling_threshold) {
+                        last_unsettled = step.time.seconds_since_j2000();
+                    }
+
+                    // What the thrusters were doing, whether or not a burn was on:
+                    // the acquisition slew costs propellant too.
+                    const Vec3 demand = controller.unsaturated_torque(step.state, step.time);
+                    if (demand.norm_squared() > 0.0) {
+                        const double factor = controller.saturation_factor(demand);
+                        if (factor < 1.0) {
+                            saturated_time += step.step_seconds;
+                        }
+                        const auto throttles = rcs.allocate(demand * factor);
+                        const auto output = rcs.evaluate(throttles);
+                        rcs_propellant += output.mass_flow * step.step_seconds;
+                        double open = 0.0;
+                        for (const double throttle : throttles) {
+                            open += throttle;
+                        }
+                        duty_sum += (open / thruster_count) * step.step_seconds;
+                    }
+                    duty_weight += step.step_seconds;
+
+                    if (insertion == nullptr || !insertion->active_at(step.time)) {
                         return;
                     }
                     const auto body = inputs_.provider->state(inputs_.target, step.time, ssb_);
@@ -415,10 +490,18 @@ private:
                 }
             }
             propagator.set_step_observer(nullptr);
-            out.pointing_error_mean = error_weight > 0.0 ? error_sum / error_weight : 0.0;
-            out.pointing_error_peak = error_peak;
+            if (insertion != nullptr) {
+                out.pointing_error_mean = error_weight > 0.0 ? error_sum / error_weight : 0.0;
+                out.pointing_error_peak = error_peak;
+                out.rcs_propellant = rcs_propellant;
+                out.rcs_duty_cycle = duty_weight > 0.0 ? duty_sum / duty_weight : 0.0;
+                out.torque_saturation = duty_weight > 0.0 ? saturated_time / duty_weight : 0.0;
+                out.settling_s = std::max(0.0, last_unsettled - leg_two_start);
+                out.angular_rate_peak = rate_peak;
+            }
         }
         out.propellant_used = candidate.state.mass - out.state.mass;
+        out.plan = plan;
         return out;
     }
 
@@ -577,9 +660,9 @@ private:
         // The proxy the candidates are SORTED by before any of them is flown.
         // Not the cost function of section 8: that one needs numbers only a
         // flight produces.  This one decides which few are worth a propagation.
-        candidate.proxy_cost =
-            config_.cost.evaluate(candidate.delta_v, candidate.insertion_estimate, 0.0, 0.0,
-                                  candidate.departure_conic_deficit);
+        candidate.proxy_cost = config_.cost.evaluate(TransferCostTerms{
+            candidate.delta_v, candidate.insertion_estimate, 0.0, 0.0,
+            candidate.departure_conic_deficit, tof.days(), 0.0});
         candidate.id = std::string{direction == trajectory::TransferDirection::Prograde
                                        ? "prograde"
                                        : "retrograde"} +
@@ -798,6 +881,7 @@ private:
                 out.capture_duration = burn.duration.seconds();
             }
         }
+        out.plan = plan;
         return out;
     }
 
@@ -1228,24 +1312,39 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
     // Two orbits past the burn, so the result is an ORBIT and not a lucky
     // instant: the elements are read after a full revolution.
     const auto t_end = capture_at + time::Duration::seconds(burn.period * 2.0);
-    propagation::Trajectory captured_arc;
+    auto captured_arc = std::make_shared<propagation::Trajectory>();
     const auto captured =
-        fly(candidate, departure_velocity, t_end, config_.keep_trajectory ? &captured_arc : nullptr,
-            true, burn, capture_at, mass_at_capture);
+        fly(candidate, departure_velocity, t_end,
+            config_.keep_trajectory ? captured_arc.get() : nullptr, true, burn, capture_at,
+            mass_at_capture);
     if (!captured.ok) {
         record.failure = classify(captured);
         record.detail = captured.message;
         return record;
+    }
+    if (config_.keep_trajectory) {
+        record.trajectory = captured_arc;
     }
 
     record.burn_start = captured.capture_ignition;
     record.burn_duration_s = captured.capture_duration;
     record.capture_pointing_error_mean_rad = captured.pointing_error_mean;
     record.capture_pointing_error_peak_rad = captured.pointing_error_peak;
+    record.capture_rcs_propellant = captured.rcs_propellant;
+    record.capture_rcs_duty_cycle = captured.rcs_duty_cycle;
+    record.capture_torque_saturation = captured.torque_saturation;
+    record.capture_settling_s = captured.settling_s;
+    record.capture_angular_rate_peak = captured.angular_rate_peak;
     record.burn_end = captured.capture_ignition +
                       time::Duration::seconds(captured.capture_duration);
     record.propellant_used = captured.propellant_used;
     record.propellant_left = captured.state.mass - inputs_.craft->dry_mass();
+    // The plan the flight flew, verbatim -- this is what the scene is armed with
+    // (section 5 of the Milestone 6.2 brief).  Under IMPULSIVE it is empty and
+    // says so, because there is no engine in that model to hand a ship.
+    record.flight_plan = captured.plan;
+    record.mass_at_departure = candidate.state.mass;
+    record.mass_at_capture = mass_at_capture;
 
     // Where the burn actually happened, which is what the Oberth question of
     // section 12 asks: the radius and speed at its MIDPOINT, not at its start.
@@ -1276,6 +1375,7 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
         std::isfinite(elements.apoapsis_radius) ? elements.apoapsis_radius - radius_target_
                                                 : std::numeric_limits<double>::infinity();
     record.post_burn_inclination_rad = elements.inclination.radians();
+    record.post_burn_raan_rad = elements.raan.radians();
 
     // Independently of the orbit test: did the burn do what a capture means?
     // epsilon > 0 before, epsilon < 0 after.  Two signs, checked, not assumed.
@@ -1299,10 +1399,10 @@ TransferRecord TransferSession::attempt(const Candidate& candidate) {
 
     record.success = true;
     record.failure = TransferFailure::None;
-    record.cost = config_.cost.evaluate(record.departure_delta_v,
-                                        record.required_capture_delta_v,
-                                        record.actual_periapsis - wanted_periapsis_,
-                                        record.correction_magnitude);
+    record.cost = config_.cost.evaluate(TransferCostTerms{
+        record.departure_delta_v, record.required_capture_delta_v,
+        record.actual_periapsis - wanted_periapsis_, record.correction_magnitude, 0.0,
+        record.time_of_flight_s / 86400.0, 0.0});
     return record;
 }
 
@@ -1321,7 +1421,22 @@ TransferRecord TransferSession::run() {
     Rejections rejections{};
     auto candidates = build_candidates(rejections);
     if (candidates.empty()) {
-        record.failure = TransferFailure::NoFeasibleTrajectory;
+        // WHICH kind of nothing.  "No feasible trajectory" is true of a ship
+        // with no propellant and of a calendar with no window, and section 21 of
+        // the Milestone 6.2 brief asks the first to be told apart from the
+        // second: a mission the ship cannot pay for has to come back as
+        // INSUFFICIENT_DEPARTURE_DV, not as a shrug.
+        //
+        // Before this the code could never produce that label at all -- it
+        // existed in the taxonomy and nothing assigned it -- so every
+        // fuel-starved scenario was reported as if the geometry were the
+        // problem.
+        const bool starved = rejections.delta_v > 0 &&
+                             rejections.delta_v >= rejections.no_lambert &&
+                             rejections.delta_v >= rejections.transfer_angle &&
+                             rejections.delta_v >= rejections.departure_conic;
+        record.failure = starved ? TransferFailure::InsufficientDepartureDeltaV
+                                 : TransferFailure::NoFeasibleTrajectory;
         std::ostringstream os;
         os << rejections.considered << " geometries considered: " << rejections.no_lambert
            << " with no Lambert solution, " << rejections.transfer_angle
@@ -1363,9 +1478,9 @@ TransferRecord TransferSession::run() {
                       : std::numeric_limits<double>::infinity();
         const double predicted_correction =
             candidate.flown_miss / std::max(config_.arrival_lever_arm, 1.0);
-        candidate.selection_score =
-            config_.cost.evaluate(candidate.delta_v, candidate.insertion_estimate, 0.0,
-                                  predicted_correction, candidate.departure_conic_deficit);
+        candidate.selection_score = config_.cost.evaluate(TransferCostTerms{
+            candidate.delta_v, candidate.insertion_estimate, 0.0, predicted_correction,
+            candidate.departure_conic_deficit, candidate.tof_s / 86400.0, 0.0});
     }
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         return a.selection_score < b.selection_score;
@@ -1400,6 +1515,9 @@ TransferRecord TransferSession::run() {
         }
         ++flown;
         auto attempt_record = attempt(candidates[i]);
+        if (config_.on_attempt) {
+            config_.on_attempt(attempt_record);
+        }
         if (attempt_record.success) {
             if (!have_best || attempt_record.cost < best.cost) {
                 best = attempt_record;
@@ -1521,7 +1639,13 @@ std::string TransferRecord::describe() const {
        << post_burn_specific_energy << " J/kg\n"
        << "orbit             : " << post_burn_periapsis_altitude / 1000.0 << " x "
        << post_burn_apoapsis_altitude / 1000.0 << " km, e = " << post_burn_eccentricity
-       << ", i = " << units::rad_to_deg(post_burn_inclination_rad) << " deg\n"
+       << ", i = " << units::rad_to_deg(post_burn_inclination_rad) << " deg, RAAN = "
+       << units::rad_to_deg(post_burn_raan_rad) << " deg\n"
+       << "autopilot         : lag mean " << units::rad_to_deg(capture_pointing_error_mean_rad)
+       << " deg, peak " << units::rad_to_deg(capture_pointing_error_peak_rad)
+       << " deg, settled in " << capture_settling_s << " s, RCS "
+       << capture_rcs_propellant << " kg at duty " << capture_rcs_duty_cycle
+       << ", saturated " << capture_torque_saturation << " of the time\n"
        << "propellant        : used " << propellant_used << " kg, left " << propellant_left
        << " kg\n"
        << "search            : " << candidates_considered << " considered, "
@@ -1559,8 +1683,11 @@ std::string TransferRecord::csv_header() {
            "burn_start_tdb_s,burn_duration_s,burn_end_tdb_s,burn_offset_s,"
            "burn_midpoint_radius_m,burn_midpoint_speed_ms,"
            "capture_pointing_error_mean_deg,capture_pointing_error_peak_deg,"
+           "capture_rcs_propellant_kg,capture_rcs_duty_cycle,capture_torque_saturation,"
+           "capture_settling_s,capture_angular_rate_peak_rad_s,"
            "energy_before_j_kg,post_burn_energy_j_kg,post_burn_ecc,"
            "post_burn_periapsis_alt_m,post_burn_apoapsis_alt_m,post_burn_inclination_deg,"
+           "post_burn_raan_deg,mass_at_departure_kg,mass_at_capture_kg,"
            "execution,result,failure_reason,detail,cost,"
            "propellant_used_kg,propellant_left_kg,"
            "candidates_considered,candidates_feasible,candidates_flown,"
@@ -1629,9 +1756,14 @@ std::string TransferRecord::csv_row() const {
        << burn_offset_from_periapsis_s << "," << burn_midpoint_radius << ","
        << burn_midpoint_speed << "," << units::rad_to_deg(capture_pointing_error_mean_rad)
        << "," << units::rad_to_deg(capture_pointing_error_peak_rad)
+       << "," << capture_rcs_propellant << "," << capture_rcs_duty_cycle << ","
+       << capture_torque_saturation << "," << capture_settling_s << ","
+       << capture_angular_rate_peak
        << "," << energy_before_burn << "," << post_burn_specific_energy
        << "," << post_burn_eccentricity << "," << post_burn_periapsis_altitude << ","
        << post_burn_apoapsis_altitude << "," << units::rad_to_deg(post_burn_inclination_rad)
+       << "," << units::rad_to_deg(post_burn_raan_rad) << "," << mass_at_departure << ","
+       << mass_at_capture
        << "," << to_string(execution) << "," << (success ? "SUCCESS" : "FAILURE") << ","
        << to_string(failure) << "," << escape(detail) << "," << cost << "," << propellant_used
        << "," << propellant_left << "," << candidates_considered << "," << candidates_feasible

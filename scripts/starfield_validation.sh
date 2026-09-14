@@ -20,16 +20,19 @@ GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
 if [[ ! -x "${GODOT}" ]]; then
     GODOT="$(command -v godot || true)"
 fi
+# 77, not 1: CTest reads it as Skipped.  A machine with no Godot has not FAILED
+# the graphics validation, it has not run it, and a suite that cannot tell those
+# apart is how an untested renderer reads as a tested one (Milestone 6.2 s. 22).
 if [[ -z "${GODOT}" || ! -x "${GODOT}" ]]; then
-    echo "Godot not found. Run scripts/fetch_godot.sh, or set GODOT_BIN." >&2
-    exit 1
+    echo "SKIP: Godot not found. Run scripts/fetch_godot.sh, or set GODOT_BIN." >&2
+    exit 77
 fi
 
 if ! ls "${PROJECT}"/bin/spaceflight.* >/dev/null 2>&1; then
-    echo "The GDExtension is not built. Run:" >&2
+    echo "SKIP: the GDExtension is not built. Run:" >&2
     echo "  cmake -S . -B build-godot -DSPACEFLIGHT_BUILD_GODOT=ON" >&2
     echo "  cmake --build build-godot --target spaceflight_gdextension -j" >&2
-    exit 1
+    exit 77
 fi
 
 # The .gdextension file is only registered after an editor scan writes

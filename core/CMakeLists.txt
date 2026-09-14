@@ -30,6 +30,8 @@ add_library(spaceflight_core STATIC
     navigation/b_plane.cpp
     navigation/lunar_transfer.cpp
     navigation/maneuver.cpp
+    navigation/mission_execution.cpp
+    navigation/mission_planner.cpp
     navigation/maneuver_executor.cpp
     navigation/mission.cpp
     navigation/targeting.cpp

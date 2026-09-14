@@ -198,6 +198,44 @@ um PD faz seguindo uma rampa. Zerar isso exige **feed-forward** da taxa do alvo
 e o teste `the_pointing_controller_slews_to_prograde_and_stops_there` verifica a
 fórmula acima em vez de exigir zero.
 
+### 7.2 O que esse atraso custou, e o que se fez com ele (Milestone 6.2)
+
+Em 6.1 o autopiloto entregava capturas lunares com `e ≈ 0,0105` contra `0,0017`
+das mesmas trajetórias sob guiagem ideal. A fórmula de 7.1 explica tudo: na
+periapse de uma órbita lunar de 100 km o retrógrado gira a `8,9·10⁻⁴ rad/s`, o
+que com `ω_n = 0,05` dá `2,04°` de erro permanente — medido `2,07°`. A componente
+**transversal** do empuxo é linear nesse ângulo (a perda de cosseno é quadrática),
+então é ela que abre a órbita.
+
+A varredura de [autopilot-hardening.md](../validation/autopilot-hardening.md)
+confirma a lei `1/ω_n` a 0,4 % sobre um fator de quatro em ganho, e a razão
+pico/média fica em 1,24 constante — que é a evidência de que não há oscilação: um
+controlador subamortecido veria essa razão crescer com o ganho.
+
+`ω_n` passou de **0,05 para 0,20 rad/s**, o menor ganho varrido que satisfaz
+`pico < 1°` e `média < 0,5°`. Isso compra a especificação com **autoridade**, não
+com estrutura: o feed-forward acima continua sendo a solução certa, e com ele o
+ganho poderia voltar a 0,05 com o mesmo apontamento e um quarto do consumo de RCS.
+
+### 7.3 Saturação (Milestone 6.2 §11)
+
+O controlador deixou de assumir torque infinito. `ActuatorLimits` recebe o torque
+alcançável da disposição de propulsores e a demanda inteira é escalada por um
+fator, fixado pelo eixo que esgota primeiro.
+
+Antes disso a demanda ainda era truncada — `RcsSystem::allocate` prende cada
+propulsor em `[0, 1]` — mas **por propulsor**, o que muda a *direção* do torque
+entregue tanto quanto o tamanho quando os eixos saturam em proporções diferentes.
+Um comando saturado passa a ser a rotação certa entregue devagar em vez da
+rotação errada entregue depressa.
+
+No caminho, um defeito: `RcsSystem::max_torque()` somava `|τ|` sobre os doze
+propulsores e reportava `4aF` onde a nave entrega `2aF` — na disposição em
+binários, quatro propulsores produzem torque ao longo de `x`, dois para `+x` e
+dois para `−x`, e abrir os quatro produz nada. Como string de diagnóstico era
+apenas errado; como limite de saturação teria deixado o controlador pedir o dobro
+do torque que existe e chamar isso de não-saturado.
+
 ## 8. Fora de escopo
 
 Sem rodas de reação, sem *control moment gyros*, sem gradiente de gravidade, sem

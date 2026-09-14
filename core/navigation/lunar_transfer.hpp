@@ -68,7 +68,9 @@
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/math/vec3.hpp"
 #include "core/navigation/b_plane.hpp"
+#include "core/navigation/maneuver.hpp"
 #include "core/navigation/targeting.hpp"
+#include "core/propagation/dense_output.hpp"
 #include "core/propagation/spacecraft_propagator.hpp"
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/time/coordinate_time.hpp"
@@ -76,6 +78,8 @@
 #include "core/trajectory/lambert.hpp"
 #include "core/units/angle.hpp"
 
+#include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -196,6 +200,20 @@ struct TargetOrbit {
 // The hard constraints are not in here.  A candidate that violates one is not
 // expensive, it is refused (section 8: "hard constraints").
 // ---------------------------------------------------------------------------
+// What a candidate is priced ON.  A struct and not seven positional doubles
+// because section 14 of the Milestone 6.2 brief asks for the cost function to be
+// EXTENSIBLE -- insertion delta-v, fuel, periapsis, inclination, orbital plane --
+// and a call with seven bare numbers in it is where the wrong one gets passed.
+struct TransferCostTerms {
+    double departure_delta_v{0.0};      // [m/s]
+    double insertion_delta_v{0.0};      // [m/s]
+    double periapsis_error_m{0.0};      // [m], signed; the weight takes |.|
+    double correction_delta_v{0.0};     // [m/s] of corrector authority
+    double conic_deficit_m{0.0};        // [m] the departure conic falls below the floor
+    double time_of_flight_days{0.0};    // [d]
+    double inclination_error_rad{0.0};  // [rad] |achieved - requested|, 0 when unrequested
+};
+
 struct TransferCost {
     double departure_delta_v{1.0};        // per m/s
     double insertion_delta_v{1.0};        // per m/s
@@ -228,17 +246,33 @@ struct TransferCost {
     // is nothing else.
     double departure_conic_deficit{0.01};
 
+    // -- the terms section 14 asks the architecture to be ready for -----------
+    //
+    // ZERO, and deliberately so.  The 365/365 campaign was qualified with a cost
+    // function that does not contain them, and turning one on changes which
+    // trajectory the planner picks -- which is a new campaign, not a tweak.  They
+    // exist so that adding the capability later is a weight and not a rewrite,
+    // and so that the shape of the eventual answer is visible now.
+    //
+    // `inclination_error` in particular: section 13 is explicit that the lunar
+    // inclinations the campaign produces (0.1 to 30.2 degrees) are NOT to be
+    // quietly corrected, because inclination is not yet part of the
+    // specification.  Reporting it is this milestone's job; steering to it is
+    // not.
+    double time_of_flight{0.0};           // per day of flight
+    double inclination_error{0.0};        // per radian of |i - requested|
+
     // The corrector's own sensitivity, priced.  A candidate that needs a large
     // correction is one whose two-body plan was a poor description of the full
     // model, and that is a property worth avoiding even when it converges.
-    [[nodiscard]] double evaluate(double departure_dv, double insertion_dv,
-                                  double periapsis_error_m, double correction_dv,
-                                  double conic_deficit_m = 0.0) const;
+    [[nodiscard]] double evaluate(const TransferCostTerms& terms) const;
 };
 
 // ---------------------------------------------------------------------------
 // The search (sections 6 and 7).
 // ---------------------------------------------------------------------------
+struct TransferRecord;
+
 struct LunarTransferConfig {
     // -- when to leave -----------------------------------------------------
     //
@@ -413,9 +447,24 @@ struct LunarTransferConfig {
     // centred on it; the sweep is what the campaign tool varies.
     double capture_burn_offset_seconds{0.0};
 
+    // Where the pointing error has to fall below for the slew to count as
+    // finished, for TransferRecord::capture_settling_s.  Not a success criterion
+    // -- the specification of docs/validation/autopilot-hardening.md is -- just
+    // the line the stopwatch is read against.
+    units::Angle settling_threshold{units::Angle::degrees(0.5)};
+
     // Recorded arcs cost nothing in force evaluations (ADR-0006) but they do
     // cost memory, and a 365-epoch campaign does not need them.
     bool keep_trajectory{false};
+
+    // Called once per candidate that is actually flown, with that candidate's
+    // own record, before the best of them is chosen.
+    //
+    // This is how section 13's "report the alternatives" is answered without a
+    // second search: the attempts already happen, and each one already knows the
+    // inclination and RAAN it would arrive in.  Throwing them away and then
+    // recomputing them for a list would be inventing work.
+    std::function<void(const TransferRecord&)> on_attempt{};
 };
 
 // ---------------------------------------------------------------------------
@@ -500,12 +549,43 @@ struct TransferRecord {
     double capture_pointing_error_mean_rad{0.0};
     double capture_pointing_error_peak_rad{0.0};
 
+    // AUTOPILOT only, and everything section 10 warns about optimising away.
+    //
+    // A gain chosen on eccentricity alone will happily buy it with propellant and
+    // with an actuator that is hard against its stop for the whole burn, and
+    // neither shows up in an orbit element.  These are the other columns of the
+    // sweep in docs/validation/autopilot-hardening.md.
+    double capture_rcs_propellant{0.0};      // [kg] burnt by the thrusters in the burn
+    double capture_rcs_duty_cycle{0.0};      // [0,1] mean throttle over all thrusters
+    double capture_torque_saturation{0.0};   // [0,1] fraction of the burn hard against the stop
+    // The LAST instant the pointing error was above `settling_threshold`,
+    // measured from the guidance command changing at the injection cutoff --
+    // where the nose is still on the injection direction and the target has just
+    // become retrograde about the destination.
+    //
+    // For a controller that settles this is the settling time.  For one that
+    // does not it comes out equal to the whole coast, and that reading is the
+    // useful one rather than a defect in the metric: at omega_n = 0.05 the
+    // steady-state lag is 1.65 degrees, so a 0.5 degree threshold is never
+    // crossed downwards and "settling time = 402 610 s" is the honest way to say
+    // the controller never got inside specification at all.  A metric that
+    // returned zero there, or gave up and reported nothing, would hide it.
+    double capture_settling_s{0.0};          // [s]
+    // Peak |omega| during the slew and the burn, which is what a crewed hull
+    // would feel (section 10).
+    double capture_angular_rate_peak{0.0};   // [rad/s]
+
     double energy_before_burn{0.0};       // [J/kg] specific, about the target
     double post_burn_specific_energy{0.0};
     double post_burn_eccentricity{0.0};
     double post_burn_periapsis_altitude{0.0};
     double post_burn_apoapsis_altitude{0.0};
     double post_burn_inclination_rad{0.0};
+    // Section 13: reported, never silently corrected.  The campaign's final
+    // orbits run from 0.1 to 30.2 degrees of inclination and that is not a bug --
+    // inclination is not part of the specification yet.  What WOULD be a bug is
+    // the planner knowing the number and not saying it.
+    double post_burn_raan_rad{0.0};
 
     // -- outcome -----------------------------------------------------------
     bool success{false};
@@ -550,6 +630,26 @@ struct TransferRecord {
     double cost{0.0};
     double propellant_used{0.0};
     double propellant_left{0.0};
+
+    // -- what the scene has to fly (Milestone 6.2 sections 1 and 5) ---------
+    //
+    // The plan the winning flight ACTUALLY flew, not a reconstruction of it.
+    // Before this existed the only way for the game to fly the validated
+    // trajectory was to re-derive the burns from the record, and a
+    // re-derivation is a second implementation of exactly the kind this
+    // milestone exists to delete.
+    //
+    // Empty for ExecutionModel::Impulsive, where there is no engine and
+    // therefore no maneuver: an impulsive result is a reference trajectory, not
+    // something a ship can be armed with.
+    ManeuverPlan flight_plan{};
+    double mass_at_departure{0.0};   // [kg] total, at the injection's ignition
+    double mass_at_capture{0.0};     // [kg] total, at the capture burn's ignition
+
+    // The flown arc, when LunarTransferConfig::keep_trajectory asked for it.
+    // shared_ptr because a TransferRecord is copied freely (the campaign holds a
+    // vector of them) and a dense arc over five days is megabytes.
+    std::shared_ptr<const propagation::Trajectory> trajectory{};
 
     // -- the search that produced it ---------------------------------------
     int candidates_considered{0};

@@ -20,6 +20,8 @@
 #include "core/navigation/b_plane.hpp"
 #include "core/navigation/maneuver.hpp"
 #include "core/navigation/maneuver_executor.hpp"
+#include "core/navigation/mission_execution.hpp"
+#include "core/navigation/mission_planner.hpp"
 #include "core/propagation/dormand_prince_54.hpp"
 #include "core/propulsion/main_engine_force.hpp"
 #include "core/render/render_transform.hpp"
@@ -28,7 +30,9 @@
 #include "core/simulation/snapshot.hpp"
 
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/quaternion.hpp>
@@ -143,16 +147,46 @@ public:
     godot::String get_engine_mode() const;
 
     // --- missions ----------------------------------------------------------
-    // Plans a transfer to a body and arms it: a finite injection burn now-ish,
-    // and an insertion burn at the flyby periapsis.
+    // Plans a transfer to a body and arms it.
+    //
+    // Every number in the answer comes from core/navigation/mission_planner.hpp:
+    // the same entry point, with the same request type, that the 365-epoch
+    // campaign goes through (Milestone 6.2 sections 1-5). Nothing in the
+    // GDExtension decides anything about a trajectory any more.
+    //
+    // NOTE what is NOT an argument: the time of flight. It is what the search
+    // decides, and fixing it at 4.5 days is precisely the defect that made
+    // Milestone 6's campaign fail 82 % of its epochs -- with the departure point
+    // and the flight time both pinned, the transfer angle is whatever the
+    // calendar says. Offering it as a cockpit dial would put the defect back
+    // through the user interface.
     //
     // BLOCKING, and deliberately so: it searches departure opportunities and then
     // inverts the full model twice, which is tens of trajectory propagations and
     // takes of the order of a second. It is a one-off command, not something a
     // frame does. Returns a summary Dictionary; empty on failure, with the reason
     // in get_last_error().
-    godot::Dictionary plan_transfer(const godot::String& target_body, double flyby_altitude_km,
-                                    double time_of_flight_days, double search_hours);
+    godot::Dictionary plan_transfer(const godot::String& target_body,
+                                    double periapsis_altitude_km, double apoapsis_altitude_km,
+                                    double search_hours);
+
+    // Which execution model the planner corrects against: "finite" or
+    // "autopilot". The choice is a real one and it is offered rather than
+    // buried, because the two differ in both accuracy and cost:
+    //
+    //   finite      ideal guidance, the engine points where the plan says.
+    //               e ~ 0.0017 over the 365-epoch campaign, plans in ~7 s.
+    //   autopilot   the attitude controller is inside the corrected map, so the
+    //               pointing lag is part of the trajectory rather than assumed
+    //               away. Strictly the better physics, and it costs minutes per
+    //               plan -- every one of the corrector's few hundred probe
+    //               flights integrates a quaternion and twelve thrusters.
+    //
+    // "finite" by default: it is what the scene has always flown and what
+    // docs/validation/lunar-navigation-campaign-v2.csv qualifies, and a keypress
+    // that freezes the game for several minutes is not a keypress.
+    bool set_execution_model(const godot::String& model);
+    godot::String get_execution_model() const;
     // The osculating orbit about the mission target, when the ship is close
     // enough to it for that to mean anything. Empty otherwise.
     //
@@ -164,6 +198,26 @@ public:
     bool has_plan() const;
     void clear_plan();
     godot::Dictionary get_plan() const;
+
+    // The geometries the search actually flew, each with the orbit it would have
+    // arrived in (section 13). Reported so that the inclination the mission ends
+    // up with is a visible consequence of a choice rather than a surprise; the
+    // planner does not steer towards an inclination and this is how it says so.
+    godot::Array get_plan_alternatives() const;
+
+    // Section 16: which of the mission states the flight is in. A STRING, and
+    // the UI's only job is to print it -- the classification is
+    // core/navigation/mission_execution.hpp's, because it depends on where the
+    // sphere of influence is and where the burns sit.
+    godot::String get_mission_phase() const;
+
+    // Section 17: predicted against actual, for the quantities that say whether
+    // the simulator predicts its own physics. Empty until the orbit has settled.
+    godot::Dictionary get_mission_outcome() const;
+
+    // The planned arc, in scene units, for drawing. One entry per sample,
+    // already through RenderTransform.
+    godot::PackedVector3Array get_planned_trajectory() const;
 
     // Everything else, as a Dictionary: the cockpit reads this once per frame
     // instead of making twenty calls.
@@ -200,6 +254,19 @@ private:
     // Planning replaces the plan's CONTENTS instead.
     std::unique_ptr<sf::navigation::ManeuverPlan> plan_;
     std::unique_ptr<sf::navigation::ManeuverExecutor> executor_;
+
+    // The last plan, whole. Kept rather than flattened into the Dictionary
+    // because sections 15 and 17 want it more than once and from more than one
+    // angle -- the cockpit readout, the alternatives list, the predicted half of
+    // the predicted-versus-actual table -- and re-deriving any of those from a
+    // Dictionary would be the same mistake in a smaller costume.
+    sf::navigation::MissionPlanResult planned_{};
+    sf::navigation::ExecutionModel execution_{sf::navigation::ExecutionModel::FiniteBurn};
+    sf::navigation::MissionExecution mission_{};
+
+    // The last value returned by plan_transfer, kept only so that a caller that
+    // held on to it sees the same thing get_plan() would build. Never a second
+    // source of truth: it is assigned FROM get_plan() and nowhere else.
     godot::Dictionary plan_summary_;
 
     sf::propagation::PropagationState state_{};

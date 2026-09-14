@@ -329,6 +329,44 @@ de um passo de quantização do buffer de profundidade de 24 bits.
 
 Relatório: [`docs/validation/milestone-6-1-report.md`](docs/validation/milestone-6-1-report.md).
 
+## Milestone 6.2 — um planejador, não dois
+
+Os 365/365 acima descreviam `core/navigation/lunar_transfer.hpp`. O jogo, quando
+o piloto apertava **J**, executava outra coisa: 532 linhas de astrodinâmica
+dentro do GDExtension, com a sua própria busca de partida, a sua própria grade de
+tempo de voo e o seu próprio corretor de plano B — e **sem** a triagem da cônica
+de partida, que é o mecanismo por trás de 46 das 59 falhas do Milestone 6. A
+campanha certificava software que ninguém executava.
+
+As 469 linhas foram **apagadas**. Campanha e jogo entram pela mesma porta,
+`sf::navigation::plan_lunar_transfer`, e a campanha refeita por esse caminho dá
+**365/365 bit a bit idênticos** aos anteriores.
+
+```bash
+scripts/lunar_campaign.sh 365 8                     # o caminho público
+scripts/execution_campaign.sh 30 8                  # planner + autopiloto + queima finita
+./build/bin/lunar-campaign tests/scenarios/lunar-intercept.json --autopilot-sweep
+ctest --test-dir build -R planner_equivalence       # a ponte não pode divergir de novo
+```
+
+**O autopiloto** entregava `e ≈ 0,0105` contra `0,0017` das queimas finitas. Não
+era ruído: é o erro de regime de um PD seguindo uma rampa, `θ = 2ζω/ω_n`, que
+prevê o pico medido com 1,4 % — na periapse de uma órbita lunar de 100 km o
+retrógrado gira a 8,886·10⁻⁴ rad/s e a 0,05 rad/s de banda isso são 2,036°
+permanentes, contra 2,064° medidos. A
+varredura confirma a lei `1/ω_n` a 0,4 % sobre um fator de quatro em ganho, e
+`ω_n` passou para 0,20 rad/s — o menor que satisfaz `pico < 1°` e `média < 0,5°`.
+
+E os testes deixaram de fingir que cobrem gráficos:
+
+```bash
+cmake --build build --target ctest-headless    # aritmética, roda em qualquer lugar
+cmake --build build --target gpu-validation    # precisa de framebuffer real
+```
+
+Relatório: [`docs/validation/milestone-6-2-report.md`](docs/validation/milestone-6-2-report.md).
+Arquitetura: [`docs/architecture/navigation-integration.md`](docs/architecture/navigation-integration.md).
+
 ## Próximo
 
 O arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica atual joga
@@ -342,3 +380,16 @@ Na imagem, o que ficou de fora está listado em
 aberração ainda é rígida por corpo (o disco de um planeta não se distorce ao
 atravessar o mapa), a luz anda em linha reta mesmo perto do Sol, e as estrelas
 são corpos negros sem linhas espectrais.
+
+No controle, o atraso de rastreio do apontamento foi **comprado com autoridade**,
+não removido: `ω_n` subiu de 0,05 para 0,20 rad/s. O *feed-forward* da taxa do
+alvo — cuja derivada a lei de guiagem já conhece — levaria o mesmo atraso a zero
+sem gastar banda nenhuma, e com ele o ganho poderia voltar a 0,05 com um quarto
+do consumo de RCS. Está nomeado em
+[`docs/physics/attitude.md`](docs/physics/attitude.md) §7 desde o Milestone 3.
+
+E a inércia do casco (1000 kg) ainda não é a massa da nave (20 000 kg): o mesmo
+objeto com duas massas. Está registrado em
+[`docs/validation/autopilot-hardening.md`](docs/validation/autopilot-hardening.md)
+§6 em vez de silenciosamente consertado, porque consertá-lo multiplica a inércia
+por vinte e refaz todos os números daquela página.

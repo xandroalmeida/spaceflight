@@ -25,11 +25,37 @@ RcsSystem::RcsSystem(std::vector<RcsThruster> thrusters) : thrusters_(std::move(
             throw std::invalid_argument("RcsSystem: thruster \"" + thruster.name +
                                         "\" has no direction");
         }
-        const Vec3 torque = thruster.torque_at(1.0);
-        max_torque_.x += std::abs(torque.x);
-        max_torque_.y += std::abs(torque.y);
-        max_torque_.z += std::abs(torque.z);
     }
+    // Achievable about each axis: only the thrusters that push the RIGHT way
+    // count.  See the note in the header on what summing absolute values gave.
+    max_torque_ = Vec3{max_torque_about(Vec3::unit_x()), max_torque_about(Vec3::unit_y()),
+                       max_torque_about(Vec3::unit_z())};
+}
+
+double RcsSystem::max_torque_about(const Vec3& axis) const {
+    const double norm = axis.norm();
+    if (!(norm > 0.0)) {
+        return 0.0;
+    }
+    const Vec3 unit = axis / norm;
+    double total = 0.0;
+    for (const auto& thruster : thrusters_) {
+        total += std::max(0.0, dot(thruster.torque_at(1.0), unit));
+    }
+    return total;
+}
+
+double RcsSystem::max_angular_acceleration(const InertiaTensor& inertia, const Vec3& axis) const {
+    const double norm = axis.norm();
+    if (!(norm > 0.0)) {
+        return 0.0;
+    }
+    const Vec3 unit = axis / norm;
+    const double torque = max_torque_about(unit);
+    // The component of I^-1 tau along the axis: a torque about a non-principal
+    // axis produces angular acceleration that is not parallel to it, and only the
+    // parallel part turns the ship the way it was asked to.
+    return dot(inertia.angular_acceleration(unit * torque), unit);
 }
 
 RcsSystem RcsSystem::couples(double arm_metres, const propulsion::EngineSpec& engine) {

@@ -380,7 +380,16 @@ TEST(the_pointing_controller_slews_to_prograde_and_stops_there) {
     const propulsion::EngineSpec thruster{"rcs", 0.02, 3.0e-5, 1.0};
     const auto rcs = attitude::RcsSystem::couples(2.0, thruster);
 
-    attitude::PointingController controller{provider, inertia, ssb};
+    // The gains are SET here rather than defaulted, and the reason is that this
+    // test is about the tracking-lag LAW and not about whatever bandwidth the
+    // ship currently flies.  It used to rely on the default being 0.05, so
+    // qualifying a different bandwidth in Milestone 6.2 broke a test that had no
+    // opinion about the bandwidth at all -- which is the tell that the dependency
+    // was accidental.
+    attitude::PointingGains gains{};
+    gains.natural_frequency = 0.05;
+    gains.damping_ratio = 1.0;
+    attitude::PointingController controller{provider, inertia, ssb, gains};
     attitude::PointingCommand command{};
     command.mode = navigation::GuidanceMode::Prograde;
     command.reference = earth;
@@ -445,9 +454,8 @@ TEST(the_pointing_controller_slews_to_prograde_and_stops_there) {
     //     theta_lag = 2 zeta n / omega_n
     //
     const double orbital_rate = std::sqrt(kGm / (radius * radius * radius));
-    const double damping_ratio = 1.0;
-    const double natural_frequency = 0.05;
-    const double predicted_lag = 2.0 * damping_ratio * orbital_rate / natural_frequency;
+    const double predicted_lag =
+        2.0 * gains.damping_ratio * orbital_rate / gains.natural_frequency;
 
     std::ostringstream lag;
     lag << "predicted tracking lag 2 zeta n / omega_n = " << units::rad_to_deg(predicted_lag)

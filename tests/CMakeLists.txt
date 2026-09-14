@@ -10,6 +10,14 @@ add_library(test_support STATIC
 target_include_directories(test_support PUBLIC "${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_support PUBLIC spaceflight::core spaceflight::warnings)
 
+# A handful of invariants are about the SHAPE of the source rather than about a
+# number -- "the GDExtension does not solve orbits" is the one this milestone
+# added (tests/support/source_fixture.hpp).  Those tests read the repository, and
+# a test's working directory is wherever ctest was invoked from, so the root is
+# compiled in.
+target_compile_definitions(test_support PUBLIC
+    SPACEFLIGHT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # Tests that need kernels exit 77 when they cannot find them; CTest then reports
 # them as Skipped instead of quietly passing.
 function(spaceflight_add_test CATEGORY NAME)
@@ -53,9 +61,81 @@ spaceflight_add_test(scientific relativistic_gravity)
 spaceflight_add_test(scientific spin_transport)
 spaceflight_add_test(scientific b_plane)
 spaceflight_add_test(scientific lunar_transfer)
+
+# The golden mission flies the whole thing under the AUTOPILOT model, which puts
+# the attitude controller and twelve RCS thrusters inside the map the two
+# differential correctors invert.  That costs minutes where the same trajectory
+# under ideal guidance costs seconds, and it is the cost of testing what the
+# scene can actually fly rather than a cheaper thing next to it.
+spaceflight_add_test(scientific full_mission)
+set_tests_properties(scientific.full_mission PROPERTIES TIMEOUT 2400)
+
+# The equivalence test compiles the GDExtension's planner BRIDGE into itself.
+#
+# That is possible because the bridge header has no Godot in it, and it is the
+# whole point: the test exercises the code the engine actually calls rather than
+# a copy of it that happens to agree.  Nothing else in tests/ links anything from
+# godot/, and nothing else should.
+spaceflight_add_test(scientific planner_equivalence)
+target_sources(test_planner_equivalence PRIVATE
+    "${CMAKE_SOURCE_DIR}/godot/gdextension/src/mission_planner.cpp")
+# Flies the full production search twice, once per caller.
+set_tests_properties(scientific.planner_equivalence PROPERTIES TIMEOUT 600)
 spaceflight_add_test(scientific blackbody_colour)
 spaceflight_add_test(scientific terrell_rotation)
 spaceflight_add_test(scientific relativistic_sky)
 spaceflight_add_test(scientific verification_hardening)
 
 spaceflight_add_test(regression reference_states)
+
+# ---------------------------------------------------------------------------
+# Headless versus GPU (Milestone 6.2 section 22).
+#
+# Everything above runs with no display, no driver and no window, and every one
+# of those tests is about ARITHMETIC.  None of them can tell you whether anything
+# is visible, and that distinction is not academic: Milestone 6 shipped a
+# starfield of 8 786 loaded stars, none of which could be seen, through a suite
+# that was entirely green.  Two independent defects -- `render_mode unshaded`
+# discarding EMISSION on the Forward+ renderer, and a sky sphere sitting below one
+# quantisation step of a 24-bit depth buffer -- are invisible to arithmetic by
+# construction.
+#
+# So the two suites are separated and LABELLED, and the labels are the point: a
+# CI job that runs `ctest` and reports "all tests passed" must not be readable as
+# a statement about the graphics.  It is not one.
+#
+#   cmake --build build --target ctest-headless    no display needed, runs anywhere
+#   cmake --build build --target gpu-validation    needs a real framebuffer
+#
+# The GPU tests SKIP (exit 77) rather than fail when Godot, the GDExtension or a
+# display is missing, which is the same policy the kernel-dependent tests use:
+# a green suite that verified nothing is worse than a red one.
+# ---------------------------------------------------------------------------
+
+set(SPACEFLIGHT_HEADLESS_LABELS "unit|integration|scientific|regression")
+
+add_custom_target(ctest-headless
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
+            --label-regex "${SPACEFLIGHT_HEADLESS_LABELS}"
+            --output-on-failure
+    COMMENT "The headless suite: arithmetic only, no claim about anything visible"
+    USES_TERMINAL)
+
+foreach(gpu_case starfield relativistic_visual)
+    add_test(NAME "gpu.${gpu_case}"
+             COMMAND "${CMAKE_SOURCE_DIR}/scripts/gpu_validation.sh" "${gpu_case}")
+    set_tests_properties("gpu.${gpu_case}" PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "gpu"
+        # Rendering a ladder of full-sky frames and reading the framebuffer back
+        # is not a millisecond operation, and the default 1500 s is not enough on
+        # an integrated GPU.
+        TIMEOUT 1800
+        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
+endforeach()
+
+add_custom_target(gpu-validation
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
+            --label-regex "gpu" --output-on-failure
+    COMMENT "The GPU suite: needs a real framebuffer; qualified only on Apple M5 Pro / Metal"
+    USES_TERMINAL)

@@ -8,6 +8,8 @@
 
 #include <cmath>
 #include <limits>
+#include <stdexcept>
+#include <string>
 
 using sf::coordinates::StateVector;
 using sf::math::Vec3;
@@ -111,4 +113,111 @@ TEST(circular_helpers_agree_with_kepler) {
                    "a geostationary orbit has the period of one sidereal day, 86164.0905 s. "
                    "The 2e-5 relative bound (1.7 s) covers the rounding of the conventional "
                    "geostationary radius 42164 km, which is itself quoted to 5 digits");
+}
+
+// ---------------------------------------------------------------------------
+// state_from_elements: the inverse, checked as a round trip.
+//
+// A round trip is the right test for an inverse and a weak test for either half
+// on its own -- two rotations that are each wrong in opposite ways compose to
+// the identity.  So the first case pins the ABSOLUTE geometry of a case whose
+// answer is known by inspection, and the round trips then check that the general
+// rotation agrees with it.
+// ---------------------------------------------------------------------------
+
+TEST(state_from_elements_places_a_known_orbit_where_it_belongs) {
+    // Circular, equatorial, at the ascending node: the ship is on +x moving
+    // along +y.  No rotation is involved, so any error here is in the perifocal
+    // construction and nowhere else.
+    sf::trajectory::OrbitalElements el{};
+    el.semi_major_axis = 7.0e6;
+    el.eccentricity = 0.0;
+    el.inclination = sf::units::Angle::radians(0.0);
+    el.raan = sf::units::Angle::radians(0.0);
+    el.argument_of_periapsis = sf::units::Angle::radians(0.0);
+    el.true_anomaly = sf::units::Angle::radians(0.0);
+
+    const auto sv = sf::trajectory::state_from_elements(el, kEarthGm);
+    const double v = std::sqrt(kEarthGm / 7.0e6);
+
+    CHECK_NEAR_REL(sv.position.x, 7.0e6, 4.0 * kEps, "r = p/(1+e cos nu) = a exactly for e = 0");
+    CHECK_NEAR_ABS(sv.position.y, 0.0, 1.0e-9, "sin(0) is exactly 0; only the products round");
+    CHECK_NEAR_ABS(sv.position.z, 0.0, 1.0e-9, "an equatorial orbit has no z component");
+    CHECK_NEAR_ABS(sv.velocity.x, 0.0, 1.0e-9, "at periapsis the velocity is purely transverse");
+    CHECK_NEAR_REL(sv.velocity.y, v, 4.0 * kEps, "sqrt(gm/p)*(e + cos nu) = sqrt(gm/a) for e = 0");
+    CHECK_NEAR_ABS(sv.velocity.z, 0.0, 1.0e-9, "an equatorial orbit has no z velocity");
+
+    // A quarter of a turn later the ship is on +y moving along -x.
+    el.true_anomaly = sf::units::Angle::degrees(90.0);
+    const auto quarter = sf::trajectory::state_from_elements(el, kEarthGm);
+    CHECK_NEAR_ABS(quarter.position.x, 0.0, 1.0e-8, "cos(90 deg) is zero to rounding");
+    CHECK_NEAR_REL(quarter.position.y, 7.0e6, 1.0e-14, "sin(90 deg) = 1");
+    CHECK_NEAR_REL(quarter.velocity.x, -v, 1.0e-14, "-sqrt(gm/p) sin nu");
+    CHECK_NEAR_ABS(quarter.velocity.y, 0.0, 1.0e-6,
+                   "e + cos(90 deg) is zero to rounding, times a speed of 7.5 km/s");
+}
+
+TEST(elements_and_state_are_inverses) {
+    // Three orbits that between them exercise every rotation in the 3-1-3: an
+    // inclined ellipse away from every node, a retrograde one, and a hyperbola.
+    struct Case {
+        const char* name;
+        double a;
+        double e;
+        double i_deg;
+        double raan_deg;
+        double argp_deg;
+        double nu_deg;
+    };
+    const Case cases[] = {
+        {"inclined ellipse", 2.0e7, 0.3, 51.6, 137.0, 42.0, 73.0},
+        {"retrograde ellipse", 1.1e7, 0.12, 115.0, 300.0, 210.0, 250.0},
+        {"hyperbola", -3.0e7, 1.7, 28.5, 20.0, 95.0, 33.0},
+    };
+
+    for (const auto& c : cases) {
+        INFO(std::string{"  case: "} + c.name);
+        sf::trajectory::OrbitalElements el{};
+        el.semi_major_axis = c.a;
+        el.eccentricity = c.e;
+        el.inclination = sf::units::Angle::degrees(c.i_deg);
+        el.raan = sf::units::Angle::degrees(c.raan_deg);
+        el.argument_of_periapsis = sf::units::Angle::degrees(c.argp_deg);
+        el.true_anomaly = sf::units::Angle::degrees(c.nu_deg);
+
+        const auto sv = sf::trajectory::state_from_elements(el, kEarthGm);
+        const auto back = elements_from_state(sv, kEarthGm);
+
+        // 1e-12 relative: the round trip is a dozen trigonometric evaluations
+        // and two vector rotations, each losing a few units in the last place of
+        // a double, against quantities of order 1e7.  Nothing here approximates
+        // anything -- the bound is pure floating point accumulation, and it is
+        // set four orders of magnitude above the 1e-16 epsilon rather than at it
+        // because the angles go through acos, which loses half the digits near
+        // its endpoints.
+        CHECK_NEAR_REL(back.semi_major_axis, c.a, 1.0e-12, "a recovered from the energy");
+        CHECK_NEAR_REL(back.eccentricity, c.e, 1.0e-12, "|e_vec| recovered from the state");
+        CHECK_NEAR_REL(back.inclination.degrees(), c.i_deg, 1.0e-12, "acos(h_z/|h|)");
+        CHECK_NEAR_REL(back.raan.degrees(), c.raan_deg, 1.0e-12, "acos(n_x/|n|), quadrant fixed");
+        CHECK_NEAR_REL(back.argument_of_periapsis.degrees(), c.argp_deg, 1.0e-11,
+                       "acos(n.e/(|n||e|)); the extra decade covers the three-way product");
+        CHECK_NEAR_REL(back.true_anomaly.degrees(), c.nu_deg, 1.0e-11, "acos(e.r/(|e||r|))");
+    }
+}
+
+TEST(state_from_elements_refuses_a_conic_that_is_not_one) {
+    sf::trajectory::OrbitalElements el{};
+    // a > 0 with e > 1 gives a negative semi-latus rectum: no such conic.
+    el.semi_major_axis = 1.0e7;
+    el.eccentricity = 1.5;
+    CHECK_THROWS_AS(sf::trajectory::state_from_elements(el, kEarthGm), std::invalid_argument);
+
+    // Past the asymptote of a real hyperbola.
+    el.semi_major_axis = -1.0e7;
+    el.true_anomaly = sf::units::Angle::degrees(179.0);
+    CHECK_THROWS_AS(sf::trajectory::state_from_elements(el, kEarthGm), std::invalid_argument);
+
+    el.eccentricity = 0.0;
+    el.semi_major_axis = 1.0e7;
+    CHECK_THROWS_AS(sf::trajectory::state_from_elements(el, 0.0), std::invalid_argument);
 }

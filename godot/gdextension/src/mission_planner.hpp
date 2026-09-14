@@ -1,100 +1,125 @@
 #pragma once
 
-// Planning a transfer to another body, for the scene.
+// The bridge between the scene and core/navigation/mission_planner.hpp.
 //
-// No Godot in this header on purpose: it is plain core types, so the planner can
-// be read, reasoned about and (if it ever earns a test) exercised without an
-// engine. simulation_node.cpp is the only thing that turns the result into a
-// Dictionary.
+// ---------------------------------------------------------------------------
+// What this file used to be, and why it is not that any more
 //
-// See docs/physics/b-plane.md.
+// Until Milestone 6.2 this header declared a `TransferRequest` and a
+// `TransferPlan` of its own, and the .cpp beside it contained five hundred lines
+// of astrodynamics: a departure scan over a coasted parking orbit, a
+// time-of-flight sweep, a Lambert screen with its own degenerate-angle band, a
+// two-stage differential corrector, a B-plane aim point, an insertion burn, and
+// a cost rule that chose between candidates by flying them.
+//
+// Every one of those had a counterpart in core/navigation/lunar_transfer.hpp,
+// and the two were not the same code.  The counterpart is what the 365-epoch
+// campaign measured; this was what the game flew.  A validation report about
+// software the player never runs is not a validation report.
+//
+// So the astrodynamics is gone -- deleted, not moved -- and what is left is a
+// translation:
+//
+//     scene objects  ->  navigation::SimulationState + LunarTransferRequest
+//     plan_lunar_transfer(...)
+//     navigation::MissionPlanResult  ->  the caller
+//
+// There is no arithmetic here that decides anything about a trajectory.  If a
+// future change needs one, it belongs in the core, and
+// tests/scientific/test_planner_equivalence.cpp exists to notice if it does not.
+//
+// ---------------------------------------------------------------------------
+// What the scene is allowed to choose (Milestone 6.2 section 3)
+//
+// Godot supplies parameters, picks a destination, starts the planning, shows the
+// alternatives, presents the result and asks for execution.  It does not choose
+// a departure epoch, a time of flight, a Lambert branch, an aim point or a burn.
+//
+// The time of flight in particular is NOT a parameter here, and its absence is
+// the whole lesson of Milestone 6: with the departure point fixed at wherever
+// the orbit happened to be and the flight time fixed at 4.5 days, the transfer
+// angle is whatever the calendar says, and 82.5 % of the geometries that
+// produces are unflyable from a 400 km parking orbit.  The search decides the
+// flight time.  Letting the cockpit pin it would reintroduce the defect through
+// the user interface.
+//
+// No Godot types in this header on purpose: it is plain core types, so the
+// bridge can be read, reasoned about and exercised without an engine.
+// simulation_node.cpp is the only thing that turns the result into a Dictionary.
 
+#include "core/attitude/pointing_controller.hpp"
+#include "core/celestial/body_catalog.hpp"
 #include "core/celestial/body_id.hpp"
 #include "core/ephemeris/ephemeris_provider.hpp"
-#include "core/navigation/maneuver.hpp"
-#include "core/navigation/maneuver_executor.hpp"
-#include "core/propagation/dormand_prince_54.hpp"
+#include "core/navigation/mission_planner.hpp"
+#include "core/propagation/propagation_state.hpp"
+#include "core/propagation/spacecraft_propagator.hpp"
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/time/coordinate_time.hpp"
-#include "core/units/angle.hpp"
 
-#include <string>
+#include <vector>
 
 namespace spaceflight_godot {
 
-struct TransferRequest {
+// Everything the scene owns that the planner needs.  Pointers, because the
+// simulation node owns the lifetimes and this struct lives for one call.
+struct SceneTransferRequest {
     const sf::ephemeris::EphemerisProvider* provider{nullptr};
-    sf::propagation::DormandPrince54Propagator* propagator{nullptr};
+    const sf::celestial::BodyOrientationProvider* orientation{nullptr};
+    const sf::celestial::BodyCatalog* catalog{nullptr};
     const sf::spacecraft::Spacecraft* craft{nullptr};
+    std::vector<sf::celestial::BodyId> j2_bodies{};
+    sf::propagation::IntegratorConfig integrator{};
 
-    // The plan the propagator's force model already points at, and the executor
-    // that reads it. The planner writes trial burns into `plan` and flies them,
-    // so that what it corrects is the FINITE burn the scene will actually fly --
-    // not an impulse. The difference is not small: a trans-lunar injection loses
-    // about 600 m/s to gravity while the engine is running, and a plan that
-    // ignores that arrives somewhere else entirely.
-    sf::navigation::ManeuverPlan* plan{nullptr};
-    sf::navigation::ManeuverExecutor* executor{nullptr};
-
+    // The ship as the simulation holds it: absolute, in the integration frame.
+    // Converting it to a parking orbit relative to `center` is this bridge's
+    // job, and one of the very few things it computes.
     sf::propagation::PropagationState initial{};
     sf::time::CoordinateTime epoch{};
 
     sf::celestial::BodyId center{sf::celestial::bodies::earth};
     sf::celestial::BodyId target{sf::celestial::bodies::moon};
 
-    double time_of_flight_s{4.5 * 86400.0};
-    double flyby_altitude_m{100.0e3};
-    sf::units::Angle b_plane_angle{sf::units::Angle::radians(0.0)};
+    // The orbit the pilot is asking to end up in.
+    double target_periapsis_altitude_m{100.0e3};
+    double target_apoapsis_altitude_m{100.0e3};
 
-    // How far ahead to look for a departure, and how finely. Most points in a
-    // parking orbit are a bad place to leave from.
-    double search_window_s{6.0 * 3600.0};
-    int departure_samples{48};
+    // How far ahead to look for a departure.  Most points in a parking orbit are
+    // a bad place to leave from, and which ones are good is decided by where the
+    // target WILL BE rather than by anything about the orbit.
+    double search_window_s{2.0 * 3600.0};
+    int departure_samples{16};
 
-    double position_tolerance_m{1.0e4};
-    double periapsis_tolerance_m{500.0};
+    // How the burns are delivered.  Autopilot is the scene's answer -- the ship
+    // has an attitude controller and the pointing lag is real -- and it is the
+    // model docs/validation/autopilot-hardening.md qualified.
+    sf::navigation::ExecutionModel execution{sf::navigation::ExecutionModel::Autopilot};
+    sf::attitude::PointingGains pointing{};
 
-    // How many of the cheapest Lambert candidates to actually FLY before choosing.
-    int trial_count{6};
-
-    bool insert{true};
-    double insert_apoapsis_m{0.0};   // 0 = circularise
+    // The cockpit draws the planned arc, so it asks for one.
+    bool want_trajectory{true};
+    int trajectory_samples{256};
 };
 
-struct TransferPlan {
-    bool valid{false};
-    std::string message;
+// The translation, in two halves, EXPOSED.
+//
+// Not so that callers can go round the front door -- `plan_transfer` below is
+// the front door and it is one line -- but so that the translation itself can be
+// checked field by field.  A test that can only compare two flown trajectories
+// can tell you that they agree today; a test that compares the two REQUESTS can
+// tell you that the bridge is still asking the same question, which is the
+// invariant that actually has to hold.
+//
+// Splitting them also says what the bridge computes: `state_for` subtracts the
+// origin body's state, and that is the only piece of geometry in this file.
+[[nodiscard]] sf::navigation::SimulationState state_for(const SceneTransferRequest& request);
+[[nodiscard]] sf::navigation::LunarTransferRequest request_for(const SceneTransferRequest& request);
 
-    sf::time::CoordinateTime departure{};
-    sf::time::CoordinateTime arrival{};
-    sf::time::CoordinateTime insertion{};
-    double time_of_flight_s{0.0};
-
-    double lambert_delta_v{0.0};      // [m/s] the two-body plan
-    double injection_delta_v{0.0};    // [m/s] after correction
-    double insertion_delta_v{0.0};    // [m/s]
-
-    double reach_miss_initial{0.0};   // [m] stage 1
-    double reach_miss_final{0.0};     // [m]
-    double b_plane_miss{0.0};         // [m] stage 2
-    int passes{0};
-    std::string reach_message;
-    std::string shape_message;
-    int reach_iterations{0};
-    int reach_evaluations{0};
-    double transfer_angle{0.0};   // [rad]
-    double candidate_miss{0.0};   // [m] the flown miss of the chosen departure
-    int candidates_tried{0};
-    int attempts{0};
-
-    double v_infinity{0.0};           // [m/s] at the target
-    double periapsis_radius{0.0};     // [m]
-    double flyby_altitude_m{0.0};
-    double orbit_period_s{0.0};
-
-    sf::navigation::ManeuverPlan maneuvers;
-};
-
-[[nodiscard]] TransferPlan plan_transfer(const TransferRequest& request);
+// Translates, calls the core, returns what the core returned.
+//
+// Deliberately returns the CORE's result type rather than a local one: a
+// bridge-shaped copy of MissionPlanResult would be one more place for the two
+// sides to drift apart, which is the thing this milestone deleted.
+[[nodiscard]] sf::navigation::MissionPlanResult plan_transfer(const SceneTransferRequest& request);
 
 }  // namespace spaceflight_godot

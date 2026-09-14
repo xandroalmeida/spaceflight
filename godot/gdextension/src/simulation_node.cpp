@@ -2,6 +2,7 @@
 
 #include "mission_planner.hpp"
 
+#include "core/coordinates/reference_frame.hpp"
 #include "core/gravity/oblateness_gravity.hpp"
 #include "core/gravity/point_mass_gravity.hpp"
 #include "core/navigation/mission.hpp"
@@ -15,6 +16,7 @@
 
 #include <cmath>
 #include <exception>
+#include <utility>
 
 namespace spaceflight_godot {
 namespace {
@@ -126,14 +128,26 @@ void SpaceflightSimulation::_bind_methods() {
     godot::ClassDB::bind_method(D_METHOD("get_engine_mode"),
                                 &SpaceflightSimulation::get_engine_mode);
     godot::ClassDB::bind_method(
-        D_METHOD("plan_transfer", "target_body", "flyby_altitude_km", "time_of_flight_days",
-                 "search_hours"),
+        D_METHOD("plan_transfer", "target_body", "periapsis_altitude_km",
+                 "apoapsis_altitude_km", "search_hours"),
         &SpaceflightSimulation::plan_transfer);
     godot::ClassDB::bind_method(D_METHOD("get_orbit_about_target"),
                                 &SpaceflightSimulation::get_orbit_about_target);
     godot::ClassDB::bind_method(D_METHOD("has_plan"), &SpaceflightSimulation::has_plan);
     godot::ClassDB::bind_method(D_METHOD("clear_plan"), &SpaceflightSimulation::clear_plan);
     godot::ClassDB::bind_method(D_METHOD("get_plan"), &SpaceflightSimulation::get_plan);
+    godot::ClassDB::bind_method(D_METHOD("set_execution_model", "model"),
+                                &SpaceflightSimulation::set_execution_model);
+    godot::ClassDB::bind_method(D_METHOD("get_execution_model"),
+                                &SpaceflightSimulation::get_execution_model);
+    godot::ClassDB::bind_method(D_METHOD("get_plan_alternatives"),
+                                &SpaceflightSimulation::get_plan_alternatives);
+    godot::ClassDB::bind_method(D_METHOD("get_mission_phase"),
+                                &SpaceflightSimulation::get_mission_phase);
+    godot::ClassDB::bind_method(D_METHOD("get_mission_outcome"),
+                                &SpaceflightSimulation::get_mission_outcome);
+    godot::ClassDB::bind_method(D_METHOD("get_planned_trajectory"),
+                                &SpaceflightSimulation::get_planned_trajectory);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -301,6 +315,32 @@ void SpaceflightSimulation::advance(double wall_seconds) {
         }
         state_ = result.state;
         clock_->commit(result.time, state_.proper_time - clock_->proper_time(), wall);
+
+        // Section 16: where the mission has got to. A classification, computed
+        // in the core from the plan and the state, and the cockpit prints it.
+        if (mission_.armed() && provider_ != nullptr) {
+            const double error =
+                pointing_ != nullptr
+                    ? pointing_->pointing_error(state_, clock_->coordinate_time())
+                    : 0.0;
+            mission_.update(*provider_, clock_->coordinate_time(), state_,
+                            sf::units::Angle::radians(error));
+
+            // ...and the ship points where the phase says. Without this,
+            // ORIENTING would be a label nobody acts on: the cockpit would
+            // report that the ship is getting ready for the burn while the nose
+            // sat wherever the pilot last left it.
+            //
+            // The command comes from the core, which knows which burn is next
+            // and which way it points; this applies it. A mission that has
+            // finished or been abandoned returns nullopt and the attitude goes
+            // back to the pilot -- an armed plan steers, a finished one does not.
+            if (pointing_ != nullptr) {
+                if (const auto command = mission_.pointing_command(); command.has_value()) {
+                    pointing_->set_command(*command);
+                }
+            }
+        }
 
         if (!result.ok()) {
             last_error_ = "advance: " + sf::propagation::to_string(result.status) + " -- " +
@@ -514,6 +554,17 @@ bool SpaceflightSimulation::set_pointing_mode(const godot::String& mode) {
     if (pointing_ == nullptr) {
         return false;
     }
+    // An armed mission steers the ship, and the next frame would overwrite this
+    // command anyway (see advance()). Refusing says so; accepting and then
+    // silently undoing it would leave the cockpit showing a mode the ship is not
+    // in -- the same class of quiet lie as a label that keeps saying "prograde"
+    // after the ship has stopped being prograde.
+    if (mission_.armed() && mission_.pointing_command().has_value()) {
+        last_error_ =
+            "the flight computer is steering: abandon the plan (K) to take the attitude back";
+        godot::UtilityFunctions::push_warning(godot::String{last_error_.c_str()});
+        return false;
+    }
     const std::string name{mode.utf8().get_data()};
 
     sf::attitude::PointingCommand command{};
@@ -581,8 +632,8 @@ double SpaceflightSimulation::get_throttle() const {
 }
 
 godot::Dictionary SpaceflightSimulation::plan_transfer(const godot::String& target_body,
-                                                       double flyby_altitude_km,
-                                                       double time_of_flight_days,
+                                                       double periapsis_altitude_km,
+                                                       double apoapsis_altitude_km,
                                                        double search_hours) {
     plan_summary_ = godot::Dictionary{};
     if (builder_ == nullptr) {
@@ -597,60 +648,221 @@ godot::Dictionary SpaceflightSimulation::plan_transfer(const godot::String& targ
             throw std::invalid_argument("no body named \"" + name + "\"");
         }
 
-        TransferRequest request{};
+        SceneTransferRequest request{};
         request.provider = provider_.get();
-        request.propagator = propagator_.get();
+        request.orientation = provider_.get();
+        request.catalog = catalog_.get();
         request.craft = craft_.get();
-        request.plan = plan_.get();
-        request.executor = executor_.get();
+        // The same perturbation set the propagator itself runs with. Planning
+        // against a different force model than the one that flies the result is
+        // how a corrected trajectory stops being corrected.
+        request.j2_bodies = {sf::celestial::bodies::earth};
+        request.integrator = propagator_->config();
         request.initial = state_;
         request.epoch = clock_->coordinate_time();
         request.center = sf::celestial::bodies::earth;
         request.target = lookup.id;
-        request.flyby_altitude_m = flyby_altitude_km * 1000.0;
-        request.time_of_flight_s = time_of_flight_days * 86400.0;
+        request.target_periapsis_altitude_m = periapsis_altitude_km * 1000.0;
+        request.target_apoapsis_altitude_m = apoapsis_altitude_km * 1000.0;
         request.search_window_s = search_hours * 3600.0;
+        request.execution = execution_;
+        request.pointing = pointing_->gains();
 
-        const TransferPlan planned = spaceflight_godot::plan_transfer(request);
-        if (!planned.valid) {
-            // The planner writes trial burns into the shared plan as it searches.
-            // A failure must not leave one of them armed: the ship would fly a
-            // burn nobody planned, four simulated days from a target it was never
-            // going to reach.
-            *plan_ = sf::navigation::ManeuverPlan{};
-            throw std::runtime_error(planned.message);
+        // Into a LOCAL first. A failed re-plan must not disturb the mission that
+        // is already flying: assigning straight into planned_ would leave the
+        // cockpit reading an empty plan while plan_ still held an armed burn and
+        // the executor still meant to fly it.
+        //
+        // Nothing else needs cleaning up. The core planner never writes into the
+        // ship's live plan while it searches -- the old GDExtension planner did,
+        // and a failure there left a trial burn armed for the ship to fly four
+        // simulated days from a target it was never going to reach.
+        auto result = spaceflight_godot::plan_transfer(request);
+        if (!result.ok()) {
+            throw std::runtime_error(
+                result.failure.has_value()
+                    ? std::string{result.failure->name()} + ": " + result.failure->detail
+                    : std::string{sf::navigation::to_string(result.status)});
         }
 
+        planned_ = std::move(result);
         // Install it by replacing the CONTENTS of the plan the executor already
         // points at. Swapping the objects would dangle the reference the force
         // model holds.
-        *plan_ = planned.maneuvers;
-
-        const auto now = clock_->coordinate_time();
-        plan_summary_["target"] = godot::String{lookup.id.name().data()};
-        plan_summary_["valid"] = true;
-        plan_summary_["seconds_to_ignition"] =
-            (planned.departure - now).seconds();
-        plan_summary_["time_of_flight_s"] = planned.time_of_flight_s;
-        plan_summary_["lambert_delta_v"] = planned.lambert_delta_v;
-        plan_summary_["injection_delta_v"] = planned.injection_delta_v;
-        plan_summary_["insertion_delta_v"] = planned.insertion_delta_v;
-        plan_summary_["seconds_to_insertion"] = (planned.insertion - now).seconds();
-        plan_summary_["reach_miss_initial_m"] = planned.reach_miss_initial;
-        plan_summary_["reach_miss_final_m"] = planned.reach_miss_final;
-        plan_summary_["b_plane_miss_m"] = planned.b_plane_miss;
-        plan_summary_["passes"] = planned.passes;
-        plan_summary_["reach_message"] = godot::String{planned.reach_message.c_str()};
-        plan_summary_["shape_message"] = godot::String{planned.shape_message.c_str()};
-        plan_summary_["reach_iterations"] = planned.reach_iterations;
-        plan_summary_["transfer_angle_deg"] = planned.transfer_angle * 180.0 / sf::units::pi;
-        plan_summary_["time_of_flight_days"] = planned.time_of_flight_s / 86400.0;
-        plan_summary_["v_infinity"] = planned.v_infinity;
-        plan_summary_["flyby_altitude_m"] = planned.flyby_altitude_m;
-        plan_summary_["orbit_period_s"] = planned.orbit_period_s;
-        plan_summary_["burns"] = static_cast<int64_t>(plan_->size());
+        *plan_ = planned_.maneuvers;
+        mission_.set_vehicle(craft_.get());
+        mission_.arm(planned_);
     });
+    // Built from the plan rather than cached separately: the summary and the
+    // readout have to be the same thing, and two copies of it would be two
+    // things that can disagree -- which is the mistake this whole milestone is
+    // about, in miniature.
+    plan_summary_ = get_plan();
     return plan_summary_;
+}
+
+// Section 15: everything the computer must show BEFORE execution, and all of it
+// out of the core's MissionMetrics. Nothing here computes; it renames.
+godot::Dictionary SpaceflightSimulation::get_plan() const {
+    godot::Dictionary out;
+    if (!planned_.ok() || clock_ == nullptr) {
+        return out;
+    }
+    const auto& m = planned_.metrics;
+    const auto now = clock_->coordinate_time();
+
+    out["valid"] = true;
+    out["target"] = godot::String{m.destination.name().data()};
+    out["origin"] = godot::String{m.origin.name().data()};
+
+    out["departure_tdb_s"] = m.departure.seconds_since_j2000();
+    out["arrival_tdb_s"] = m.arrival.seconds_since_j2000();
+    out["seconds_to_ignition"] = mission_.seconds_to_injection(now);
+    out["seconds_to_insertion"] = mission_.seconds_to_capture(now);
+    out["time_of_flight_s"] = m.time_of_flight_s;
+    out["time_of_flight_days"] = m.time_of_flight_s / 86400.0;
+    out["transfer_angle_deg"] = m.transfer_angle.degrees();
+    out["branch"] = godot::String{m.branch == sf::trajectory::TransferDirection::Prograde
+                                      ? "prograde"
+                                      : "retrograde"};
+
+    out["injection_delta_v"] = m.injection_delta_v;
+    out["midcourse_delta_v"] = m.midcourse_delta_v;
+    out["insertion_delta_v"] = m.capture_delta_v;
+    out["total_delta_v"] = m.total_delta_v;
+    out["delta_v_available"] = m.delta_v_available;
+    out["injection_duration_s"] = m.injection_duration_s;
+    out["insertion_duration_s"] = m.capture_duration_s;
+
+    out["v_infinity"] = m.v_infinity;
+    out["flyby_periapsis_m"] = m.predicted_flyby_periapsis;
+    out["predicted_periapsis_m"] = m.predicted_periapsis_altitude;
+    out["predicted_apoapsis_m"] = m.predicted_apoapsis_altitude;
+    out["predicted_eccentricity"] = m.predicted_eccentricity;
+    out["predicted_inclination_deg"] = m.predicted_inclination.degrees();
+    out["predicted_raan_deg"] = m.predicted_raan.degrees();
+
+    out["propellant_required_kg"] = m.propellant_required;
+    out["propellant_remaining_kg"] = m.propellant_remaining;
+
+    // What the autopilot is expected to do while the capture burn runs. Shown
+    // because section 10 is explicit that a controller is not judged on the
+    // orbit alone.
+    out["pointing_error_mean_deg"] = m.pointing_error_mean.degrees();
+    out["pointing_error_peak_deg"] = m.pointing_error_peak.degrees();
+    out["rcs_propellant_kg"] = m.rcs_propellant;
+    out["rcs_duty_cycle"] = m.rcs_duty_cycle;
+    out["torque_saturation"] = m.torque_saturation;
+
+    out["phase"] = get_mission_phase();
+    if (plan_ != nullptr && !plan_->empty()) {
+        const auto& first = plan_->maneuvers().front();
+        const auto& last = plan_->maneuvers().back();
+        out["burns"] = static_cast<int64_t>(plan_->size());
+        out["burning"] = first.active_at(now) || last.active_at(now);
+        out["done"] = now >= last.cutoff();
+    }
+    return out;
+}
+
+godot::Array SpaceflightSimulation::get_plan_alternatives() const {
+    godot::Array out;
+    for (const auto& alternative : planned_.alternatives) {
+        godot::Dictionary entry;
+        entry["label"] = godot::String{alternative.label.c_str()};
+        entry["feasible"] = alternative.feasible;
+        entry["departure_tdb_s"] = alternative.departure.seconds_since_j2000();
+        entry["time_of_flight_days"] = alternative.time_of_flight_s / 86400.0;
+        entry["branch"] =
+            godot::String{alternative.branch == sf::trajectory::TransferDirection::Prograde
+                              ? "prograde"
+                              : "retrograde"};
+        entry["injection_delta_v"] = alternative.injection_delta_v;
+        entry["insertion_delta_v"] = alternative.capture_delta_v;
+        entry["total_delta_v"] = alternative.total_delta_v;
+        entry["predicted_periapsis_m"] = alternative.predicted_periapsis_altitude;
+        entry["predicted_apoapsis_m"] = alternative.predicted_apoapsis_altitude;
+        entry["predicted_eccentricity"] = alternative.predicted_eccentricity;
+        entry["predicted_inclination_deg"] = alternative.predicted_inclination.degrees();
+        entry["predicted_raan_deg"] = alternative.predicted_raan.degrees();
+        entry["failure"] =
+            godot::String{std::string{sf::navigation::to_string(alternative.failure)}.c_str()};
+        out.append(entry);
+    }
+    return out;
+}
+
+godot::String SpaceflightSimulation::get_mission_phase() const {
+    return godot::String{
+        std::string{sf::navigation::to_string(mission_.phase())}.c_str()};
+}
+
+godot::Dictionary SpaceflightSimulation::get_mission_outcome() const {
+    godot::Dictionary out;
+    const auto& outcome = mission_.outcome();
+    if (!outcome.recorded) {
+        return out;
+    }
+    const auto row = [](const sf::navigation::PredictedVersusActual& value) {
+        godot::Dictionary entry;
+        entry["predicted"] = value.predicted;
+        entry["actual"] = value.actual;
+        entry["difference"] = value.difference();
+        entry["recorded"] = value.recorded;
+        return entry;
+    };
+    out["periapsis_m"] = row(outcome.periapsis_altitude);
+    out["apoapsis_m"] = row(outcome.apoapsis_altitude);
+    out["eccentricity"] = row(outcome.eccentricity);
+    out["inclination_deg"] = row(outcome.inclination_deg);
+    out["propellant_kg"] = row(outcome.propellant_used);
+    out["arrival_tdb_s"] = row(outcome.arrival_tdb_s);
+    out["capture_delta_v"] = row(outcome.capture_delta_v);
+    out["note"] = godot::String{outcome.note.c_str()};
+    return out;
+}
+
+godot::PackedVector3Array SpaceflightSimulation::get_planned_trajectory() const {
+    godot::PackedVector3Array out;
+    if (!planned_.ok() || provider_ == nullptr) {
+        return out;
+    }
+    const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+    out.resize(static_cast<int64_t>(planned_.trajectory.samples.size()));
+    int64_t index = 0;
+    for (const auto& sample : planned_.trajectory.samples) {
+        // The arc is stored relative to the origin body; the renderer wants it
+        // in the same absolute frame everything else goes through, so the origin
+        // is added back at the sample's own epoch. Using the CURRENT epoch would
+        // draw the transfer against an Earth that has moved 1.1e9 m over the
+        // four days the arc spans.
+        const auto origin = provider_->state(planned_.metrics.origin, sample.time, frame);
+        out[index++] = to_godot(transform_.to_render(origin.state.position + sample.from_origin));
+    }
+    return out;
+}
+
+bool SpaceflightSimulation::set_execution_model(const godot::String& model) {
+    const std::string name{model.utf8().get_data()};
+    if (name == "finite" || name == "finite_burn") {
+        execution_ = sf::navigation::ExecutionModel::FiniteBurn;
+        return true;
+    }
+    if (name == "autopilot") {
+        execution_ = sf::navigation::ExecutionModel::Autopilot;
+        return true;
+    }
+    // IMPULSIVE is deliberately not offered. It produces no maneuvers at all --
+    // there is no engine in that model -- so a ship cannot be armed with its
+    // result, and offering it would be offering a button that plans a mission
+    // nobody can fly.
+    last_error_ = "unknown execution model \"" + name + "\" (finite | autopilot)";
+    godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+    return false;
+}
+
+godot::String SpaceflightSimulation::get_execution_model() const {
+    return godot::String{std::string{sf::navigation::to_string(execution_)}.c_str()};
 }
 
 godot::Dictionary SpaceflightSimulation::get_orbit_about_target() const {
@@ -700,23 +912,9 @@ void SpaceflightSimulation::clear_plan() {
     if (plan_ != nullptr) {
         *plan_ = sf::navigation::ManeuverPlan{};
     }
+    planned_ = sf::navigation::MissionPlanResult{};
+    mission_.abort();
     plan_summary_ = godot::Dictionary{};
-}
-
-godot::Dictionary SpaceflightSimulation::get_plan() const {
-    godot::Dictionary out = plan_summary_.duplicate();
-    if (plan_ != nullptr && !plan_->empty() && clock_ != nullptr) {
-        // Countdowns, refreshed: the summary was written when the plan was made
-        // and the clock has moved since.
-        const auto now = clock_->coordinate_time();
-        const auto& first = plan_->maneuvers().front();
-        const auto& last = plan_->maneuvers().back();
-        out["seconds_to_ignition"] = (first.ignition - now).seconds();
-        out["seconds_to_insertion"] = (last.ignition - now).seconds();
-        out["burning"] = first.active_at(now) || last.active_at(now);
-        out["done"] = now >= last.cutoff();
-    }
-    return out;
 }
 
 godot::Dictionary SpaceflightSimulation::get_snapshot() const {
