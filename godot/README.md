@@ -1,4 +1,4 @@
-# Godot (Milestones 2 e 5)
+# Godot (Milestones 2, 5 e 7)
 
 O Godot entra aqui **apenas como consumidor** do `spaceflight_core` (ADR-0002).
 Nada nesta pasta calcula física — nem o GDScript, nem os shaders.
@@ -8,9 +8,26 @@ godot/
 ├── gdextension/     ponte C++: expõe SimulationSnapshot e o céu ao engine
 │                    SpaceflightSimulation  estado, snapshots, posições aparentes
 │                    SpaceflightSky         catálogo estelar + tabela de Planck
-└── project/         projeto Godot 4.5: cena, câmera, HUD
-    └── shaders/     star_field, relativistic_body
+└── project/         projeto Godot 4.5
+    ├── scripts/
+    │   ├── flight.gd            o orquestrador: constrói tudo e encaminha a entrada
+    │   ├── input_actions.gd     TODO o mapeamento de teclas, numa tabela
+    │   ├── flight_controls.gd   o que o piloto comanda
+    │   ├── format.gd  palette.gd
+    │   ├── world/               nave, pluma, jatos, planetas, estrelas, materiais
+    │   ├── camera/              as DUAS câmeras e os cinco modos
+    │   ├── cockpit/             interior 3D, controles clicáveis, instrumentos
+    │   ├── ui/                  HUD, mapa, missão, menu, ajuda, HUD técnico
+    │   ├── audio/               som estrutural e de interface
+    │   └── headless/            a verificação sem tela
+    ├── tests/                   a suíte de apresentação (regra 62 do M7)
+    ├── shaders/                 star_field, relativistic_body
+    └── assets/                  áudio-substituto; texturas quando existirem
 ```
+
+O Milestone 7 partiu o `main.gd` de 1520 linhas nesta árvore. A leitura técnica
+completa não foi reduzida: ela está em `ui/debug_hud.gd`, é o que a verificação
+sem tela imprime, e passou a viver atrás de `F3` em vez de ser a interface.
 
 Onde cada conta acontece está em `docs/architecture/relativistic-shaders.md`.
 Em uma linha: o `D` chega pronto de `core/relativity/optics.hpp` e o shader
@@ -134,7 +151,13 @@ nessa velocidade.
 
 ### Ir à Lua, na cena
 
-`J` planeja e arma a viagem inteira; o warp faz o resto.
+`Shift+J` planeja, `Enter` arma, e o warp faz o resto.
+
+⚠️ No Milestone 7 planejar deixou de armar. A regra 26 põe um `EXECUTE` e um
+`CANCEL` à frente do piloto, e um plano que já está a voar quando esses botões
+aparecem faz do `CANCEL` uma mentira sobre o que acabou de acontecer. Nenhum
+número da trajetória mudou com isso — a mesma busca, o mesmo corretor; o que
+mudou é quando a lista de manobras chega ao executor.
 
 ```
 [mission] 2 burns: injection 4548.5 m/s in 94.5 min, insertion 856.4 m/s, flyby 99.8 km
@@ -152,7 +175,7 @@ about Moon      CAPTURED   1838.2 km at 1632.7 m/s
 A física é toda do `core/`: Lambert, o corretor diferencial, o plano B
 (`docs/physics/b-plane.md`), a inserção. O `.gd` carrega números e mostra-os.
 
-⚠️ **`J` bloqueia o quadro por cerca de um segundo**, e isso está assim de
+⚠️ **Planejar bloqueia o quadro por cerca de um segundo**, e isso está assim de
 propósito: planear é procurar oportunidades de partida e depois inverter o modelo
 completo duas vezes, dezenas de propagações. É uma operação de missão, não de
 quadro. Threadá-lo compraria um segundo mais suave e custaria poder dizer qual era
@@ -199,8 +222,11 @@ cortando numa linha em branco para não partir uma seção ao meio. Numa janela 
 | **duas colunas** | **28** | **18 px** |
 | compacto | 13 | 22 px |
 
-`TAB` alterna completo → compacto → desligado. O compacto tem os números com que
-se voa; o resto está a uma tecla.
+No Milestone 7 esta leitura passou para trás de `F3` e deixou de ser a
+interface: o que se vê ao voar são os instrumentos do cockpit, e o HUD técnico é
+uma sobreposição que se liga quando se quer conferir um número contra uma
+tolerância. As duas colunas e o ajuste de fonte pelo conteúdo continuam
+exatamente como estão descritos acima.
 
 ⚠️ A saída headless imprime **sempre** o conjunto completo, em uma coluna, seja
 qual for o modo na tela. A verificação não pode depender de para que lado um
@@ -224,7 +250,7 @@ cada 150 quadros, e o mesmo comando dá a mesma saída em qualquer lugar.
 ### Voar de verdade até `β` relativístico
 
 A ótica só fica visível acima de `β ≈ 0,1`, e o único jeito honesto de chegar lá é
-queimar por oito anos. Com tela, a tecla `C` faz isso: CRUZEIRO, prógrado,
+queimar por oito anos. Com tela, `Alt+C` faz isso: CRUZEIRO, prógrado,
 acelerador cheio, warp 10⁸. Sem tela, uma corrida longa faz o mesmo sozinha:
 
 ```
@@ -239,22 +265,26 @@ acrescentou; a demonstração da queima precisa de mais.
 
 ## Controles
 
+A tabela completa está em [`docs/gameplay/controls.md`](../docs/gameplay/controls.md),
+**gerada** a partir de `scripts/input_actions.gd` por `scripts/dump_controls.sh` --
+uma lista de teclas copiada à mão num documento é uma lista que envelhece em
+silêncio. `F1` mostra a mesma coisa dentro do jogo, a partir da mesma fonte.
+
+O essencial:
+
 | Tecla | Ação |
 |---|---|
-| `,` `.` | desce/sobe o time warp (1× … 10⁸×) |
-| `F` | alterna o foco entre a nave e cada corpo |
-| `B` | escala dos corpos (1× … 1000×) |
-| `R` | reinicia a órbita |
-| `1`–`6`, `0` | modo de apontamento; `0` = manter |
-| setas, `PgUp`/`PgDn` | torque manual do RCS |
-| `Z` `X` `-` `=` | acelerador: cheio, corte, trim |
-| `M` | modo do motor, IMPULSO ↔ CRUZEIRO |
-| `E` `Q` | exposição do céu (§10.4) |
-| `L` | tempo de luz + aberração: liga/desliga |
-| `C` | queima de cruzeiro: CRUZEIRO + prógrado + acelerador cheio + warp 10⁸ |
-| `W` `A` `S` `D`, ou botão direito do mouse | olhar em volta |
-| `V` | trava da câmera: perseguição → prógrado → retrógrado |
-| `H` | recentra o olhar |
+| `W` `A` `S` `D` `Q` `E` | arfagem, guinada, rolagem — **a nave**, e gasta propelente |
+| setas | **a câmera**, e não gasta nada |
+| `I` `J` `K` `L` `U` `O` | translação por RCS |
+| `Shift` / `Ctrl` | abre e fecha o acelerador; `Z` cheio, `X` corte |
+| `P` `N` `R` `T` (+`Shift`) | prógrado/retrógrado, normal, radial, alvo |
+| `C` | câmera: COCKPIT → EXTERNAL → CHASE → VELOCITY → TARGET |
+| `Tab` / `M` | computador de missão / mapa orbital |
+| `Shift+J` / `Enter` / `Shift+K` | planejar / executar / abortar |
+| `,` `.` | time warp; `Space` pausa; `Esc` menu |
+| `` ` `` / `F3` / `F1` | HUD cockpit-mínimo-nenhum / HUD técnico / ajuda |
+| `Alt+A` `Alt+D` `Alt+B` `Alt+L` | aberração, Doppler, beaming, tempo de luz |
 
 `L` desliga a **ótica**, não a física. O estado é bit a bit o mesmo dos dois
 lados; o que muda é qual pergunta o renderizador faz. É a forma mais rápida de
@@ -272,7 +302,7 @@ perguntas diferentes:
 * **girar no lugar** deixa o alvo para trás e aponta para o vazio. Fica sob
   `Shift`, porque é a exceção.
 
-A órbita é parametrizada num referencial, e o `V` escolhe **qual** — porque há
+A órbita é parametrizada num referencial, e o modo de câmera escolhe **qual** — porque há
 duas perguntas diferentes e elas querem eixos diferentes.
 
 **`ship`: os eixos do próprio casco.** Para olhar *a nave*. Azimute 180° é
@@ -354,7 +384,7 @@ e azimute inteiro.
 
 ### Olhar em volta é uma medição
 
-O `V` alterna entre as duas vistas em que a ótica mais difere, e o HUD diz o que
+O `C` alterna entre as vistas em que a ótica mais difere, e o HUD diz o que
 a câmera está enquadrando:
 
 ```
@@ -383,7 +413,7 @@ mentindo assim mesmo.
 Girar a câmera **não é manobra**: a atitude da nave continua onde o RCS a deixou,
 e nada no estado muda.
 
-O rótulo (`chase`, `prograde`, `retrograde`) vira `free` assim que a câmera sai do
+O rótulo (`EXTERNAL`, `CHASE`, `VELOCITY`, `TARGET`) ganha `(free)` assim que a câmera sai do
 preset, em vez de continuar afirmando uma posição que ela não tem mais. É o mesmo
 cuidado do parágrafo acima: um mostrador cujos números estão todos certos ainda
 pode mentir.

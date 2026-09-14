@@ -49,6 +49,67 @@ uniform vec3 observer_position_scene = vec3(0.0);
 
 uniform vec3 reflectance : source_color = vec3(0.5);
 
+// --- surface, added in Milestone 7 ------------------------------------------
+//
+// Everything below is APPEARANCE. None of it reaches the vertex stage, none of
+// it changes a Doppler factor, and turning it all off gives back exactly the
+// Milestone 5 image: `reflectance` alone, multiplied by the same ratio.
+//
+// What changed for it: the illuminant ratio used to be multiplied into the
+// colour in vertex() and is now carried to fragment() as `colour_ratio` and
+// multiplied there. Same product, later -- but per-pixel, which is what a
+// texture needs. At D = 1 the ratio is exactly vec3(1) and the surface is the
+// texel, which is the invariant worth keeping (rule 47: a generated image is
+// never physics; it says what the body LOOKS like and nothing else).
+uniform sampler2D albedo_map : source_color, filter_linear_mipmap, repeat_enable;
+uniform bool use_albedo_map = false;
+uniform sampler2D night_map : source_color, filter_linear_mipmap, repeat_enable;
+uniform bool use_night_map = false;
+// A máscara de nuvens NÃO leva `source_color`, e isso não é esquecimento: no
+// Godot 4 é o hint do uniforme que decide se a amostra passa por sRGB, não o
+// importador. Uma cobertura é uma fração, não uma cor, e passá-la pela curva
+// sRGB distorceria a coisa que ela mede.
+uniform sampler2D cloud_map : filter_linear_mipmap, repeat_enable;
+uniform bool use_cloud_map = false;
+uniform float cloud_offset = 0.0;
+
+// A curva da máscara, medida e não escolhida.
+//
+// O histograma do mapa entregue, em bytes: p05 21, p25 38, p50 115, p75 191,
+// p95 230. Usado cru, o cinza médio de 115/255 = 0,45 cobriria o planeta inteiro
+// com 38 % de branco e a Terra ficaria leitosa de polo a polo. Remapeado para
+// 82..204, sobram 42 % de cobertura e 41 % de céu genuinamente limpo -- menos
+// que os 67 % reais da Terra, e é isso que se quer: as nuvens têm de deixar ver
+// os continentes que estão por baixo.
+uniform float cloud_low = 0.32;
+uniform float cloud_high = 0.80;
+uniform float cloud_opacity = 0.88;
+
+// The Sun, as a direction in scene coordinates. Used for the night side and for
+// the limb -- both of which are questions about where the terminator is, and the
+// terminator is not something a renderer should guess.
+uniform vec3 sun_direction_scene = vec3(1.0, 0.0, 0.0);
+// O relevo. `hint_normal` e NÃO `source_color`: uma normal é dado, não cor, e
+// passá-la pela curva sRGB torceria os vetores.
+//
+// A tangente vem da malha, calculada sobre os vértices EM REPOUSO, e a etapa de
+// vértice acima desloca-os pelo tempo retardado. A diferença é de segunda ordem
+// em β e some a velocidades orbitais; a β relativístico o relevo de um planeta
+// fica com a orientação da tangente de repouso, o que está registrado como
+// VISUAL_DEBT em vez de corrigido -- corrigi-lo pede a derivada do deslocamento,
+// que é uma conta por vértice a mais para um efeito que só existe onde o
+// planeta já está deformado por Terrell.
+uniform sampler2D normal_map : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform bool use_normal_map = false;
+uniform float normal_strength = 1.0;
+
+// Quanto as luzes de cidade emitem. 1,4 era o valor com a textura procedural,
+// cujas luzes eram pontos fracos; o mapa entregue tem aglomerados inteiros
+// saturados e a 1,4 o lado noturno ficava âmbar de costa a costa.
+uniform float night_energy = 0.75;
+uniform float atmosphere_strength = 0.0;
+uniform vec3 atmosphere_colour : source_color = vec3(0.35, 0.55, 0.95);
+
 // Planets reflect; they are not black bodies.  The illuminant is, so the shift
 // acts on sunlight and the albedo multiplies it
 // (docs/physics/relativistic-rendering.md section 9.4).
@@ -62,6 +123,9 @@ uniform float half_saturation = 0.1584893;
 uniform bool apply_light_time = true;
 
 varying vec3 shifted_colour;
+varying vec3 colour_ratio;
+varying vec3 world_normal;
+varying vec3 world_position;
 
 float table_index(float temperature) {
     return temperature / (temperature + table_reference_temperature);
@@ -128,22 +192,98 @@ void vertex() {
     float luminance = pow(beaming_doppler, 4.0) * band;
     float response = luminance / (luminance + half_saturation);
 
+    world_normal = normalize(MODEL_NORMAL_MATRIX * NORMAL);
+    world_position = VERTEX;
+
     if (is_self_luminous) {
         // A star: it emits its own black body, and the beaming acts on it.
         shifted_colour = shifted.rgb * response;
+        colour_ratio = vec3(1.0);
     } else {
-        // A planet: grey reflectance times a shifted illuminant.  At D = 1 the
-        // ratio is exactly 1 and the colour is the tabulated albedo -- anything
-        // else would mean the scene lies while standing still.  The division is
-        // safe for any illuminant above ~1500 K, where every tabulated channel is
+        // A planet: reflectance times a shifted illuminant.  At D = 1 the ratio
+        // is exactly 1 and the colour is the tabulated albedo -- anything else
+        // would mean the scene lies while standing still.  The division is safe
+        // for any illuminant above ~1500 K, where every tabulated channel is
         // strictly positive; the epsilon is float hygiene, not a limit.
-        shifted_colour = reflectance * (shifted.rgb / max(rest.rgb, vec3(1e-6)));
+        colour_ratio = shifted.rgb / max(rest.rgb, vec3(1e-6));
+        shifted_colour = reflectance * colour_ratio;
     }
 }
 
+// Amostragem equirretangular sem a linha na costura.
+//
+// Em `u = 0 ≡ 1` a coordenada salta de 1 para 0 entre dois pixels vizinhos. A
+// GPU escolhe o nível de mipmap a partir da DERIVADA de `u`, e nessa coluna a
+// derivada é ~1 em vez de ~1e-3: ela escolhe o mip mais grosseiro e desenha uma
+// linha visível de um polo ao outro. Na captura do planeta inteiro ela cortava o
+// Pacífico exatamente na longitude ±180, que é onde a costura está.
+//
+// A correção é dizer à GPU a derivada verdadeira: se o salto é maior que meia
+// textura, ele é o embrulho e não um gradiente, e subtrai-se uma volta.
+vec4 sample_wrapped(sampler2D map, vec2 uv) {
+    vec2 dx = dFdx(uv);
+    vec2 dy = dFdy(uv);
+    if (abs(dx.x) > 0.5) { dx.x -= sign(dx.x); }
+    if (abs(dy.x) > 0.5) { dy.x -= sign(dy.x); }
+    return textureGrad(map, uv, dx, dy);
+}
+
 void fragment() {
-    ALBEDO = is_self_luminous ? vec3(0.0) : shifted_colour;
+    // A star emits its own black body; a planet reflects the Sun's. One branch,
+    // no early return -- GLSL's fragment stage in Godot has an implicit epilogue
+    // and `return` skips it.
     if (is_self_luminous) {
+        ALBEDO = vec3(0.0);
         EMISSION = shifted_colour;
+    } else {
+        vec3 surface = reflectance;
+        if (use_albedo_map) {
+            surface = sample_wrapped(albedo_map, UV).rgb;
+        }
+
+        // Clouds: a second layer with its own longitude offset, over the surface
+        // and under everything else. The offset is a DRAWING parameter -- there
+        // is no atmospheric circulation in this project and pretending otherwise
+        // with a number that drifts would be inventing weather.
+        if (use_cloud_map) {
+            float raw = sample_wrapped(cloud_map, vec2(fract(UV.x + cloud_offset), UV.y)).r;
+            float cloud = smoothstep(cloud_low, cloud_high, raw);
+            surface = mix(surface, vec3(0.92, 0.94, 0.96), cloud * cloud_opacity);
+        }
+
+        ALBEDO = surface * colour_ratio;
+
+        if (use_normal_map) {
+            NORMAL_MAP = sample_wrapped(normal_map, UV).rgb;
+            NORMAL_MAP_DEPTH = normal_strength;
+        }
+
+        // How lit this pixel is, from the direction of the Sun. Godot's own
+        // lighting does the shading; this only decides which side is night.
+        vec3 normal = normalize(world_normal);
+        float sun = dot(normal, normalize(sun_direction_scene));
+        vec3 emitted = vec3(0.0);
+
+        if (use_night_map) {
+            // City lights, fading in across the terminator rather than switching
+            // at it: a hard line at sun = 0 reads as a rendering artefact, which
+            // is what it would be.
+            float night = smoothstep(0.08, -0.16, sun);
+            emitted += sample_wrapped(night_map, UV).rgb * night * night_energy;
+        }
+
+        if (atmosphere_strength > 0.0) {
+            // The limb: air is thickest where the line of sight grazes the
+            // surface, which is where the normal is perpendicular to the view.
+            // Brightened only on the lit side, because an unlit limb does not
+            // glow.
+            vec3 to_view = normalize(world_position - CAMERA_POSITION_WORLD);
+            float grazing = 1.0 - abs(dot(normal, to_view));
+            float limb = pow(clamp(grazing, 0.0, 1.0), 3.0);
+            float lit = clamp(sun * 1.4 + 0.25, 0.0, 1.0);
+            emitted += atmosphere_colour * limb * lit * atmosphere_strength;
+        }
+
+        EMISSION = emitted;
     }
 }

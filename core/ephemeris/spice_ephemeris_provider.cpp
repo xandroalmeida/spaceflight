@@ -226,9 +226,9 @@ BodyState SpiceEphemerisProvider::light_time_corrected_state(
     return out;
 }
 
-math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
-                                                  time::CoordinateTime t,
-                                                  coordinates::FrameAxes axes) const {
+math::Mat3 SpiceEphemerisProvider::body_fixed_rotation(celestial::BodyId body,
+                                                       time::CoordinateTime t,
+                                                       coordinates::FrameAxes axes) const {
     // Name of the body-fixed frame (IAU_EARTH, IAU_MOON, ...).  Asking SPICE
     // rather than keeping a table means a body with a high-precision frame
     // loaded gets it for free.
@@ -252,7 +252,7 @@ math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
         }
         if (!found) {
             throw EphemerisUnavailable("no body-fixed frame for " + body.name() +
-                                       "; cannot determine its pole");
+                                       "; cannot determine its orientation");
         }
         body_frame = name.data();
         const std::lock_guard lock{cache_mutex_};
@@ -261,9 +261,8 @@ math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
 
     const std::string target{coordinates::spice_frame_name(axes)};
 
-    // pxform_c gives the rotation taking vectors FROM the body-fixed frame TO the
-    // target axes; the pole is that matrix applied to the body-fixed +z, i.e. its
-    // third column.
+    // pxform_c gives the rotation taking vectors FROM the body-fixed frame TO
+    // the target axes.
     SpiceDouble rotation[3][3];
     {
         const std::lock_guard lock{detail::spice_mutex()};
@@ -271,7 +270,24 @@ math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
         detail::throw_if_spice_failed("pxform(" + body_frame + " -> " + target + ")");
     }
 
-    return math::Vec3{rotation[0][2], rotation[1][2], rotation[2][2]};
+    math::Mat3 out{};
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            out.m[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)] = rotation[r][c];
+        }
+    }
+    return out;
+}
+
+math::Vec3 SpiceEphemerisProvider::pole_direction(celestial::BodyId body,
+                                                  time::CoordinateTime t,
+                                                  coordinates::FrameAxes axes) const {
+    // The pole is the body-fixed +z carried into `axes`, i.e. the third column
+    // of the same matrix.  Written as one call rather than a second copy of the
+    // cidfrm/pxform dance: two copies of a frame lookup is two places for a
+    // frame name to be wrong.
+    const auto rotation = body_fixed_rotation(body, t, axes);
+    return math::Vec3{rotation.at(0, 2), rotation.at(1, 2), rotation.at(2, 2)};
 }
 
 bool SpiceEphemerisProvider::has_body(celestial::BodyId body) const {

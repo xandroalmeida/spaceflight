@@ -6,18 +6,36 @@ O núcleo é uma biblioteca C++20 independente do engine gráfico: física orbit
 efemérides JPL, propagação com controle de erro e uma CLI de verificação. O Godot
 entra depois, como consumidor de snapshots (ADR-0002).
 
-**Estado: Milestone 5 concluído.** Núcleo científico, efemérides JPL, gravidade de
-N corpos com J₂, propagação com dense output, propulsão, manobras, Lambert com
-targeting diferencial, a camada de renderização (snapshot, origem flutuante,
-GDExtension para o Godot 4.5), atitude de corpo rígido com RCS e apontamento, o
-cockpit, propulsão relativística em espaço plano, gravidade como geometria, e a
-renderização relativística inteira — tempo de trânsito da luz, aberração, Doppler
-e *beaming* limitado à banda visível, rotação de Terrell por vértice, e um céu de
-8 786 estrelas reais do Yale BSC5. Sem gameplay. 30 suítes de teste, das quais 16 estão na
-categoria `scientific` — a que `tests/CMakeLists.txt` define como *"does the
-answer match nature / an external reference?"* — comparando contra o JPL
-Horizons/SPICE, o REBOUNDx, o lugar planckiano da CIE, o Yale BSC5 ou soluções
-analíticas fechadas.
+**Estado: Milestone 7 concluído — primeiro vertical slice jogável.**
+
+Os Milestones 0–6 construíram e qualificaram o núcleo científico: efemérides JPL,
+gravidade de N corpos com J₂, propagação com dense output e controle de erro,
+propulsão, manobras, Lambert com targeting diferencial, atitude de corpo rígido
+com RCS e apontamento, propulsão relativística em espaço plano, gravidade como
+geometria, a renderização relativística inteira — tempo de trânsito da luz,
+aberração, Doppler e *beaming* limitado à banda visível, rotação de Terrell por
+vértice, um céu de 8 786 estrelas reais do Yale BSC5 — e um planejador Terra–Lua
+qualificado contra 365 épocas.
+
+O **Milestone 7** transformou isso num simulador que se pilota: um cockpit
+tridimensional, uma nave com geometria, instrumentos por função, controle manual
+de atitude e de motor, cinco modos de câmera, mapa orbital, computador de bordo
+com `EXECUTE`/`CANCEL`, e a missão Terra–Lua voável do princípio ao fim. O
+relatório é [`docs/validation/milestone-7-report.md`](docs/validation/milestone-7-report.md);
+as imagens da demonstração estão em `docs/validation/m7/`.
+
+**38 suítes de teste**, das quais 21 na categoria `scientific` — a que
+`tests/CMakeLists.txt` define como *"does the answer match nature / an external
+reference?"* — comparando contra o JPL Horizons/SPICE, o REBOUNDx, o lugar
+planckiano da CIE, o Yale BSC5 ou soluções analíticas fechadas; mais 137
+verificações da camada de apresentação, que não repetem uma única conta da
+física.
+
+```bash
+cmake --build build --target ctest-headless   # a física, sem tela
+cmake --build build --target godot-tests      # a apresentação, sem tela
+cmake --build build --target gpu-validation   # os pixels, precisa de tela
+```
 
 ---
 
@@ -72,9 +90,23 @@ spaceflight/
 │   │   ├── spin-transport.md          Fermi-Walker, Thomas, geodética, Gravity Probe B
 │   │   ├── relativity-roadmap.md      formulação alvo: u = gamma*v, geodésica exata
 │   │   └── propulsion-model.md        foguete relativístico derivado de conservação
-│   ├── adr/                           0001 linguagem .. 0007 formato de configuração
+│   ├── adr/                           0001 linguagem .. 0008 representação de atitude
+│   ├── manual/
+│   │   ├── *.md                       o manual do piloto, um capítulo por arquivo
+│   │   ├── manual.css                 a folha de estilo da impressão
+│   │   └── manual.pdf                 GERADO por scripts/build_manual.sh
+│   ├── gameplay/
+│   │   ├── controls.md                GERADO do Input Map; não editar à mão
+│   │   └── cockpit.md                 o que cada mostrador diz e de onde vem
+│   ├── assets/
+│   │   ├── manifest.md                estado de cada asset; o que falta gerar
+│   │   ├── import-settings.md         como importar cada tipo, e porquê
+│   │   └── planets|spacecraft|cockpit prompts prontos para o Codex
 │   └── validation/
-│       └── tolerances.md              toda tolerância, medida e justificada
+│       ├── tolerances.md              toda tolerância, medida e justificada
+│       ├── milestone-7-report.md      o que é jogável, e o que ficou por fazer
+│       ├── m7-playtest.md             o checklist manual da Definition of Done
+│       └── m7/                        a demonstração do M7, fotografada
 │
 ├── external/                   CSPICE (fora do Git)
 ├── kernels/spice/              LSK, PCK, SPK (fora do Git; MANIFEST.md + SHA256SUMS)
@@ -367,6 +399,83 @@ cmake --build build --target gpu-validation    # precisa de framebuffer real
 Relatório: [`docs/validation/milestone-6-2-report.md`](docs/validation/milestone-6-2-report.md).
 Arquitetura: [`docs/architecture/navigation-integration.md`](docs/architecture/navigation-integration.md).
 
+## Milestone 7 — o primeiro cockpit jogável
+
+O que o M7 acrescentou é **imagem e interação**, não física. Nenhum modelo foi
+redesenhado; o que mudou é que agora dá para sentar na nave.
+
+```
+antes                                     agora
+─────────────────────────────────────     ──────────────────────────────────────
+a nave: uma caixa amarela de 20 km        22 m de veículo com cockpit, habitat,
+                                          tanques, radiadores, motor, antenas
+não havia cockpit                         interior 3D com quatro mostradores,
+                                          sete botões clicáveis, quatro lâmpadas
+uma câmera orbital                        cinco modos, e DUAS câmeras por modo
+52 números monoespaçados                  instrumentos por função; os 52 números
+                                          continuam, atrás de F3
+a Terra: uma esfera azul                  continentes, nuvens, luzes noturnas,
+                                          limbo, e rodando pelos kernels
+sem som                                   som estrutural dentro da nave, e
+                                          silêncio na câmera externa
+```
+
+Três coisas que este milestone obrigou a construir e que valem ser ditas:
+
+**As texturas encontraram três defeitos que a esfera lisa escondia.** A rotação
+dos corpos estava transposta — as linhas da matriz do SPICE entregues a um
+construtor de `Basis` que recebe colunas, ou seja, a Terra girava ao contrário. O
+polo da malha (`+y` de `SphereMesh`) não é o polo do corpo (`+z` fixo ao corpo),
+e sem conversão as calotas iam para o equador. E a costura de UV desenhava uma
+linha de polo a polo, porque em `u = 0 ≡ 1` a derivada salta e a GPU escolhe o
+mipmap mais grosseiro. Nenhum dos três é detectável por aritmética; os três
+foram fechados contra um facto externo: às 00:00 UTC o ponto subsolar tem de
+estar perto de 180° E, e agora ele cai no Pacífico e o antissolar no Saara.
+
+E um normal map da Lua foi **recusado por medição**: sobre os mares, que são as
+superfícies mais lisas que existem lá, ele lê `(50, 54, 247)` em vez de
+`(128, 128, 255)`, e os canais R e G correlacionam-se com o albedo em vez da
+inclinação. É uma imagem de relevo tingida, não um normal map.
+
+**Duas escalas, uma câmera.** A cena tem 1 unidade = 10⁶ m e o plano próximo tem
+de ser 50 km, ou as estrelas somem por quantização de profundidade. A nave tem
+22 m — duas mil vezes dentro desse plano. São duas câmeras com a mesma orientação
+e o mesmo campo de visão, uma em unidades de cena e outra em metros, e a
+conversão entre elas é uma multiplicação num lugar só. Elas não são duas câmeras
+que se seguem: são a mesma câmera em duas unidades, e é por isso que a paralaxe
+entre a nave e o planeta atrás dela sai certa em vez de ser ajustada.
+
+**O desenho lê o atuador.** `RcsForce::throttles()` é a mesma função que o modelo
+de forças voa e que o renderizador consome — não há arranjo de código em que o
+jato desenhado e o propelente queimado discordem. Um torque puro abre dois bicos;
+um diagonal abre quatro, a frações diferentes; e o teste fixa os quatro casos,
+incluindo o de "sem comando, nada acende", que é o único que uma implementação
+guiada pela tecla acertaria por acidente.
+
+**Os marcadores vêm do piloto automático.** `PointingController::direction_for` é
+a rotina pela qual o autopilot guia, e é dela que saem as retículas do mostrador
+de voo. Alinhar o nariz com o marcador leva a nave ao mesmo sítio por construção.
+
+E uma dívida encontrada e **não** paga: o tensor de inércia do core modela uma
+caixa de 8 × 3 × 3 m, que é o casco pressurizado — mas não os treze metros de
+tanques, potência e motor que ficam atrás dele. A regra 57 do M7 põe "perfect
+spacecraft mass distribution" fora deste milestone, e corrigir o tensor
+invalidaria as campanhas de apontamento do M6.2. Está em
+[`docs/assets/spacecraft/dimensions.md`](docs/assets/spacecraft/dimensions.md)
+com a forma de pagar.
+
+**Manual do piloto:** [`docs/manual/manual.pdf`](docs/manual/manual.pdf) — trinta
+e uma páginas com as capturas da demonstração, do primeiro voo à órbita lunar.
+A fonte é [`docs/manual/`](docs/manual/), um capítulo por arquivo, e o PDF sai de
+`./scripts/build_manual.sh`. Nenhuma tecla é escrita à mão lá dentro: elas vêm do
+Input Map, e uma ação renomeada **reprova a compilação** em vez de imprimir a
+tecla errada.
+
+Relatório: [`docs/validation/milestone-7-report.md`](docs/validation/milestone-7-report.md) ·
+controles: [`docs/gameplay/controls.md`](docs/gameplay/controls.md) ·
+cockpit: [`docs/gameplay/cockpit.md`](docs/gameplay/cockpit.md) ·
+checklist manual: [`docs/validation/m7-playtest.md`](docs/validation/m7-playtest.md)
+
 ## Próximo
 
 O arrasto de referencial (`g₀ᵢ ≠ 0`): a 0,9 c o termo que a métrica atual joga
@@ -393,3 +502,9 @@ objeto com duas massas. Está registrado em
 [`docs/validation/autopilot-hardening.md`](docs/validation/autopilot-hardening.md)
 §6 em vez de silenciosamente consertado, porque consertá-lo multiplica a inércia
 por vinte e refaz todos os números daquela página.
+
+O Milestone 7 acrescentou a essa mesma linha uma segunda discrepância, do mesmo
+tipo e pela mesma razão: a caixa de 8 × 3 × 3 m que a inércia modela é o casco
+pressurizado, e a nave desenhada tem 22 m. As duas pagam-se juntas — derivando o
+tensor da geometria — e as duas exigem re-qualificar a campanha em vez de trocar
+uma constante.

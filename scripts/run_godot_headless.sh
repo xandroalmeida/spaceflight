@@ -40,8 +40,28 @@ if [[ ! -f "${PROJECT}/bin/spaceflight.dylib" && ! -f "${PROJECT}/bin/spacefligh
     exit 1
 fi
 
+# A third quirk, found while the Milestone 7 scene was being split into files:
+# `class_name` is resolved from `.godot/global_script_class_cache.cfg`, which is
+# also written only by a scan. A NEW script with a class_name is invisible until
+# then -- the parse fails with "Could not find type X" and nothing mentions the
+# cache. So the scan also runs whenever a script is newer than the cache, which
+# is cheap (a second) and removes a trap that costs ten minutes each time.
+NEEDS_SCAN=0
 if [[ ! -f "${PROJECT}/.godot/extension_list.cfg" ]]; then
-    echo "Scanning the project so Godot registers the extension (see the header)..."
+    NEEDS_SCAN=1
+elif [[ ! -f "${PROJECT}/.godot/global_script_class_cache.cfg" ]]; then
+    NEEDS_SCAN=1
+else
+    while IFS= read -r script; do
+        if [[ "${script}" -nt "${PROJECT}/.godot/global_script_class_cache.cfg" ]]; then
+            NEEDS_SCAN=1
+            break
+        fi
+    done < <(find "${PROJECT}" -name '*.gd' -not -path '*/.godot/*')
+fi
+
+if (( NEEDS_SCAN )); then
+    echo "Scanning the project so Godot registers the extension and the script classes..."
     "${GODOT}" --headless --path "${PROJECT}" --import > /dev/null 2>&1 || true
 fi
 

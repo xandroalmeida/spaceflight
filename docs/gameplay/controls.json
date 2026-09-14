@@ -1,0 +1,297 @@
+{
+  "body_scale": {
+    "description": "exagero de escala dos corpos",
+    "group": "TÉCNICO",
+    "key": "F8"
+  },
+  "camera_cycle": {
+    "description": "alterna o modo de câmera",
+    "group": "CÂMERA",
+    "key": "C"
+  },
+  "camera_focus_next": {
+    "description": "foca o próximo corpo",
+    "group": "CÂMERA",
+    "key": "F"
+  },
+  "camera_free_look": {
+    "description": "olhar em volta (mantido)",
+    "group": "CÂMERA",
+    "key": "Option"
+  },
+  "camera_recentre": {
+    "description": "recentra o olhar",
+    "group": "CÂMERA",
+    "key": "Home"
+  },
+  "camera_zoom_in": {
+    "description": "aproxima",
+    "group": "CÂMERA",
+    "key": "BracketRight"
+  },
+  "camera_zoom_out": {
+    "description": "afasta",
+    "group": "CÂMERA",
+    "key": "BracketLeft"
+  },
+  "cruise_burn": {
+    "description": "queima de cruzeiro (β relativístico)",
+    "group": "TÉCNICO",
+    "key": "Alt+C"
+  },
+  "debug_hud": {
+    "description": "HUD técnico (todos os números)",
+    "group": "INTERFACE",
+    "key": "F3"
+  },
+  "engine_cutoff": {
+    "description": "corte do motor",
+    "group": "MOTOR",
+    "key": "X"
+  },
+  "engine_mode": {
+    "description": "modo IMPULSO / CRUZEIRO",
+    "group": "MOTOR",
+    "key": "G"
+  },
+  "execution_model": {
+    "description": "planejador: finito / piloto automático",
+    "group": "TÉCNICO",
+    "key": "F6"
+  },
+  "exposure_down": {
+    "description": "exposição do céu -",
+    "group": "INTERFACE",
+    "key": "PageDown"
+  },
+  "exposure_up": {
+    "description": "exposição do céu +",
+    "group": "INTERFACE",
+    "key": "PageUp"
+  },
+  "help": {
+    "description": "ajuda dos controles",
+    "group": "INTERFACE",
+    "key": "F1"
+  },
+  "hud_cycle": {
+    "description": "HUD completo / mínimo / nenhum",
+    "group": "INTERFACE",
+    "key": "QuoteLeft"
+  },
+  "menu": {
+    "description": "menu",
+    "group": "TEMPO",
+    "key": "Escape"
+  },
+  "mission_abort": {
+    "description": "ABORTA a missão",
+    "group": "MISSÃO",
+    "key": "Shift+K"
+  },
+  "mission_execute": {
+    "description": "executa o plano",
+    "group": "MISSÃO",
+    "key": "Enter"
+  },
+  "mission_plan": {
+    "description": "planeja a transferência",
+    "group": "MISSÃO",
+    "key": "Shift+J"
+  },
+  "nav_panel": {
+    "description": "computador de navegação",
+    "group": "MISSÃO",
+    "key": "Tab"
+  },
+  "optics_aberration": {
+    "description": "aberração liga/desliga",
+    "group": "TÉCNICO",
+    "key": "Alt+A"
+  },
+  "optics_beaming": {
+    "description": "beaming liga/desliga",
+    "group": "TÉCNICO",
+    "key": "Alt+B"
+  },
+  "optics_doppler": {
+    "description": "Doppler liga/desliga",
+    "group": "TÉCNICO",
+    "key": "Alt+D"
+  },
+  "optics_light_time": {
+    "description": "tempo de luz liga/desliga",
+    "group": "TÉCNICO",
+    "key": "Alt+L"
+  },
+  "orbit_map": {
+    "description": "mapa orbital",
+    "group": "MISSÃO",
+    "key": "M"
+  },
+  "pause": {
+    "description": "pausa",
+    "group": "TEMPO",
+    "key": "Space"
+  },
+  "pitch_down": {
+    "description": "arfagem para baixo",
+    "group": "ATITUDE",
+    "key": "S"
+  },
+  "pitch_up": {
+    "description": "arfagem para cima",
+    "group": "ATITUDE",
+    "key": "W"
+  },
+  "point_anti_normal": {
+    "description": "anti-normal",
+    "group": "APONTAMENTO",
+    "key": "Shift+N"
+  },
+  "point_anti_target": {
+    "description": "contra o alvo",
+    "group": "APONTAMENTO",
+    "key": "Shift+T"
+  },
+  "point_hold": {
+    "description": "manter atitude",
+    "group": "APONTAMENTO",
+    "key": "0"
+  },
+  "point_normal": {
+    "description": "normal",
+    "group": "APONTAMENTO",
+    "key": "N"
+  },
+  "point_prograde": {
+    "description": "prógrado",
+    "group": "APONTAMENTO",
+    "key": "P"
+  },
+  "point_radial_in": {
+    "description": "radial para dentro",
+    "group": "APONTAMENTO",
+    "key": "Shift+R"
+  },
+  "point_radial_out": {
+    "description": "radial para fora",
+    "group": "APONTAMENTO",
+    "key": "R"
+  },
+  "point_retrograde": {
+    "description": "retrógrado",
+    "group": "APONTAMENTO",
+    "key": "Shift+P"
+  },
+  "point_target": {
+    "description": "para o alvo",
+    "group": "APONTAMENTO",
+    "key": "T"
+  },
+  "rcs_mode": {
+    "description": "RCS rotação / translação",
+    "group": "MOTOR",
+    "key": "B"
+  },
+  "rcs_toggle": {
+    "description": "RCS ligado / desligado",
+    "group": "MOTOR",
+    "key": "V"
+  },
+  "restart_orbit": {
+    "description": "reinicia a órbita de partida",
+    "group": "TÉCNICO",
+    "key": "F5"
+  },
+  "roll_left": {
+    "description": "rolagem à esquerda",
+    "group": "ATITUDE",
+    "key": "Q"
+  },
+  "roll_right": {
+    "description": "rolagem à direita",
+    "group": "ATITUDE",
+    "key": "E"
+  },
+  "target_next": {
+    "description": "próximo alvo",
+    "group": "MISSÃO",
+    "key": "Apostrophe"
+  },
+  "target_prev": {
+    "description": "alvo anterior",
+    "group": "MISSÃO",
+    "key": "Semicolon"
+  },
+  "throttle_down": {
+    "description": "fecha o acelerador",
+    "group": "MOTOR",
+    "key": "Ctrl"
+  },
+  "throttle_full": {
+    "description": "acelerador cheio",
+    "group": "MOTOR",
+    "key": "Z"
+  },
+  "throttle_up": {
+    "description": "abre o acelerador",
+    "group": "MOTOR",
+    "key": "Shift"
+  },
+  "translate_back": {
+    "description": "atrás",
+    "group": "TRANSLAÇÃO",
+    "key": "K"
+  },
+  "translate_down": {
+    "description": "abaixo",
+    "group": "TRANSLAÇÃO",
+    "key": "O"
+  },
+  "translate_forward": {
+    "description": "à frente",
+    "group": "TRANSLAÇÃO",
+    "key": "I"
+  },
+  "translate_left": {
+    "description": "à esquerda",
+    "group": "TRANSLAÇÃO",
+    "key": "J"
+  },
+  "translate_right": {
+    "description": "à direita",
+    "group": "TRANSLAÇÃO",
+    "key": "L"
+  },
+  "translate_up": {
+    "description": "acima",
+    "group": "TRANSLAÇÃO",
+    "key": "U"
+  },
+  "visual_beta": {
+    "description": "escada de β visual",
+    "group": "TÉCNICO",
+    "key": "F7"
+  },
+  "warp_down": {
+    "description": "desce o time warp",
+    "group": "TEMPO",
+    "key": "Comma"
+  },
+  "warp_up": {
+    "description": "sobe o time warp",
+    "group": "TEMPO",
+    "key": "Period"
+  },
+  "yaw_left": {
+    "description": "guinada à esquerda",
+    "group": "ATITUDE",
+    "key": "A"
+  },
+  "yaw_right": {
+    "description": "guinada à direita",
+    "group": "ATITUDE",
+    "key": "D"
+  }
+}

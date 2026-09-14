@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <utility>
 
 namespace spaceflight_godot {
@@ -55,6 +56,8 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::configure);
     godot::ClassDB::bind_method(D_METHOD("start_circular_orbit", "altitude_m", "inclination_deg"),
                                 &SpaceflightSimulation::start_circular_orbit);
+    godot::ClassDB::bind_method(D_METHOD("align_attitude_to_flight", "nadir_bias_deg"),
+                                &SpaceflightSimulation::align_attitude_to_flight);
 
     godot::ClassDB::bind_method(D_METHOD("set_time_warp", "warp"),
                                 &SpaceflightSimulation::set_time_warp);
@@ -118,6 +121,8 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_pointing_error_deg);
     godot::ClassDB::bind_method(D_METHOD("set_manual_torque", "torque_body"),
                                 &SpaceflightSimulation::set_manual_torque);
+    godot::ClassDB::bind_method(D_METHOD("set_manual_translation", "force_body"),
+                                &SpaceflightSimulation::set_manual_translation);
     godot::ClassDB::bind_method(D_METHOD("set_throttle", "throttle"),
                                 &SpaceflightSimulation::set_throttle);
     godot::ClassDB::bind_method(D_METHOD("get_throttle"), &SpaceflightSimulation::get_throttle);
@@ -133,6 +138,9 @@ void SpaceflightSimulation::_bind_methods() {
         &SpaceflightSimulation::plan_transfer);
     godot::ClassDB::bind_method(D_METHOD("get_orbit_about_target"),
                                 &SpaceflightSimulation::get_orbit_about_target);
+    godot::ClassDB::bind_method(D_METHOD("arm_plan"), &SpaceflightSimulation::arm_plan);
+    godot::ClassDB::bind_method(D_METHOD("has_planned_transfer"),
+                                &SpaceflightSimulation::has_planned_transfer);
     godot::ClassDB::bind_method(D_METHOD("has_plan"), &SpaceflightSimulation::has_plan);
     godot::ClassDB::bind_method(D_METHOD("clear_plan"), &SpaceflightSimulation::clear_plan);
     godot::ClassDB::bind_method(D_METHOD("get_plan"), &SpaceflightSimulation::get_plan);
@@ -148,6 +156,25 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_mission_outcome);
     godot::ClassDB::bind_method(D_METHOD("get_planned_trajectory"),
                                 &SpaceflightSimulation::get_planned_trajectory);
+    godot::ClassDB::bind_method(D_METHOD("get_flight_directions"),
+                                &SpaceflightSimulation::get_flight_directions);
+    godot::ClassDB::bind_method(D_METHOD("get_body_orientation", "index"),
+                                &SpaceflightSimulation::get_body_orientation);
+    godot::ClassDB::bind_method(D_METHOD("get_selectable_targets"),
+                                &SpaceflightSimulation::get_selectable_targets);
+    godot::ClassDB::bind_method(D_METHOD("set_target_body", "name"),
+                                &SpaceflightSimulation::set_target_body);
+    godot::ClassDB::bind_method(D_METHOD("get_target_body"),
+                                &SpaceflightSimulation::get_target_body);
+    godot::ClassDB::bind_method(D_METHOD("get_rcs_thrusters"),
+                                &SpaceflightSimulation::get_rcs_thrusters);
+    godot::ClassDB::bind_method(D_METHOD("get_rcs_throttles"),
+                                &SpaceflightSimulation::get_rcs_throttles);
+    godot::ClassDB::bind_method(D_METHOD("get_orbit_track", "samples"),
+                                &SpaceflightSimulation::get_orbit_track);
+    godot::ClassDB::bind_method(D_METHOD("get_body_orbit_track", "index", "samples"),
+                                &SpaceflightSimulation::get_body_orbit_track);
+    godot::ClassDB::bind_method(D_METHOD("get_maneuvers"), &SpaceflightSimulation::get_maneuvers);
     godot::ClassDB::bind_method(D_METHOD("get_snapshot"), &SpaceflightSimulation::get_snapshot);
     godot::ClassDB::bind_method(D_METHOD("is_ready"), &SpaceflightSimulation::is_ready);
     godot::ClassDB::bind_method(D_METHOD("get_last_error"),
@@ -270,6 +297,65 @@ bool SpaceflightSimulation::start_circular_orbit(double altitude_m, double incli
 
         rebuild_snapshot();
         focus_on_spacecraft();
+    });
+}
+
+bool SpaceflightSimulation::align_attitude_to_flight(double nadir_bias_deg) {
+    if (builder_ == nullptr) {
+        last_error_ = "align_attitude_to_flight: configure() first";
+        return false;
+    }
+    return guarded(last_error_, "align_attitude_to_flight", [&] {
+        const auto& craft = snapshot_.spacecraft;
+        const sf::math::Vec3 forward = craft.relative_velocity.normalized();
+        const sf::math::Vec3 outward = craft.relative_position.normalized();
+        if (forward.norm_squared() <= 0.0 || outward.norm_squared() <= 0.0) {
+            throw std::runtime_error("no reference orbit to align to");
+        }
+
+        // Body +x on the velocity, body +z outward from the planet -- so the
+        // planet is under the floor, which is where a pilot expects it. The
+        // third axis is the cross product, which makes the set orthonormal by
+        // construction rather than by assertion.
+        //
+        // In a near-circular orbit the velocity and the outward radial are
+        // already perpendicular to about a part in 10^4, but "about" is not
+        // orthonormal, and a quaternion built from a non-orthonormal triad is a
+        // quaternion that shears. So +z is re-derived from the other two.
+        const sf::math::Vec3 side = cross(outward, forward).normalized();
+        const sf::math::Vec3 up = cross(forward, side).normalized();
+
+        // The matrix whose COLUMNS are the body axes in the inertial frame,
+        // which is exactly what from_rotation_matrix documents itself as taking.
+        sf::math::Mat3 basis{};
+        const sf::math::Vec3 columns[3] = {forward, side, up};
+        for (int row = 0; row < 3; ++row) {
+            basis.m[static_cast<std::size_t>(row)] = {columns[0][row], columns[1][row],
+                                                      columns[2][row]};
+        }
+        auto orientation = sf::math::Quaternion::from_rotation_matrix(basis).normalized();
+
+        // The nadir bias: the nose tipped down from the velocity by this much,
+        // about the body's own pitch axis.
+        //
+        // Not decoration. From 400 km the Earth's limb sits 19.7 degrees below
+        // the local horizontal (arcsin(6371/6771) = 70.3 degrees from nadir), so
+        // a nose exactly on the velocity puts the entire planet below the window
+        // sill and the first frame of a new flight is empty sky -- with the
+        // planet genuinely there, under the floor. A 25-degree bias brings the
+        // limb to 5 degrees above the nose and fills the lower two thirds of the
+        // window, which is what "you are in orbit around the Earth" looks like.
+        //
+        // Real spacecraft hold nadir-biased attitudes for exactly this reason.
+        if (std::abs(nadir_bias_deg) > 0.0) {
+            const auto pitch = sf::math::Quaternion::from_axis_angle(
+                sf::math::Vec3::unit_y(), sf::units::Angle::degrees(nadir_bias_deg));
+            orientation = (orientation * pitch).normalized();
+        }
+
+        state_.attitude.orientation = orientation;
+        state_.attitude.angular_velocity = sf::math::Vec3{};
+        rebuild_snapshot();
     });
 }
 
@@ -621,6 +707,13 @@ godot::String SpaceflightSimulation::get_engine_mode() const {
     return craft_ != nullptr ? godot::String{craft_->mode_name().c_str()} : godot::String{};
 }
 
+void SpaceflightSimulation::set_manual_translation(const godot::Vector3& force_body) {
+    if (rcs_force_ == nullptr) {
+        return;
+    }
+    rcs_force_->set_manual_force(sf::math::Vec3{force_body.x, force_body.y, force_body.z});
+}
+
 void SpaceflightSimulation::set_throttle(double throttle) {
     if (main_engine_ != nullptr) {
         main_engine_->set_throttle(throttle);
@@ -686,12 +779,6 @@ godot::Dictionary SpaceflightSimulation::plan_transfer(const godot::String& targ
         }
 
         planned_ = std::move(result);
-        // Install it by replacing the CONTENTS of the plan the executor already
-        // points at. Swapping the objects would dangle the reference the force
-        // model holds.
-        *plan_ = planned_.maneuvers;
-        mission_.set_vehicle(craft_.get());
-        mission_.arm(planned_);
     });
     // Built from the plan rather than cached separately: the summary and the
     // readout have to be the same thing, and two copies of it would be two
@@ -717,8 +804,19 @@ godot::Dictionary SpaceflightSimulation::get_plan() const {
 
     out["departure_tdb_s"] = m.departure.seconds_since_j2000();
     out["arrival_tdb_s"] = m.arrival.seconds_since_j2000();
-    out["seconds_to_ignition"] = mission_.seconds_to_injection(now);
-    out["seconds_to_insertion"] = mission_.seconds_to_capture(now);
+    // Armed, these come from the mission runner, which knows which leg is next.
+    // Not armed, the plan is a proposal and the countdown has to come from its
+    // own epochs -- otherwise the review screen would show a departure "in
+    // 0.0 s" for a burn ninety minutes away, and the pilot would press EXECUTE
+    // on a number that meant nothing.
+    if (mission_.armed()) {
+        out["seconds_to_ignition"] = mission_.seconds_to_injection(now);
+        out["seconds_to_insertion"] = mission_.seconds_to_capture(now);
+    } else {
+        out["seconds_to_ignition"] = (m.departure - now).seconds();
+        out["seconds_to_insertion"] = (m.arrival - now).seconds();
+    }
+    out["armed"] = mission_.armed();
     out["time_of_flight_s"] = m.time_of_flight_s;
     out["time_of_flight_days"] = m.time_of_flight_s / 86400.0;
     out["transfer_angle_deg"] = m.transfer_angle.degrees();
@@ -755,10 +853,16 @@ godot::Dictionary SpaceflightSimulation::get_plan() const {
     out["torque_saturation"] = m.torque_saturation;
 
     out["phase"] = get_mission_phase();
+    // The burn COUNT is a property of the plan, armed or not. It used to be read
+    // off the executor's list, which is empty until arm_plan() installs it -- so
+    // the review screen announced "0 burns" for a two-burn transfer it was
+    // showing the delta-v of, one line above.
+    out["burns"] = static_cast<int64_t>(planned_.maneuvers.size());
+    out["burning"] = false;
+    out["done"] = false;
     if (plan_ != nullptr && !plan_->empty()) {
         const auto& first = plan_->maneuvers().front();
         const auto& last = plan_->maneuvers().back();
-        out["burns"] = static_cast<int64_t>(plan_->size());
         out["burning"] = first.active_at(now) || last.active_at(now);
         out["done"] = now >= last.cutoff();
     }
@@ -822,22 +926,388 @@ godot::Dictionary SpaceflightSimulation::get_mission_outcome() const {
     return out;
 }
 
+godot::Dictionary SpaceflightSimulation::get_flight_directions() const {
+    godot::Dictionary out;
+    if (pointing_ == nullptr || clock_ == nullptr) {
+        return out;
+    }
+    const auto t = clock_->coordinate_time();
+    const auto reference = snapshot_.spacecraft.reference;
+
+    const auto put = [&](const char* key, sf::navigation::GuidanceMode mode) {
+        if (const auto direction = pointing_->direction_for(mode, reference, state_, t);
+            direction.has_value()) {
+            out[key] = Vector3{static_cast<float>(direction->x), static_cast<float>(direction->y),
+                               static_cast<float>(direction->z)};
+        }
+    };
+    put("prograde", sf::navigation::GuidanceMode::Prograde);
+    put("retrograde", sf::navigation::GuidanceMode::Retrograde);
+    put("normal", sf::navigation::GuidanceMode::Normal);
+    put("anti_normal", sf::navigation::GuidanceMode::AntiNormal);
+    put("radial_out", sf::navigation::GuidanceMode::RadialOut);
+    put("radial_in", sf::navigation::GuidanceMode::RadialIn);
+
+    // The nose, straight off the integrated quaternion. Not derived from
+    // anything on screen: it is where the hull IS pointing, which is what the
+    // error between it and a marker means.
+    const auto nose = state_.attitude.orientation.rotate(sf::math::Vec3::unit_x());
+    out["nose"] = Vector3{static_cast<float>(nose.x), static_cast<float>(nose.y),
+                          static_cast<float>(nose.z)};
+
+    // Target and Sun are directions to a PLACE rather than guidance laws, so
+    // they are geometry here rather than a call to the controller -- and they
+    // are geometric in the controller too, which is why "point at the target"
+    // is not one of its modes.
+    if (snapshot_.spacecraft.target.has_value()) {
+        if (const auto* body = snapshot_.find(*snapshot_.spacecraft.target); body != nullptr) {
+            const auto to_target = (body->position - snapshot_.spacecraft.position).normalized();
+            out["target"] = Vector3{static_cast<float>(to_target.x),
+                                    static_cast<float>(to_target.y),
+                                    static_cast<float>(to_target.z)};
+            out["anti_target"] = Vector3{static_cast<float>(-to_target.x),
+                                         static_cast<float>(-to_target.y),
+                                         static_cast<float>(-to_target.z)};
+        }
+    }
+    if (const auto* sun = snapshot_.find(sf::celestial::bodies::sun); sun != nullptr) {
+        const auto to_sun = (sun->position - snapshot_.spacecraft.position).normalized();
+        out["sun"] = Vector3{static_cast<float>(to_sun.x), static_cast<float>(to_sun.y),
+                             static_cast<float>(to_sun.z)};
+    }
+    return out;
+}
+
+godot::Basis SpaceflightSimulation::get_body_orientation(int index) const {
+    if (index < 0 || index >= get_body_count() || provider_ == nullptr) {
+        return godot::Basis{};
+    }
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    sf::math::Mat3 rotation = sf::math::Mat3::identity();
+    try {
+        rotation = provider_->body_fixed_rotation(body.id, snapshot_.time,
+                                                  sf::coordinates::FrameAxes::J2000);
+    } catch (const std::exception&) {
+        // A barycentre, or a body whose PCK is not loaded. The identity draws it
+        // unrotated, which is a visible approximation rather than a crash -- the
+        // same policy the whole project applies to missing kernels.
+        return godot::Basis{};
+    }
+    // ⚠️ Godot's three-Vector3 Basis constructor sets the COLUMNS, and the
+    // body-fixed axes are the columns of the SPICE matrix -- so the SPICE
+    // columns are what has to be handed over.
+    //
+    // The first version passed the SPICE ROWS while a comment right above it
+    // said "columns", and the result was the TRANSPOSE: the inverse rotation.
+    // With a flat-coloured sphere nobody could see it. With a texture on it, the
+    // Earth turns backwards and the prime meridian is in the wrong place, which
+    // is how it was found.
+    //
+    // Checked against something outside this code: at 2026-01-01 00:00 UTC the
+    // sub-solar point must be near 180 degrees east, because solar noon at
+    // Greenwich is 12:00 UTC, and near 23 degrees SOUTH, because it is January.
+    // `godot/project/tests/probe_orientation.gd` computes both from this matrix:
+    //
+    //     sub-solar  longitude 180.92 east   latitude -23.01
+    return godot::Basis{
+        Vector3{static_cast<float>(rotation.at(0, 0)), static_cast<float>(rotation.at(1, 0)),
+                static_cast<float>(rotation.at(2, 0))},
+        Vector3{static_cast<float>(rotation.at(0, 1)), static_cast<float>(rotation.at(1, 1)),
+                static_cast<float>(rotation.at(2, 1))},
+        Vector3{static_cast<float>(rotation.at(0, 2)), static_cast<float>(rotation.at(1, 2)),
+                static_cast<float>(rotation.at(2, 2))}};
+}
+
+godot::Array SpaceflightSimulation::get_selectable_targets() const {
+    godot::Array out;
+    if (catalog_ == nullptr) {
+        return out;
+    }
+    for (const auto& body : catalog_->bodies()) {
+        // Barycentres are in the catalogue because their GM is what the gravity
+        // model needs; they are not places, and offering "Mars Barycenter" as a
+        // destination would offer a point in empty space. A body with no radius
+        // is exactly that test, and it is the catalogue's own field rather than
+        // a list of names kept in the user interface.
+        if (body.radius <= 0.0) {
+            continue;
+        }
+        out.append(godot::String{body.name.c_str()});
+    }
+    return out;
+}
+
+bool SpaceflightSimulation::set_target_body(const godot::String& name) {
+    if (builder_ == nullptr) {
+        last_error_ = "set_target_body: configure() first";
+        return false;
+    }
+    const std::string wanted{name.utf8().get_data()};
+    if (wanted.empty()) {
+        builder_->set_target(std::nullopt);
+        rebuild_snapshot();
+        return true;
+    }
+    for (const auto& body : catalog_->bodies()) {
+        if (body.name == wanted && body.radius > 0.0) {
+            builder_->set_target(body.id);
+            rebuild_snapshot();
+            return true;
+        }
+    }
+    const auto lookup = sf::celestial::body_from_name(wanted);
+    if (lookup.ok) {
+        builder_->set_target(lookup.id);
+        rebuild_snapshot();
+        return true;
+    }
+    last_error_ = "set_target_body: no body named \"" + wanted + "\"";
+    godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+    return false;
+}
+
+godot::String SpaceflightSimulation::get_target_body() const {
+    if (!snapshot_.spacecraft.target.has_value()) {
+        return godot::String{};
+    }
+    return godot::String{snapshot_.spacecraft.target->name().c_str()};
+}
+
+godot::Array SpaceflightSimulation::get_rcs_thrusters() const {
+    godot::Array out;
+    if (rcs_ == nullptr) {
+        return out;
+    }
+    for (const auto& thruster : rcs_->thrusters()) {
+        godot::Dictionary entry;
+        entry["name"] = godot::String{thruster.name.c_str()};
+        // Body frame, metres and unit vector. NOT through RenderTransform: these
+        // are offsets on a hull the renderer draws at its own exaggerated size,
+        // and scaling them by 1e-6 would put every thruster at the origin.
+        entry["position"] = Vector3{static_cast<float>(thruster.position.x),
+                                    static_cast<float>(thruster.position.y),
+                                    static_cast<float>(thruster.position.z)};
+        // The direction of the FORCE ON THE SHIP. The exhaust leaves the other
+        // way, and the visual has to flip it -- said here once so that the
+        // renderer is not left to guess which convention this is.
+        entry["force_direction"] = Vector3{static_cast<float>(thruster.direction.x),
+                                           static_cast<float>(thruster.direction.y),
+                                           static_cast<float>(thruster.direction.z)};
+        out.append(entry);
+    }
+    return out;
+}
+
+godot::PackedFloat64Array SpaceflightSimulation::get_rcs_throttles() const {
+    godot::PackedFloat64Array out;
+    if (rcs_force_ == nullptr || clock_ == nullptr) {
+        return out;
+    }
+    // Not a second copy of the allocation: RcsForce::throttles IS what
+    // RcsForce::evaluate feeds to the RCS, and the renderer asks it the same
+    // question at the snapshot's own epoch. There is no arrangement of code in
+    // which the drawn jet and the burnt propellant disagree.
+    const auto open = rcs_force_->throttles(state_, clock_->coordinate_time());
+    out.resize(static_cast<int64_t>(open.size()));
+    for (std::size_t i = 0; i < open.size(); ++i) {
+        out[static_cast<int64_t>(i)] = open[i];
+    }
+    return out;
+}
+
+godot::PackedVector3Array SpaceflightSimulation::get_orbit_track(int samples) const {
+    godot::PackedVector3Array out;
+    if (builder_ == nullptr || catalog_ == nullptr || samples < 8) {
+        return out;
+    }
+    const auto& craft = snapshot_.spacecraft;
+    const auto* reference = catalog_->find(craft.reference);
+    if (reference == nullptr || reference->gm <= 0.0) {
+        return out;
+    }
+    // The centre, taken as a difference rather than by asking the ephemeris
+    // again: position - relative_position IS the reference body's position, at
+    // the same instant and with no second call that could answer for a slightly
+    // different epoch.
+    const sf::math::Vec3 centre = craft.position - craft.relative_position;
+
+    auto elements = craft.elements;
+    const double e = elements.eccentricity;
+
+    // Where the true anomaly is allowed to go.
+    //
+    // Closed orbit: the whole circle. Hyperbola: the asymptotes sit at
+    // +-acos(-1/e), and the radius goes to infinity as they are approached, so
+    // the sweep stops short of them. 0.92 of the way is far enough that the arc
+    // reads as an escape and near enough that the last sample is still a place
+    // the ship could be.
+    double from = -M_PI;
+    double to = M_PI;
+    if (e >= 1.0) {
+        const double asymptote = std::acos(-1.0 / e);
+        from = -0.92 * asymptote;
+        to = 0.92 * asymptote;
+    }
+
+    out.resize(samples);
+    for (int i = 0; i < samples; ++i) {
+        const double nu = from + (to - from) * static_cast<double>(i) /
+                                     static_cast<double>(samples - 1);
+        elements.true_anomaly = sf::units::Angle::radians(nu);
+        // Kepler lives in core/trajectory, here as everywhere else. This is the
+        // inverse the campaign tool uses to build parking orbits from elements;
+        // reimplementing it in GDScript would make the drawn orbit a second
+        // opinion about the shape of the first.
+        const auto sample = sf::trajectory::state_from_elements(elements, reference->gm);
+        out[i] = to_godot(transform_.to_render(centre + sample.position));
+    }
+    return out;
+}
+
+godot::PackedVector3Array SpaceflightSimulation::get_body_orbit_track(int index,
+                                                                      int samples) const {
+    godot::PackedVector3Array out;
+    if (provider_ == nullptr || catalog_ == nullptr || samples < 8) {
+        return out;
+    }
+    if (index < 0 || index >= get_body_count()) {
+        return out;
+    }
+    const auto& body = snapshot_.bodies[static_cast<std::size_t>(index)];
+    const auto& craft = snapshot_.spacecraft;
+    const auto* reference = catalog_->find(craft.reference);
+    if (reference == nullptr || reference->gm <= 0.0 || body.id == craft.reference) {
+        return out;
+    }
+
+    const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+    const auto now = snapshot_.time;
+
+    // How long one lap takes, from the body's own osculating elements about the
+    // reference. Not a hard-coded 27.32 days: the same call works for anything
+    // in the catalogue, and a number in the code would be a fact about the Moon
+    // written down where nothing checks it.
+    sf::coordinates::StateVector relative{};
+    relative.position = body.position - (craft.position - craft.relative_position);
+    relative.velocity = body.velocity - craft.velocity + craft.relative_velocity;
+    const auto elements = sf::trajectory::elements_from_state(relative, reference->gm);
+    if (!elements.bound || elements.period <= 0.0) {
+        return out;
+    }
+
+    const sf::math::Vec3 centre = craft.position - craft.relative_position;
+    out.resize(samples);
+    for (int i = 0; i < samples; ++i) {
+        const double fraction = static_cast<double>(i) / static_cast<double>(samples - 1);
+        const auto t = now + sf::time::Duration::seconds(elements.period * fraction);
+        // The EPHEMERIS, sampled -- not the ellipse. The Moon's path is
+        // perturbed by the Sun and by the Earth's figure, and the difference
+        // between the two answers is hundreds of kilometres. Drawing the ellipse
+        // would be drawing a trajectory the simulation does not fly.
+        const auto body_state = provider_->state(body.id, t, frame);
+        const auto reference_state = provider_->state(craft.reference, t, frame);
+        out[i] = to_godot(transform_.to_render(
+            centre + (body_state.state.position - reference_state.state.position)));
+    }
+    return out;
+}
+
+godot::Array SpaceflightSimulation::get_maneuvers() const {
+    godot::Array out;
+    if (plan_ == nullptr || provider_ == nullptr || clock_ == nullptr) {
+        return out;
+    }
+    const auto now = clock_->coordinate_time();
+    for (const auto& maneuver : plan_->maneuvers()) {
+        godot::Dictionary entry;
+        entry["name"] = godot::String{maneuver.name.c_str()};
+        entry["guidance"] =
+            godot::String{std::string{sf::navigation::to_string(maneuver.guidance)}.c_str()};
+        entry["ignition_tdb_s"] = maneuver.ignition.seconds_since_j2000();
+        entry["cutoff_tdb_s"] = maneuver.cutoff().seconds_since_j2000();
+        entry["duration_s"] = maneuver.duration.seconds();
+        entry["throttle"] = maneuver.throttle;
+        entry["seconds_to_ignition"] = (maneuver.ignition - now).seconds();
+        entry["active"] = maneuver.active_at(now);
+        entry["done"] = now >= maneuver.cutoff();
+        // Where it happens, for a marker on the map: the arc the planner flew,
+        // at the sample nearest the ignition. The renderer places a dot; it does
+        // not work out where the burn is.
+        bool located = false;
+        if (planned_.ok() && !planned_.trajectory.samples.empty()) {
+            const sf::navigation::TrajectoryPrediction::Sample* nearest = nullptr;
+            double best = std::numeric_limits<double>::infinity();
+            for (const auto& sample : planned_.trajectory.samples) {
+                const double gap = std::abs((sample.time - maneuver.ignition).seconds());
+                if (gap < best) {
+                    best = gap;
+                    nearest = &sample;
+                }
+            }
+            if (nearest != nullptr) {
+                // The same frame the arc is in, for the same reason: a marker in
+                // a different frame from the line it marks is a marker on the
+                // wrong part of the line.
+                const auto* origin_body = snapshot_.find(planned_.metrics.origin);
+                const sf::math::Vec3 anchor =
+                    origin_body != nullptr
+                        ? origin_body->position
+                        : snapshot_.spacecraft.position - snapshot_.spacecraft.relative_position;
+                entry["position"] =
+                    to_godot(transform_.to_render(anchor + nearest->from_origin));
+                located = true;
+            }
+        }
+        entry["located"] = located;
+        if (!located) {
+            entry["position"] = Vector3{};
+        }
+        out.append(entry);
+    }
+    return out;
+}
+
 godot::PackedVector3Array SpaceflightSimulation::get_planned_trajectory() const {
     godot::PackedVector3Array out;
     if (!planned_.ok() || provider_ == nullptr) {
         return out;
     }
-    const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+    // ORIGIN-RELATIVE, anchored at where the origin body is NOW.
+    //
+    // ⚠️ This is a correction to what Milestone 6.2 shipped, and the measurement
+    // is worth writing down. The arc was being rebuilt in absolute coordinates by
+    // adding the origin body's position AT EACH SAMPLE'S OWN EPOCH -- which is
+    // the right answer to "where was the ship in the Solar System", and the wrong
+    // one for anything drawn around the Earth. The Earth travels 30 km/s: over
+    // the 4.75 days a translunar transfer spans, it moves 12.7 MILLION km. The
+    // map drew a transfer to the Moon as a line reaching 13.2 million km, against
+    // a Moon at 361 thousand, and everything else collapsed into a dot at the
+    // centre.
+    //
+    // Measured, with a planner run from a 400 km parking orbit:
+    //
+    //     ship                     6 771 km from Earth
+    //     Moon                   361 025 km
+    //     arc, absolute      153 734 .. 13 228 253 km      <- what M6.2 returned
+    //     arc, origin-relative     6 771 ..    361 000 km  <- this
+    //
+    // Nothing about the trajectory changed; what changed is which frame it is
+    // expressed in. This is the SAME convention get_body_orbit_track() uses, and
+    // that is the point: three curves drawn on one map have to be in one frame,
+    // or the map cannot be read.
+    //
+    // For an interplanetary map centred on the Sun the absolute form would be the
+    // right one. When that map exists it should ask for it explicitly rather than
+    // this one guessing.
+    const auto* origin_body = snapshot_.find(planned_.metrics.origin);
+    const sf::math::Vec3 anchor =
+        origin_body != nullptr ? origin_body->position
+                               : snapshot_.spacecraft.position - snapshot_.spacecraft.relative_position;
+
     out.resize(static_cast<int64_t>(planned_.trajectory.samples.size()));
     int64_t index = 0;
     for (const auto& sample : planned_.trajectory.samples) {
-        // The arc is stored relative to the origin body; the renderer wants it
-        // in the same absolute frame everything else goes through, so the origin
-        // is added back at the sample's own epoch. Using the CURRENT epoch would
-        // draw the transfer against an Earth that has moved 1.1e9 m over the
-        // four days the arc spans.
-        const auto origin = provider_->state(planned_.metrics.origin, sample.time, frame);
-        out[index++] = to_godot(transform_.to_render(origin.state.position + sample.from_origin));
+        out[index++] = to_godot(transform_.to_render(anchor + sample.from_origin));
     }
     return out;
 }
@@ -902,6 +1372,34 @@ godot::Dictionary SpaceflightSimulation::get_orbit_about_target() const {
     out["speed_ms"] = relative.velocity.norm();
     out["captured"] = elements.eccentricity < 1.0;
     return out;
+}
+
+bool SpaceflightSimulation::arm_plan() {
+    if (!planned_.ok() || plan_ == nullptr || clock_ == nullptr) {
+        last_error_ = "arm_plan: no transfer has been planned";
+        return false;
+    }
+    if (planned_.maneuvers.empty()) {
+        last_error_ = "arm_plan: the plan has no burns";
+        return false;
+    }
+    const auto now = clock_->coordinate_time();
+    if (now >= planned_.maneuvers.maneuvers().front().ignition) {
+        // The injection epoch is behind us. Arming anyway would put the executor
+        // straight into the coast leg and then fire a capture burn worked out
+        // for a trajectory the ship never flew. Refused with the reason, which
+        // the cockpit prints.
+        last_error_ = "arm_plan: the departure has passed -- plan again";
+        return false;
+    }
+    // Install it by replacing the CONTENTS of the plan the executor already
+    // points at. Swapping the objects would dangle the reference the force
+    // model holds.
+    *plan_ = planned_.maneuvers;
+    mission_.set_vehicle(craft_.get());
+    mission_.arm(planned_);
+    plan_summary_ = get_plan();
+    return true;
 }
 
 bool SpaceflightSimulation::has_plan() const {

@@ -131,6 +131,19 @@ public:
     [[nodiscard]] std::optional<math::Vec3> desired_direction(
         const propagation::PropagationState& state, time::CoordinateTime t) const;
 
+    // The same question for a mode the controller has NOT been commanded into.
+    //
+    // The flight display draws a marker for every guidance mode at once --
+    // prograde, retrograde, normal, radial, target -- and those markers have to
+    // be where the autopilot would actually take the nose. Asking the controller
+    // is how that is guaranteed; a second set of definitions in the renderer
+    // would agree until the day one of them was fixed.
+    //
+    // Const and stateless: it does not touch command_.
+    [[nodiscard]] std::optional<math::Vec3> direction_for(
+        navigation::GuidanceMode mode, celestial::BodyId reference,
+        const propagation::PropagationState& state, time::CoordinateTime t) const;
+
     // Orientation that puts the body +x axis on the desired direction. The
     // shortest such rotation: roll is left free, because nothing here has an
     // opinion about it yet.
@@ -172,10 +185,26 @@ public:
     void set_manual_torque(const math::Vec3& torque_body) { manual_torque_ = torque_body; }
     [[nodiscard]] const math::Vec3& manual_torque() const noexcept { return manual_torque_; }
 
+    // Translation, in the body frame [N]. Independent of the torque command:
+    // a docking correction is a push that must not turn the ship, and a slew is
+    // a turn that must not push it. Zero means no translation demand.
+    void set_manual_force(const math::Vec3& force_body) { manual_force_ = force_body; }
+    [[nodiscard]] const math::Vec3& manual_force() const noexcept { return manual_force_; }
+
+    // The throttle of every thruster, for this state and this instant.
+    //
+    // PUBLIC because the renderer needs exactly this and must not compute its
+    // own version of it (rule 15 of Milestone 7: the visual lights the thruster
+    // the ACTUATOR lit). evaluate() calls this and then RcsSystem::evaluate on
+    // the result, so there is one allocation and both callers see it.
+    [[nodiscard]] std::vector<double> throttles(const propagation::PropagationState& state,
+                                                time::CoordinateTime t) const;
+
 private:
     const RcsSystem& rcs_;
     const PointingController& controller_;
     math::Vec3 manual_torque_{};
+    math::Vec3 manual_force_{};
 };
 
 }  // namespace sf::attitude

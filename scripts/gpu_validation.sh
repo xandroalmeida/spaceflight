@@ -71,7 +71,7 @@ case "${CASE}" in
         ;;
     relativistic_visual)
         # The scene photographs itself: one frame per rung of the visual-test
-        # ladder, then quits (main.gd, SPACEFLIGHT_CAPTURE).
+        # ladder, then quits (scripts/flight.gd, SPACEFLIGHT_CAPTURE).
         #
         # The images are EVIDENCE, not the oracle -- the physics is checked
         # numerically against core/ in tests/scientific/test_relativistic_sky.cpp

@@ -86,6 +86,24 @@ public:
     // honest simplification, and it is named as one.
     [[nodiscard]] std::vector<double> allocate(const math::Vec3& desired_torque_body) const;
 
+    // The same greedy rule, asked for a FORCE instead of a torque.
+    //
+    // Translation exists in this layout even though every couple is balanced:
+    // the two thrusters that push the same way from opposite arms produce 2F of
+    // force and exactly cancelling torques.  Firing "+x a" (at +y, pushing +z)
+    // together with "-x b" (at -y, pushing +z) is 2F along +z with zero torque,
+    // which is the manoeuvre a docking control has to be able to command.
+    //
+    // Added in Milestone 7 because the cockpit gained translation controls
+    // (rules 13 and 15).  It changes nothing that existed: allocate() is
+    // untouched, and a ship that never asks for a force behaves identically.
+    [[nodiscard]] std::vector<double> allocate_force(const math::Vec3& desired_force_body) const;
+
+    // Largest force ACHIEVABLE along an axis, for the same reason max_torque()
+    // exists: a controller clamped against the sum of every thruster would ask
+    // for more than the layout can deliver.
+    [[nodiscard]] double max_force_about(const math::Vec3& axis) const;
+
     [[nodiscard]] RcsOutput evaluate(const std::vector<double>& throttles) const;
     [[nodiscard]] RcsOutput evaluate(const math::Vec3& desired_torque_body) const;
 

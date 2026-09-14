@@ -118,6 +118,45 @@ std::vector<double> RcsSystem::allocate(const Vec3& desired_torque_body) const {
     return throttles;
 }
 
+std::vector<double> RcsSystem::allocate_force(const Vec3& desired_force_body) const {
+    std::vector<double> throttles(thrusters_.size(), 0.0);
+    const double magnitude = desired_force_body.norm();
+    if (!(magnitude > 0.0)) {
+        return throttles;
+    }
+    const Vec3 wanted = desired_force_body / magnitude;
+
+    for (std::size_t i = 0; i < thrusters_.size(); ++i) {
+        const Vec3 force = thrusters_[i].force_at(1.0);
+        const double available = force.norm();
+        if (available <= 0.0) {
+            continue;
+        }
+        const double alignment = dot(force / available, wanted);
+        if (alignment <= 0.0) {
+            continue;
+        }
+        throttles[i] = std::clamp(alignment * magnitude / available, 0.0, 1.0);
+    }
+    return throttles;
+}
+
+double RcsSystem::max_force_about(const Vec3& axis) const {
+    const double norm = axis.norm();
+    if (!(norm > 0.0)) {
+        return 0.0;
+    }
+    const Vec3 direction = axis / norm;
+    double total = 0.0;
+    for (const auto& thruster : thrusters_) {
+        const double along = dot(thruster.force_at(1.0), direction);
+        if (along > 0.0) {
+            total += along;
+        }
+    }
+    return total;
+}
+
 RcsOutput RcsSystem::evaluate(const std::vector<double>& throttles) const {
     if (throttles.size() != thrusters_.size()) {
         throw std::invalid_argument("RcsSystem::evaluate: one throttle per thruster is required");

@@ -57,6 +57,24 @@ public:
     bool configure(const godot::String& kernel_directory, const godot::String& epoch_utc);
     bool start_circular_orbit(double altitude_m, double inclination_deg);
 
+    // Points the nose along the velocity with the planet under the floor: the
+    // local-vertical/local-horizontal attitude a parking orbit is actually flown
+    // in.
+    //
+    // Separate from start_circular_orbit, and not folded into it, because the
+    // two answer to different things. The scenario setter is what the campaign
+    // tools and the headless verification use, and it leaves the attitude at
+    // identity so that a slew can be commanded and MEASURED from a known start.
+    // This is a cockpit convenience: the first frame of a new flight has to show
+    // the Earth (Milestone 7 rule 66), and at identity the nose points at the
+    // zenith and the window is full of empty sky.
+    //
+    // It writes the quaternion directly. That is legitimate here and nowhere
+    // else: it is scenario setup, before anything is integrated -- the same
+    // licence start_circular_orbit takes when it writes a position and a
+    // velocity. Nothing during flight may do this (rule 28).
+    bool align_attitude_to_flight(double nadir_bias_deg);
+
     // --- time --------------------------------------------------------------
     void set_time_warp(double warp);
     double get_time_warp() const;
@@ -118,6 +136,16 @@ public:
     void set_apparent_positions_enabled(bool enabled);
     bool get_apparent_positions_enabled() const;
 
+    // Where the body's own frame is pointing, as a Basis whose columns are the
+    // body-fixed axes in the integration frame.
+    //
+    // Rendering only. The dynamics never asks how far a planet has turned --
+    // an axially symmetric gravity field does not depend on it -- but a textured
+    // Earth that does not turn under a 400 km orbit is wrong within a minute of
+    // watching. Returns the identity for a body with no body-fixed frame in the
+    // loaded kernels, which draws it unrotated rather than failing.
+    godot::Basis get_body_orientation(int index) const;
+
     // --- attitude ----------------------------------------------------------
     // Godot's Quaternion is scalar LAST; the core's is scalar first (ADR-0008).
     // The reordering happens here and nowhere else.
@@ -134,6 +162,11 @@ public:
     // overrides the pointing controller; Vector3.ZERO hands it back.
     void set_manual_torque(const godot::Vector3& torque_body);
 
+    // Direct translation command in the BODY frame, in newtons. Independent of
+    // the torque: the RCS layout can push without turning, and the cockpit's
+    // translation keys are that (rule 13).
+    void set_manual_translation(const godot::Vector3& force_body);
+
     // --- main engine -------------------------------------------------------
     // Thrust goes along the nose, so where the burn goes is decided by where the
     // ship is pointing: aim with 1-6, then open the throttle.
@@ -145,6 +178,70 @@ public:
     bool set_engine_mode(const godot::String& mode);
     void cycle_engine_mode();
     godot::String get_engine_mode() const;
+
+    // The guidance directions, all of them, as unit vectors in the integration
+    // frame: prograde, retrograde, normal, anti_normal, radial_out, radial_in,
+    // target, anti_target, plus "nose" and "sun".
+    //
+    // Every one of them comes from PointingController::direction_for, which is
+    // the routine the autopilot steers by. That is the whole point: the marker
+    // the pilot lines the nose up with has to be the direction the autopilot
+    // would have taken it to, and the only way to guarantee that is for them to
+    // be the same function call.
+    godot::Dictionary get_flight_directions() const;
+
+    // --- navigation target (Milestone 7) ------------------------------------
+    // Which body the cockpit measures distance and relative speed against.
+    //
+    // It used to be wired to the Moon in configure(), which was fine while the
+    // Moon was the only destination and became a lie the moment the cockpit grew
+    // a target selector: a display that says TARGET and cannot be pointed
+    // anywhere else is a label, not an instrument.
+    godot::Array get_selectable_targets() const;
+    bool set_target_body(const godot::String& name);
+    godot::String get_target_body() const;
+
+    // --- attitude actuators (Milestone 7) -----------------------------------
+    // Where the twelve thrusters ARE, in the body frame, and what each one is
+    // doing right now.
+    //
+    // Rule 15 of the milestone: the renderer lights the thruster the ACTUATOR
+    // lit, not the one the key asked for. The two are different -- the greedy
+    // allocator opens each thruster in proportion to how much its own torque
+    // direction agrees with the demand, so a diagonal command fires four
+    // thrusters at fractional throttle and a saturated one fires two wide open.
+    // Drawing the key press instead would show a plume where no propellant is
+    // leaving, which is exactly the kind of quiet lie this project avoids.
+    //
+    // The allocation is recomputed here from the SAME RcsSystem::allocate the
+    // force model flies, against the state and epoch of the current snapshot.
+    // Not cached from the last integration stage: a Dormand-Prince step
+    // evaluates the force model seven times at seven different times, and "the
+    // last one" is an arbitrary one of those. This is the actuator state at the
+    // instant the snapshot describes, which is the instant being drawn.
+    godot::Array get_rcs_thrusters() const;
+    godot::PackedFloat64Array get_rcs_throttles() const;
+
+    // --- orbit geometry (Milestone 7) ---------------------------------------
+    // The osculating ellipse, sampled. In scene units, ready to draw.
+    //
+    // Here and not in GDScript because it is orbital mechanics (rule 77): the
+    // samples come from trajectory::state_from_elements, the same inverse the
+    // campaign tool uses to turn "400 km at 51.6 degrees" into a state vector.
+    // A Kepler solver in the renderer would be a second source of truth for the
+    // shape of the orbit, and the two would disagree the first time the elements
+    // meant anything subtle.
+    //
+    // An unbound orbit is sampled over the true anomalies that are actually
+    // reachable rather than over the full circle, because a hyperbola has
+    // asymptotes and drawing past them produces a line to nowhere.
+    godot::PackedVector3Array get_orbit_track(int samples) const;
+
+    // The same question for a celestial body about the ship's reference body,
+    // and the answer comes from the EPHEMERIS rather than from elements: the
+    // Moon's orbit is not an ellipse and drawing it as one would be inventing a
+    // trajectory the simulation does not fly.
+    godot::PackedVector3Array get_body_orbit_track(int index, int samples) const;
 
     // --- missions ----------------------------------------------------------
     // Plans a transfer to a body and arms it.
@@ -166,9 +263,24 @@ public:
     // takes of the order of a second. It is a one-off command, not something a
     // frame does. Returns a summary Dictionary; empty on failure, with the reason
     // in get_last_error().
+    // Planning does NOT arm. Milestone 7 rule 26 puts an EXECUTE and a CANCEL in
+    // front of the pilot, and a plan that is already flying by the time those
+    // buttons appear makes CANCEL a lie about what just happened. The result is
+    // held, shown, and installed only by arm_plan().
+    //
+    // Nothing about the trajectory changes: the same search, the same corrector,
+    // the same numbers. What changes is when the maneuver list reaches the
+    // executor.
     godot::Dictionary plan_transfer(const godot::String& target_body,
                                     double periapsis_altitude_km, double apoapsis_altitude_km,
                                     double search_hours);
+
+    // Installs the last planned transfer. False, with a reason in
+    // get_last_error(), if there is nothing to arm or if the departure has
+    // already passed -- flying a plan whose injection epoch is behind the ship
+    // would fire the capture burn in empty space.
+    bool arm_plan();
+    [[nodiscard]] bool has_planned_transfer() const { return planned_.ok(); }
 
     // Which execution model the planner corrects against: "finite" or
     // "autopilot". The choice is a real one and it is offered rather than
@@ -214,6 +326,11 @@ public:
     // Section 17: predicted against actual, for the quantities that say whether
     // the simulator predicts its own physics. Empty until the orbit has settled.
     godot::Dictionary get_mission_outcome() const;
+
+    // The burns of the armed plan: label, epochs, delta-v, and where the ship
+    // will be when each one lights, in scene units. The orbital map draws a
+    // marker per entry; nothing here is recomputed by the renderer.
+    godot::Array get_maneuvers() const;
 
     // The planned arc, in scene units, for drawing. One entry per sample,
     // already through RenderTransform.

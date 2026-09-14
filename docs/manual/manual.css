@@ -1,0 +1,209 @@
+/* O estilo do manual. Um arquivo, e é este.
+ *
+ * Impresso pelo Chrome em A4. A tipografia é a mesma decisão do cockpit
+ * (docs/gameplay/cockpit.md): serifada para o texto corrido, que é o que se lê
+ * por parágrafos, e monoespaçada para tudo o que é uma tecla, um número ou um
+ * nome de arquivo -- onde `0`/`O` e `1`/`I` têm de ser distinguíveis. */
+
+@page { size: A4; margin: 18mm 16mm 16mm 16mm; }
+
+:root {
+  --ink:        #15181c;
+  --soft:       #4c545e;
+  --faint:      #8a939e;
+  --rule:       #d5dae0;
+  --panel:      #f4f6f8;
+  --nav:        #12736b;
+  --warn:       #9a5a06;
+  --crit:       #a32b22;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 10.5pt/1.55 "Charter", "Georgia", "Palatino", serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+code, pre, .key {
+  font-family: "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+}
+
+/* --- capítulos --- */
+
+section.chapter { page-break-before: always; }
+section.chapter:first-of-type { page-break-before: avoid; }
+
+h1 {
+  font-size: 21pt;
+  line-height: 1.15;
+  margin: 0 0 4mm;
+  padding-bottom: 2.5mm;
+  border-bottom: 1.6pt solid var(--ink);
+  font-weight: 600;
+  letter-spacing: -0.2pt;
+}
+h2 {
+  font-size: 13.5pt;
+  margin: 7mm 0 2mm;
+  font-weight: 600;
+  page-break-after: avoid;
+}
+h3 {
+  font-size: 11pt;
+  margin: 5mm 0 1.5mm;
+  font-weight: 600;
+  color: var(--soft);
+  page-break-after: avoid;
+}
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 600; color: var(--soft); }
+
+p { margin: 0 0 2.6mm; text-align: justify; hyphens: auto; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin-bottom: 1mm; }
+hr { border: 0; border-top: 0.6pt solid var(--rule); margin: 6mm 0; }
+a { color: var(--nav); text-decoration: none; }
+
+code {
+  font-size: 0.88em;
+  background: var(--panel);
+  border: 0.4pt solid var(--rule);
+  border-radius: 2pt;
+  padding: 0.3mm 1mm;
+  white-space: nowrap;
+}
+
+pre {
+  background: var(--panel);
+  border: 0.5pt solid var(--rule);
+  border-left: 2pt solid var(--faint);
+  border-radius: 2pt;
+  padding: 2.5mm 3mm;
+  margin: 0 0 3.5mm;
+  font-size: 8.4pt;
+  line-height: 1.42;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  page-break-inside: avoid;
+}
+pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre-wrap; }
+
+blockquote {
+  margin: 0 0 3.5mm;
+  padding: 2mm 3mm;
+  background: #fffaf0;
+  border-left: 2pt solid var(--warn);
+  color: #5a4520;
+  font-size: 9.6pt;
+}
+
+/* --- tabelas --- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 4mm;
+  font-size: 9.2pt;
+  page-break-inside: avoid;
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 8.2pt;
+  letter-spacing: 0.4pt;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-bottom: 0.9pt solid var(--ink);
+  padding: 1.2mm 2mm;
+}
+td { padding: 1.4mm 2mm; border-bottom: 0.4pt solid var(--rule); vertical-align: top; }
+tbody tr:nth-child(even) { background: #fafbfc; }
+
+/* Tabela de teclas: a primeira coluna encolhe ao conteúdo. A classe é posta
+ * pelo compilador quando ele vê que a coluna inteira é monoespaçada, e não
+ * escrita à mão no Markdown. */
+table.keys td:first-child,
+table.keys th:first-child { width: 1%; white-space: nowrap; padding-right: 6mm; }
+
+/* --- figuras --- */
+
+figure {
+  margin: 0 0 4mm;
+  page-break-inside: avoid;
+}
+figure img {
+  width: 100%;
+  display: block;
+  border: 0.5pt solid var(--rule);
+  border-radius: 2pt;
+}
+figcaption {
+  font-size: 8.4pt;
+  color: var(--faint);
+  margin-top: 1.2mm;
+  line-height: 1.35;
+}
+
+/* Figura com chamadas numeradas.
+ *
+ * As posições vêm de `--x` e `--y`, em PERCENTAGEM da imagem, escritas no
+ * próprio Markdown. É HTML cru dentro do Markdown de propósito: mover uma
+ * chamada é editar dois números no mesmo arquivo em que está a legenda, sem
+ * recompor imagem nenhuma e sem inventar sintaxe. */
+figure.callouts { position: relative; }
+figure.callouts b {
+  position: absolute;
+  left: calc(var(--x) * 1%);
+  top: calc(var(--y) * 1%);
+  transform: translate(-50%, -50%);
+  width: 5.4mm; height: 5.4mm;
+  border-radius: 50%;
+  background: #f2bf67;
+  color: #15181c;
+  border: 0.7pt solid #15181c;
+  font: 600 8pt/5.2mm "SF Mono", monospace;
+  text-align: center;
+}
+figure.callouts + ol { counter-reset: none; font-size: 9.2pt; }
+
+/* --- capa --- */
+
+section.cover { text-align: left; page-break-after: always; padding-top: 36mm; }
+section.cover h1 {
+  font-size: 34pt;
+  border: 0;
+  margin-bottom: 1mm;
+  letter-spacing: -0.8pt;
+}
+section.cover .subtitle {
+  font-size: 13pt;
+  color: var(--soft);
+  margin-bottom: 14mm;
+}
+section.cover figure { margin-bottom: 12mm; }
+section.cover .meta { font-size: 9pt; color: var(--faint); }
+
+/* --- sumário --- */
+
+section.toc ol { list-style: none; padding: 0; font-size: 11pt; }
+section.toc li {
+  padding: 1.6mm 0;
+  border-bottom: 0.4pt dotted var(--rule);
+}
+section.toc a { color: var(--ink); }
+
+/* --- avisos --- */
+
+.warn  { color: var(--warn); font-weight: 600; }
+.crit  { color: var(--crit); font-weight: 600; }
+
+.colofon {
+  margin-top: 10mm;
+  padding-top: 3mm;
+  border-top: 0.5pt solid var(--rule);
+  font-size: 8pt;
+  color: var(--faint);
+}

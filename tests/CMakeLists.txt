@@ -134,6 +134,62 @@ foreach(gpu_case starfield relativistic_visual)
         ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
 endforeach()
 
+# ---------------------------------------------------------------------------
+# A terceira suíte: o Godot sem tela (Milestone 7, regra 62).
+#
+# Não é `unit` e não é `gpu`. Corre sem framebuffer, como a headless, mas o que
+# ela verifica não é aritmética: é a CAMADA DE APRESENTAÇÃO -- que o snapshot
+# chega ao cockpit com os campos que os instrumentos leem, que a seleção de alvo
+# funciona, que os jatos acendem pelo acionamento e não pela tecla, que a câmera
+# volta ao preset, que o mapa recebe pontos de trajetória que fecham na elipse
+# que o snapshot reporta.
+#
+# Precisa do Godot e da GDExtension, e por isso pula (77) quando eles não
+# existem, pela mesma política das outras duas: uma máquina que não pôde correr
+# uma suíte não a reprovou.
+#
+#   cmake --build build --target godot-tests
+add_test(NAME "godot.m7" COMMAND "${CMAKE_SOURCE_DIR}/scripts/godot_tests.sh")
+set_tests_properties("godot.m7" PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "godot"
+    TIMEOUT 300
+    ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
+
+# ---------------------------------------------------------------------------
+# As texturas, conferidas antes de serem ligadas (Milestone 7, regras 40 e 47).
+#
+# Não precisa de Godot, de kernels nem de tela: decodifica os PNG em Python puro
+# e mede o que os prompts de docs/assets/ prometem -- proporção, costura entre as
+# bordas, uniformidade dos polos, convenção de normal map, e o registro entre o
+# albedo da Terra e as suas luzes noturnas.
+#
+# Foi ele que reprovou o `moon_normal` entregue: uma imagem que parecia um normal
+# map, registrava com o albedo, e cujos canais R e G seguiam o BRILHO em vez da
+# inclinação. Sem tela nem aritmética de órbita se podia ver isso; só medindo.
+#
+# Pula (77) quando não há texturas, que é o estado de um clone antes de alguém
+# gerar os assets -- e não é uma falha.
+add_test(NAME "assets.textures"
+         COMMAND "${CMAKE_COMMAND}" -E env python3
+                 "${CMAKE_SOURCE_DIR}/scripts/validate_textures.py")
+set_tests_properties("assets.textures" PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "assets"
+    TIMEOUT 600)
+
+add_custom_target(godot-tests
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
+            --label-regex "godot" --output-on-failure
+    COMMENT "The presentation suite: Godot without a display"
+    USES_TERMINAL)
+
+add_custom_target(asset-validation
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
+            --label-regex "assets" --output-on-failure
+    COMMENT "The texture checks: no engine, no kernels, no display"
+    USES_TERMINAL)
+
 add_custom_target(gpu-validation
     COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
             --label-regex "gpu" --output-on-failure

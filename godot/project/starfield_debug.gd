@@ -35,7 +35,7 @@ const OUT_DIR := "user://starfield"
 ## turns that sentence into a measurement.
 const PRODUCTION_SKY_RADIUS := 1.9e5
 const PRODUCTION_CAMERA_FAR := 2.0e5
-## Kept in step with main.gd's CAMERA_NEAR. Stage 3b is what decides its value.
+## Kept in step with CameraRig.WORLD_NEAR. Stage 3b is what decides its value.
 const PRODUCTION_CAMERA_NEAR := 0.05
 ## What the scene shipped with through Milestone 6, kept here as the control.
 const MILESTONE_6_CAMERA_NEAR := 0.01

@@ -18,20 +18,19 @@ PointingController::PointingController(const ephemeris::EphemerisProvider& provi
     }
 }
 
-std::optional<Vec3> PointingController::desired_direction(
-    const propagation::PropagationState& state, time::CoordinateTime t) const {
-    if (!command_.mode.has_value()) {
-        return std::nullopt;
-    }
-    if (*command_.mode == navigation::GuidanceMode::Inertial) {
+std::optional<Vec3> PointingController::direction_for(navigation::GuidanceMode mode,
+                                                      celestial::BodyId reference,
+                                                      const propagation::PropagationState& state,
+                                                      time::CoordinateTime t) const {
+    if (mode == navigation::GuidanceMode::Inertial) {
         return command_.inertial_direction.normalized();
     }
 
-    const auto reference = provider_.state(command_.reference, t, frame_);
-    const Vec3 r = state.state.position - reference.state.position;
-    const Vec3 v = state.state.velocity - reference.state.velocity;
+    const auto body = provider_.state(reference, t, frame_);
+    const Vec3 r = state.state.position - body.state.position;
+    const Vec3 v = state.state.velocity - body.state.velocity;
 
-    switch (*command_.mode) {
+    switch (mode) {
         case navigation::GuidanceMode::Prograde:   return v.normalized();
         case navigation::GuidanceMode::Retrograde: return -v.normalized();
         case navigation::GuidanceMode::Normal:     return cross(r, v).normalized();
@@ -46,6 +45,14 @@ std::optional<Vec3> PointingController::desired_direction(
         case navigation::GuidanceMode::Inertial:   break;
     }
     return command_.inertial_direction.normalized();
+}
+
+std::optional<Vec3> PointingController::desired_direction(
+    const propagation::PropagationState& state, time::CoordinateTime t) const {
+    if (!command_.mode.has_value()) {
+        return std::nullopt;
+    }
+    return direction_for(*command_.mode, command_.reference, state, t);
 }
 
 std::optional<Quaternion> PointingController::desired_orientation(
@@ -139,18 +146,47 @@ double PointingController::pointing_error(const propagation::PropagationState& s
 RcsForce::RcsForce(const RcsSystem& rcs, const PointingController& controller)
     : rcs_(rcs), controller_(controller) {}
 
+std::vector<double> RcsForce::throttles(const propagation::PropagationState& state,
+                                        time::CoordinateTime t) const {
+    const Vec3 requested_torque = manual_torque_.norm_squared() > 0.0
+                                      ? manual_torque_
+                                      : controller_.desired_torque(state, t);
+
+    std::vector<double> open = rcs_.allocate(requested_torque);
+
+    if (manual_force_.norm_squared() > 0.0) {
+        // A translation demand on top of a rotation demand. The two allocations
+        // are added and the SUM is clamped per thruster, which is what the
+        // hardware does: a valve that is already wide open for the slew cannot
+        // open further for the push, and the shortfall shows up as the
+        // translation being weaker than asked rather than as a torque nobody
+        // commanded. Not an optimal allocator, for the same reason allocate()
+        // is not one, and named as such in the same place.
+        const auto translation = rcs_.allocate_force(manual_force_);
+        for (std::size_t i = 0; i < open.size() && i < translation.size(); ++i) {
+            open[i] = std::clamp(open[i] + translation[i], 0.0, 1.0);
+        }
+    }
+    return open;
+}
+
 gravity::ForceResult RcsForce::evaluate(const propagation::PropagationState& state,
                                         time::CoordinateTime t) const {
     gravity::ForceResult result{};
 
-    const Vec3 requested = manual_torque_.norm_squared() > 0.0
-                               ? manual_torque_
-                               : controller_.desired_torque(state, t);
-    if (requested.norm_squared() <= 0.0) {
+    const auto open = throttles(state, t);
+    bool any = false;
+    for (const double throttle : open) {
+        if (throttle > 0.0) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) {
         return result;
     }
 
-    const RcsOutput output = rcs_.evaluate(requested);
+    const RcsOutput output = rcs_.evaluate(open);
 
     result.torque = output.torque_body;
     // The force is produced in the body frame and acts in the inertial one. A

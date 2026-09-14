@@ -19,6 +19,11 @@ external/*.log
 kernels/spice/
 kernels/*.log
 
+# Lunar topography: LOLA LDEM, fetched by scripts/fetch_lunar_dem.sh (33 MB).
+# Dado obtido, versionado por quem o produz -- mesma política dos kernels. O que
+# o repositório guarda é o normal map DERIVADO dele, que tem 2,9 MB.
+external/lola/
+
 # Star catalogue: data, fetched by scripts/fetch_star_catalog.sh
 catalogs/bsc5.*
 catalogs/SHA256SUMS
