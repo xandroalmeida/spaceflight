@@ -130,6 +130,14 @@ executar. E o custo tem fórmula: o atraso do autopilot vai exatamente como
 `1/ω_n` (produto `atraso × ω_n` constante a 0,5 % ao longo de 16× em largura de
 banda), e a partir de `ω_n = 0,1 rad/s` a captura entra na especificação.
 
+### O que roda onde
+
+| caminho | planejador | medido em |
+|---|---|---|
+| `tools/lunar-campaign` | `core/navigation/lunar_transfer.hpp` | 365 épocas, 100 % |
+| `orbit-cli intercept` | Lambert + corretor, sem busca | comando de diagnóstico, não regressão |
+| tecla `J` na cena | `godot/.../mission_planner.cpp` | não requalificado nesta entrega |
+
 ### Sensibilidade de Oberth
 
 A janela da queima de captura é estreita e simétrica: ±30 s leva a
@@ -282,6 +290,15 @@ Registrado porque a regra do brief é explicar, não maximizar verde.
   época chegou perto de acioná-las — a campanha não testa margem de combustível.
 - **O autopilot não atinge a especificação** com os ganhos do cenário. O mecanismo
   está medido e o remédio demonstrado (`ω_n ≥ 0,1`); ele não foi aplicado à cena.
+- **A cena não usa o planejador endurecido.** `J` na UI continua chamando
+  `godot/gdextension/src/mission_planner.cpp`, que é a versão anterior: tem busca
+  própria (e por isso não quebra), mas sem a taxonomia, sem a função de custo,
+  sem o preço da cônica de partida, e com o estágio 1 mirando o centro do corpo.
+  Medido agora, ele escolhe `injection 4548,5 m/s, tof 6,75 d, estágio 1 parado a
+  229 km` contra `3 180 m/s, 3–5,5 d` do módulo novo. Testar a navegação pela
+  interface **não** testa a Parte A: ela vive em `core/navigation/lunar_transfer.hpp`
+  e só `tools/lunar-campaign` a chama. Religar os dois é a de-duplicação óbvia e
+  não foi feita nesta entrega.
 - **Uma só órbita de estacionamento** em todas as 365 épocas.
 - **Uma só GPU**: Apple M5 Pro, Metal 3.2, Godot 4.5.stable. Os números de passo
   de profundidade dependem de o buffer ter 24 bits; o estágio 3b mede onde o
