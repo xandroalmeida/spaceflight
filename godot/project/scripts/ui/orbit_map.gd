@@ -360,8 +360,26 @@ func _draw_system_grid() -> void:
 		draw_arc(_origin, radius, 0.0, TAU, 96, Palette.PANEL_EDGE.darkened(0.3),
 			maxf(unit() * 0.12, 1.0))
 		draw_text_at(_origin + Vector2(radius + unit() * 1.5, -unit() * 1.0),
-			"%.3g AU" % (ring / AU), 3.2, Palette.DIM)
+			_au_label(ring / AU), 3.2, Palette.DIM)
 		ring += step
+
+
+func _au_label(au: float) -> String:
+	## ⚠️ `%g` NÃO existe no formatador do GDScript.
+	##
+	## `"%.3g AU" % 0.5` imprime literalmente `%.3g AU`, e foi exatamente isso que
+	## a primeira captura do mapa do sistema solar mostrou em cada anel de escala:
+	## o mapa inteiro correto e as distâncias ilegíveis. Godot suporta
+	## `%s %c %d %o %x %X %f %v %%` e mais nada.
+	##
+	## As casas decimais são escolhidas pela magnitude, que é o que `%g` faria.
+	if au >= 10.0:
+		return "%.0f AU" % au
+	if au >= 1.0:
+		return "%.1f AU" % au
+	if au >= 0.1:
+		return "%.2f AU" % au
+	return "%.3f AU" % au
 
 
 func _label_fits(at: Vector2, placed: Array[Vector2]) -> bool:

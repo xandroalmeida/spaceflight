@@ -188,7 +188,11 @@ func _ready() -> void:
 	rcs_visual.build(simulation.get_rcs_thrusters())
 
 	_headless = HeadlessDriver.new(self)
+	# Dois roteiros, duas variáveis. O do M7 continua a produzir as mesmas nove
+	# imagens de um milestone fechado; o do M8 voa até Marte.
 	var shot_dir := OS.get_environment("SPACEFLIGHT_M7_SHOTS")
+	if shot_dir.is_empty():
+		shot_dir = OS.get_environment("SPACEFLIGHT_M8_SHOTS")
 	if not shot_dir.is_empty():
 		_shots = ShotDirector.new(self, shot_dir)
 
@@ -545,6 +549,24 @@ func _update_tracks(delta: float) -> void:
 	if _track_timer > 0.0:
 		return
 	_track_timer = 0.25
+
+	# Enquanto a busca corre, o quadro cede a efeméride.
+	#
+	# ⚠️ O planejador roda numa thread e o CSPICE tem um mutex global: toda
+	# consulta que este quadro faz é uma consulta que o worker espera. E este
+	# bloco é o maior consumidor da cena -- 256 chamadas para o caminho do alvo,
+	# mais uma por amostra do arco planejado, quatro vezes por segundo.
+	#
+	# Medido numa corrida sem tela, onde o quadro não tem limite de taxa e a
+	# contenção é pior do que num jogo a 60 fps: uma busca Terra→Marte que leva
+	# 64 s pela linha de comando não tinha terminado de ordenar as candidatas
+	# depois de milhares de quadros.
+	#
+	# O que se perde é um mapa parado durante a busca. Nada se move nele que
+	# alguém possa ver num minuto -- e o plano que ele vai desenhar ainda não
+	# existe.
+	if simulation.is_planning():
+		return
 	# O mapa do sistema solar só é reconstruído quando está aberto: são mais umas
 	# centenas de consultas à efeméride, e pagá-las com o mapa fechado seria pagar
 	# por um desenho que ninguém vê.

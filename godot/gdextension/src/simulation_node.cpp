@@ -189,6 +189,14 @@ void SpaceflightSimulation::_bind_methods() {
                                 &SpaceflightSimulation::get_system_map);
     godot::ClassDB::bind_method(D_METHOD("get_system_orbit_paths", "samples_per_body"),
                                 &SpaceflightSimulation::get_system_orbit_paths);
+    godot::ClassDB::bind_method(D_METHOD("set_reference_body", "name"),
+                                &SpaceflightSimulation::set_reference_body);
+    godot::ClassDB::bind_method(D_METHOD("get_reference_body"),
+                                &SpaceflightSimulation::get_reference_body);
+    godot::ClassDB::bind_method(D_METHOD("set_auto_reference", "enabled"),
+                                &SpaceflightSimulation::set_auto_reference);
+    godot::ClassDB::bind_method(D_METHOD("get_auto_reference"),
+                                &SpaceflightSimulation::get_auto_reference);
     godot::ClassDB::bind_method(D_METHOD("set_target_body", "name"),
                                 &SpaceflightSimulation::set_target_body);
     godot::ClassDB::bind_method(D_METHOD("get_target_body"),
@@ -483,12 +491,122 @@ void SpaceflightSimulation::advance(double wall_seconds) {
     });
 }
 
+sf::celestial::BodyId SpaceflightSimulation::natural_reference() const {
+    // Computed from the snapshot that was JUST BUILT, and therefore from
+    // positions the frame has already paid for.
+    //
+    // ⚠️ The first version queried the ephemeris itself -- the Sun, eight
+    // planets, then the children of whichever won -- about forty extra spkez
+    // calls per frame on top of the thirteen the snapshot already makes. Every
+    // one of them takes CSPICE's global mutex, which is the same mutex the
+    // planning worker needs, and the effect was not subtle: an Earth-Mars search
+    // that takes 64 seconds from the command line had not finished ranking its
+    // candidates after four thousand frames of an uncapped headless run. The
+    // frame loop was starving the worker.
+    //
+    // Reading the snapshot costs nothing and the answer is one frame stale,
+    // which for a label that changes three times in two hundred days is not a
+    // difference anyone can see.
+    if (system_ == nullptr || snapshot_.bodies.empty()) {
+        return sf::celestial::bodies::earth;
+    }
+
+    auto position_of = [&](sf::celestial::BodyId id) -> const sf::math::Vec3* {
+        const auto* body = snapshot_.find(id);
+        return body != nullptr ? &body->position : nullptr;
+    };
+
+    const sf::math::Vec3 ship = snapshot_.spacecraft.position;
+    auto current = system_->find(sf::celestial::bodies::sun);
+    if (current == nullptr || position_of(current->entry.id) == nullptr) {
+        return sf::celestial::bodies::earth;
+    }
+
+    // Walk DOWN from the Sun: the Sun, then whichever planet's neighbourhood
+    // holds the ship, then whichever of that planet's moons does. The first
+    // level that has no match ends the walk, so a ship inside Mars's
+    // neighbourhood but nowhere near Phobos gets Mars.
+    //
+    // "Neighbourhood" is r = R (m/M)^(2/5) against the body's own parent. It is a
+    // LENGTH SCALE and not a boundary: nothing in the dynamics knows it exists,
+    // gravity stays multibody, and what it decides is which body a readout is
+    // labelled against (rule 65).
+    for (int depth = 0; depth < 4; ++depth) {
+        const auto* parent_position = position_of(current->entry.id);
+        if (parent_position == nullptr || !(current->gm > 0.0)) {
+            break;
+        }
+        const sf::celestial::SolarSystemBody* next = nullptr;
+        double best = std::numeric_limits<double>::infinity();
+        for (const auto id : sf::celestial::children_of(current->entry.id)) {
+            const auto* child = system_->find(id);
+            const auto* child_position = position_of(id);
+            if (child == nullptr || child_position == nullptr || !(child->gm > 0.0)) {
+                continue;
+            }
+            const double separation = (*child_position - *parent_position).norm();
+            const double influence = separation * std::pow(child->gm / current->gm, 0.4);
+            const double distance = (ship - *child_position).norm();
+            if (influence > 0.0 && distance < influence && distance < best) {
+                best = distance;
+                next = child;
+            }
+        }
+        if (next == nullptr) {
+            break;
+        }
+        current = next;
+    }
+    return current->entry.id;
+}
+
+bool SpaceflightSimulation::set_reference_body(const godot::String& name) {
+    if (builder_ == nullptr || system_ == nullptr) {
+        last_error_ = "set_reference_body: configure() first";
+        return false;
+    }
+    const std::string wanted{name.utf8().get_data()};
+    const auto* body = system_->find(wanted);
+    if (body == nullptr || !body->has_ephemeris) {
+        last_error_ = "set_reference_body: no body named \"" + wanted + "\"";
+        return false;
+    }
+    auto_reference_ = false;
+    builder_->set_reference(body->entry.id);
+    rebuild_snapshot();
+    return true;
+}
+
+godot::String SpaceflightSimulation::get_reference_body() const {
+    return godot::String{snapshot_.spacecraft.reference.name().c_str()};
+}
+
+void SpaceflightSimulation::set_auto_reference(bool enabled) {
+    auto_reference_ = enabled;
+    if (enabled) {
+        rebuild_snapshot();
+    }
+}
+
+bool SpaceflightSimulation::get_auto_reference() const { return auto_reference_; }
+
 void SpaceflightSimulation::rebuild_snapshot() {
     if (builder_ == nullptr) {
         return;
     }
     builder_->set_time_warp(clock_->time_warp());
     snapshot_ = builder_->build(state_, clock_->coordinate_time());
+
+    // AFTER the build, for the NEXT one: natural_reference() reads the snapshot's
+    // own body positions rather than asking the ephemeris again. See the note
+    // there for what that costs and what the alternative cost.
+    if (auto_reference_) {
+        const auto wanted = natural_reference();
+        if (wanted != snapshot_.spacecraft.reference) {
+            builder_->set_reference(wanted);
+            snapshot_ = builder_->build(state_, clock_->coordinate_time());
+        }
+    }
 }
 
 void SpaceflightSimulation::set_render_scale(double scale) {

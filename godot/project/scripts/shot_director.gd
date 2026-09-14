@@ -41,7 +41,7 @@ func _init(owner: Node, out_directory: String) -> void:
 	flight = owner
 	directory = out_directory
 	DirAccess.make_dir_recursive_absolute(directory)
-	_steps = _script()
+	_steps = _m8_script() if OS.get_environment("SPACEFLIGHT_M8_SHOTS") != "" else _script()
 	# Iterar na imagem não pode exigir voar até à Lua primeiro. Com
 	# SPACEFLIGHT_SHOT_STOP=N a sequência para no passo N, o que faz uma volta de
 	# ajuste visual custar segundos em vez de minutos.
@@ -260,6 +260,155 @@ func _script() -> Array[Dictionary]:
 			"shot": "lunar-orbit-external",
 		},
 	]
+
+
+func _m8_script() -> Array[Dictionary]:
+	## O roteiro do Milestone 8 (regra 109): Terra → Marte, de ponta a ponta.
+	##
+	## Separado de `_script()` e não acrescentado a ele, porque o roteiro do M7 é
+	## evidência de um milestone fechado e tem de continuar a produzir as mesmas
+	## nove imagens. Os dois partilham as condições, que é o que importa: cada
+	## passo espera um ESTADO e não um número de quadros escolhido à mão.
+	##
+	##     SPACEFLIGHT_M8_SHOTS=docs/validation/m8 godot --path godot/project
+	return [
+		{
+			"name": "cockpit in Earth orbit",
+			"setup": func() -> void:
+				flight.camera_rig.set_mode(CameraRig.Mode.COCKPIT)
+				flight.controls.set_throttle(0.0),
+			"frames": 90,
+			"shot": "01-earth-orbit",
+		},
+		{
+			"name": "mission computer, Mars selected",
+			"setup": func() -> void:
+				flight.set_target("Mars")
+				flight._show_panel(flight.mission_panel, true),
+			"frames": 30,
+			"shot": "02-mission-computer-mars",
+		},
+		{
+			"name": "searching for a transfer to Mars",
+			"setup": func() -> void:
+				flight.controls.point("")
+				# 500 km circular, que é o default de Marte (regra 57).
+				flight.plan_mission("Mars", 500.0, 500.0),
+			# Fotografa a BUSCA a correr: o painel com as contagens a subir é a
+			# prova de que ela não congela o jogo (regra 48). Trinta quadros
+			# depois de começar, e a busca leva um minuto.
+			"frames": 30,
+			"shot": "03-searching",
+		},
+		{
+			"name": "trajectory options",
+			"setup": func() -> void: pass,
+			"until": _plan_ready,
+			# A busca leva 64 s pela linha de comando e cerca de três vezes isso
+			# dentro da cena: o quadro e o worker partilham o mutex global do
+			# CSPICE, e cada consulta que o `advance()` faz é uma que o worker
+			# espera. Medido: 12 000 quadros -- 200 s a 60 fps -- deixavam a busca
+			# a meio, com 1,3M dos 2,4M passos feitos, e o mapa seguinte saía sem
+			# trajetória nenhuma desenhada.
+			"limit": 40000,
+			"shot": "04-trajectory-options",
+		},
+		{
+			"name": "the solar system map, with the transfer on it",
+			"setup": func() -> void:
+				flight._show_panel(flight.mission_panel, false)
+				flight._cycle_map_mode()
+				flight.orbit_map.zoom = 1.0,
+			"frames": 40,
+			"shot": "05-solar-system-map",
+		},
+		{
+			"name": "execute, and the departure burn",
+			"setup": func() -> void:
+				flight._show_panel(flight.orbit_map, false)
+				flight.arm_mission()
+				flight.camera_rig.set_mode(CameraRig.Mode.EXTERNAL_ORBIT)
+				flight.camera_rig.orbit_zoom = 1.25
+				_set_warp(2),
+			"until": _engine_running,
+			"limit": 12000,
+			"shot": "06-departure-burn",
+		},
+		{
+			"name": "interplanetary cruise",
+			"setup": func() -> void:
+				flight.camera_rig.set_mode(CameraRig.Mode.COCKPIT)
+				_set_warp(7),
+			# Longe o bastante da Terra para o referencial já ser o Sol: é essa
+			# troca que a imagem tem de mostrar (regras 64, 65).
+			"until": _heliocentric,
+			"limit": 12000,
+			"shot": "07-interplanetary-cruise",
+		},
+		{
+			"name": "the solar system map, mid-cruise",
+			"setup": func() -> void:
+				flight._cycle_map_mode()
+				flight.orbit_map.zoom = 1.0,
+			"frames": 40,
+			"shot": "08-cruise-map",
+		},
+		{
+			"name": "Mars approach",
+			"setup": func() -> void:
+				flight._show_panel(flight.orbit_map, false)
+				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE)
+				# O warp desce quando há algo para ver: as três queimas de
+				# captura duram doze minutos, doze minutos e quinze segundos, e a
+				# 1e7x um quadro são 0,87 DIA -- todas as três caberiam entre
+				# dois quadros e a sequência fotografaria o antes e o depois.
+				_set_warp(4),
+			"until": _within_approach,
+			"limit": 24000,
+			"shot": "09-mars-approach",
+		},
+		{
+			"name": "capture burn",
+			"setup": func() -> void:
+				_set_warp(2),
+			"until": _close_to_target,
+			"limit": 24000,
+			"shot": "10-mars-capture",
+		},
+		{
+			"name": "settled Mars orbit",
+			"setup": func() -> void:
+				_set_warp(2)
+				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE),
+			"until": _settled_in_lunar_orbit,
+			"limit": 24000,
+			"shot": "11-mars-orbit",
+		},
+		{
+			"name": "the ship in Mars orbit, with Mars behind it",
+			"setup": func() -> void:
+				_set_warp(1)
+				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE)
+				flight.camera_rig.orbit_azimuth = PI
+				flight.camera_rig.orbit_elevation = 0.34
+				flight.camera_rig.orbit_zoom = 2.4,
+			"until": _over_sunlit_moon,
+			"limit": 12000,
+			"shot": "12-mars-orbit-external",
+		},
+	]
+
+
+func _plan_ready() -> bool:
+	return not flight.simulation.is_planning() \
+		and flight.simulation.has_planned_transfer()
+
+
+func _heliocentric() -> bool:
+	## O referencial trocou para o Sol, ou seja: a nave saiu da vizinhança
+	## gravitacional da Terra. É um estado da simulação e não uma distância
+	## escolhida à mão.
+	return flight.simulation.get_reference_body() == "Sun"
 
 
 ## As condições longas vivem aqui e não dentro do dicionário. Um `func` de

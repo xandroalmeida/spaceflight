@@ -137,6 +137,20 @@ func _test_interplanetary_formatting() -> void:
 	_check(Fmt.distance(8.42e10).length() < 20,
 		"uma distância de 84 milhões de km cabe num mostrador: %s" % Fmt.distance(8.42e10))
 
+	# ⚠️ `%g` não existe no formatador do GDScript, e um formato inválido não é um
+	# erro: ele é impresso LITERALMENTE. A primeira captura do mapa do sistema
+	# solar saiu com "%.3g AU" em cada anel de escala, e nada -- nem o parser, nem
+	# os testes, nem o log -- tinha dito uma palavra.
+	#
+	# Então o que se verifica é a ausência do caractere de formato na SAÍDA, que é
+	# o único sítio onde esse defeito aparece.
+	var map := OrbitMap.new()
+	for au: float in [0.05, 0.387, 1.0, 1.524, 5.2, 30.1]:
+		var label: String = map._au_label(au)
+		_check(not label.contains("%"),
+			"o rótulo de %.3f UA é texto e não um formato por imprimir: \"%s\"" % [au, label])
+	map.free()
+
 
 func _test_system_map(simulation: SpaceflightSimulation) -> void:
 	print("\nmapa do sistema solar (regras 26-31)")

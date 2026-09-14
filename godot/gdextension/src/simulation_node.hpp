@@ -361,6 +361,32 @@ public:
     // asks once when the map opens.
     godot::Dictionary get_system_orbit_paths(int samples_per_body) const;
 
+    // --- which body the cockpit measures against (rules 63-65) --------------
+    //
+    // "AP 402 km" is a lie without the body it is about, and during an
+    // interplanetary cruise the right body changes three times: the Earth while
+    // the ship is still near it, the Sun for two hundred days, Mars on arrival.
+    //
+    // ⚠️ This is NAVIGATION CONTEXT and not physics. Rule 65 is explicit: no
+    // sphere of influence appears anywhere in the dynamics, gravity stays
+    // multibody at every instant, and nothing below changes a single force. What
+    // it changes is which body the readouts are relative to -- which is a
+    // question about a display, and is answered here so that six instruments
+    // cannot answer it six different ways.
+    //
+    // The rule: the DEEPEST body in the directory whose gravitational
+    // neighbourhood contains the ship, walking down from the Sun. Neighbourhood
+    // meaning r = R (m/M)^(2/5) against the body's own parent -- the same
+    // arithmetic the planner uses to size a corrector tolerance, and used here
+    // for the same reason: it is a length scale, not a boundary.
+    bool set_reference_body(const godot::String& name);
+    godot::String get_reference_body() const;
+
+    // Off leaves the reference wherever it was last set, which is what the
+    // Milestone 7 scene did (the Earth, forever).
+    void set_auto_reference(bool enabled);
+    bool get_auto_reference() const;
+
     // Installs the last planned transfer. False, with a reason in
     // get_last_error(), if there is nothing to arm or if the departure has
     // already passed -- flying a plan whose injection epoch is behind the ship
@@ -498,6 +524,9 @@ private:
         double wall_seconds{0.0};
     };
     std::unique_ptr<PlanningJob> job_;
+    bool auto_reference_{true};
+
+    [[nodiscard]] sf::celestial::BodyId natural_reference() const;
 
     void join_worker();
 };

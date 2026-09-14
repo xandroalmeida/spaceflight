@@ -55,6 +55,7 @@ func _draw() -> void:
 		return origin + Vector2(d.dot(u), -d.dot(v)) / extent * box
 
 	_draw_central_body(origin, extent, box)
+	_draw_reference_banner()
 
 	# A órbita. Uma linha por segmento e não `draw_polyline`, porque uma
 	# hipérbole vem com as pontas muito espaçadas e o antialiasing de uma
@@ -106,6 +107,19 @@ func _draw_central_body(origin: Vector2, extent: float, box: float) -> void:
 		maxf(unit() * 0.28, 1.0))
 	draw_text_at(origin + Vector2(0.0, screen_radius + unit() * 5.0),
 		data.get("reference", "?"), 4.0, Palette.SECONDARY, HORIZONTAL_ALIGNMENT_CENTER)
+
+
+func _draw_reference_banner() -> void:
+	## Regra 64: dizer, sem ambiguidade, contra QUE corpo os números são lidos.
+	##
+	## Num voo Terra-Lua a resposta nunca muda e o rótulo sob o planeta bastava.
+	## Num cruzeiro interplanetário ela muda três vezes -- Terra, Sol, Marte -- e
+	## "AP 402 km" sem o corpo ao lado não é um número, é um número e um palpite.
+	var u := unit()
+	var reference := String(data.get("reference", "?")).to_upper()
+	draw_text_at(Vector2(u * 3.0, u * 12.0), "REFERENCE", 3.4, Palette.DIM)
+	draw_text_at(Vector2(u * 3.0, u * 17.5), reference, 5.0,
+		Palette.WARNING if reference == "SUN" else Palette.SECONDARY)
 
 
 func _draw_apsides(track: PackedVector3Array, centre: Vector3, to_screen: Callable) -> void:

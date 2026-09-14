@@ -1,4 +1,4 @@
-# Asset manifest — Milestone 7
+# Asset manifest — Milestones 7 e 8
 
 O que a imagem precisa, o que já existe, e o que tem de ser gerado fora daqui.
 
@@ -38,6 +38,9 @@ passar em tudo, ele foi regerado e o manifesto é que está desatualizado.
 | `INTEGRATED` | no caminho de destino e carregado pela cena |
 | `REJECTED` | entregue, **conferido e recusado**; o arquivo fica, com a medição que o reprovou |
 | `OPTIONAL` | melhoraria a imagem e nada depende dele |
+| `PROCEDURAL` | gerado em código; o arquivo externo substitui-o sem outra mudança |
+| `BACKLOG` | reconhecido como desejável, não feito, não bloqueante |
+| `REFUSED` | **não** deve ser gerado por modelo de imagem: é uma grandeza física com fonte medida (regra 25) |
 
 ## Planetas
 
@@ -49,7 +52,12 @@ passar em tudo, ele foi regerado e o manifesto é que está desatualizado.
 | `earth_normal` | `OPTIONAL` | sem relevo | — | `godot/project/assets/textures/earth/earth_normal.png` |
 | `moon_albedo` | `INTEGRATED` | mares no centro (face visível), terras altas nas bordas, raios de Tycho | [prompt](planets/moon-albedo-codex-prompt.md) | `assets/textures/moon/moon_albedo.png` |
 | `moon_normal` | `INTEGRATED` | **derivado**, não pintado: LOLA LDEM_16 → `scripts/make_moon_normal.py`. Mares em (127–131, 126–128, 254–255), \|n\| = 1,000 | [como](#o-normal-map-nao-e-uma-imagem) | `assets/textures/moon/moon_normal.png` |
+| `mars_albedo` | `PROCEDURAL` | substituto: ocre, regiões escuras no sul, calotas de borda irregular. Acerta a cor e o contraste; **não é um mapa de Marte** | [prompt](planets/mars-albedo-codex-prompt.md) | `assets/textures/mars/mars_albedo.png` |
+| `mars_normal` | `REFUSED` | topografia do MOLA existe e é medida: se o relevo for desejado ele é **calculado**, como o da Lua. Não pedir a um gerador de imagens (regra 25) | [porquê](planets/mars-albedo-codex-prompt.md#o-que-nao-pedir-a-um-gerador-de-imagens) | — |
+| Mercúrio, Vênus, Júpiter, Saturno, Urano, Netuno, Plutão | `PROCEDURAL` | cor média do disco, em `CelestialView._colour_for`. Reconhecíveis a distância e nada mais (regra 69) | — | — |
+| anéis de Saturno | `BACKLOG` | desejáveis para reconhecimento (regra 70); nada no M8 depende deles | — | — |
 | limbo atmosférico da Terra | `PROCEDURAL` | shader de rim scattering | — | `shaders/planet_surface.gdshader` |
+| limbo atmosférico de Marte | `PROCEDURAL` | mesmo shader, 0,12 de intensidade e ocre: a atmosfera marciana tem 0,6 % da pressão terrestre e o limbo dela é um fio. É DESENHO -- não há aerocaptura (regra 56) | — | `shaders/relativistic_body.gdshader` |
 | disco e brilho do Sol | `PROCEDURAL` | shader auto-luminoso + `DirectionalLight3D` | — | `shaders/relativistic_body.gdshader` |
 
 ### O normal map não é uma imagem

@@ -39,6 +39,16 @@ func _draw() -> void:
 		("%s%s" % ["-" if closing < 0.0 else "+", Fmt.speed(absf(closing))]),
 		7.5, Palette.OK if closing > 0.0 else Palette.WARNING)
 
+	# A fase da missão, que durante um cruzeiro de duzentos dias é a diferença
+	# entre "está tudo bem" e "algo devia ter acontecido" (regra 62).
+	#
+	# ⚠️ É uma STRING que vem pronta do core. A classificação depende de onde a
+	# esfera de influência do destino está e de onde as queimas caem, e isso é
+	# física -- `core/navigation/mission_execution.hpp`. Este mostrador imprime.
+	var phase := String(data.get("mission_phase", ""))
+	if not phase.is_empty() and phase != "IDLE":
+		draw_text_at(Vector2(u * 3.0, u * 8.0), phase.replace("_", " "), 4.4, Palette.PLAN)
+
 	_draw_bearing(Vector2(size.x * 0.76, size.y * 0.42), minf(size.x * 0.20, size.y * 0.28))
 	_draw_intercept(Vector2(u * 3.0, size.y - u * 5.5), distance, closing)
 

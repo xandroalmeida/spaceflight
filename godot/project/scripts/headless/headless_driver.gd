@@ -24,12 +24,22 @@ var _slew_commanded := false
 var _burn_commanded := false
 var _cruise_commanded := false
 var _mission_commanded := false
+var _mission_armed := false
 var _mission_reported := false
+
+## Para onde a corrida sem tela voa. A Lua por omissão, porque é o caso
+## qualificado; `SPACEFLIGHT_HEADLESS_DESTINATION=Mars` é como o Milestone 8 se
+## verifica de ponta a ponta sem tela.
+var _destination := "Moon"
 
 
 func _init(owner: Node) -> void:
 	flight = owner
 	mission_mode = OS.get_environment("SPACEFLIGHT_HEADLESS_MISSION") == "1"
+	var wanted := OS.get_environment("SPACEFLIGHT_HEADLESS_DESTINATION")
+	if not wanted.is_empty():
+		_destination = wanted
+		mission_mode = true
 
 
 func drive(text: String) -> void:
@@ -39,7 +49,7 @@ func drive(text: String) -> void:
 		return
 
 	if mission_mode:
-		_fly_to_the_moon(s, text)
+		_fly_the_mission(s, text)
 		return
 
 	# Comanda uma guinada de passagem: o erro de apontamento impresso exercita
@@ -114,19 +124,54 @@ func _warp_schedule(snapshot: Dictionary) -> void:
 		print("\n[headless] CRUISE -- exhaust 0.5 c, budget 0.9048 c")
 
 
-func _fly_to_the_moon(s: Dictionary, text: String) -> void:
-	## A missão inteira, sem teclado: planeia, ARMA, e deixa o warp levar os seis
-	## dias e três quartos. `run_mission` parte cada quadro nas épocas de ignição
-	## e de corte, de modo que um quadro que abranja uma queima inteira ainda a
-	## integra corretamente -- e é por isso que warpar através de uma é seguro
-	## aqui e não seria se `advance()` chamasse `propagate()` diretamente.
+func _fly_the_mission(s: Dictionary, text: String) -> void:
+	## A missão inteira, sem teclado: escolhe o destino, PROCURA, arma, e deixa o
+	## warp levar os dias -- seis e três quartos até à Lua, duzentos e quatro até
+	## Marte.
+	##
+	## `run_mission` parte cada quadro nas épocas de ignição e de corte, de modo
+	## que um quadro que abranja uma queima inteira ainda a integra corretamente
+	## -- e é por isso que warpar através de uma é seguro aqui e não seria se
+	## `advance()` chamasse `propagate()` diretamente. A 1e7x um quadro são
+	## 166 667 s e a queima de trim em Marte são 15: sem esse corte ela
+	## desapareceria entre dois quadros.
+	##
+	## A busca agora é assíncrona, então isto é uma máquina de estados e não duas
+	## chamadas seguidas. Essa é a diferença que interessa: `plan_mission()`
+	## devolve "comecei", não "encontrei".
 	if not _mission_commanded and s["elapsed_s"] > 1.0:
 		_mission_commanded = true
-		if flight.plan_mission() and flight.arm_mission():
-			# 1e5: uma transferência de 6,75 dias em cerca de 1200 quadros a esta
-			# taxa de quadros.
-			flight.controls.warp_index = 5
+		flight.set_target(_destination)
+		var altitude := 100.0 if _destination == "Moon" else 500.0
+		print("\n[headless] searching for a transfer to %s (%.0f km circular)"
+			% [_destination, altitude])
+		flight.plan_mission(_destination, altitude, altitude)
+
+	# Enquanto a busca corre, o quadro continua a andar -- que é o ponto dela.
+	if flight.simulation.is_planning():
+		_frames += 1
+		if _frames % PRINT_EVERY_FRAMES == 0:
+			var progress: Dictionary = flight.simulation.get_planning_progress()
+			print("[headless] searching: %s, %d of %d screened, %d flown"
+				% [progress.get("stage", "?"), progress.get("candidates_screened", 0),
+				   progress.get("candidates_considered", 0),
+				   progress.get("candidates_flown", 0)])
+		return
+
+	if _mission_commanded and not _mission_armed and flight.simulation.has_planned_transfer():
+		_mission_armed = true
+		var plan: Dictionary = flight.simulation.get_plan()
+		print("\n[headless] plan: %s -> %s, %s, %.0f m/s total"
+			% [plan.get("origin", "?"), plan.get("target", "?"),
+			   Fmt.duration(plan.get("time_of_flight_days", 0.0) * 86400.0),
+			   plan.get("total_delta_v", 0.0)])
+		if flight.arm_mission():
+			# O warp que faz a viagem caber numa corrida sem tela. Um voo lunar de
+			# 6,75 dias a 1e5x são cerca de 1200 quadros; um voo marciano de 204
+			# dias precisa de 1e7 para caber no mesmo orçamento.
+			flight.controls.warp_index = 5 if _destination == "Moon" else 7
 			flight.simulation.set_time_warp(flight.controls.warp())
+			print("[headless] armed, warp %s" % Fmt.warp(flight.controls.warp()))
 
 	_frames += 1
 	if _frames % PRINT_EVERY_FRAMES == 0:
@@ -138,4 +183,16 @@ func _fly_to_the_moon(s: Dictionary, text: String) -> void:
 			_mission_reported = true
 			print("\n===== ARRIVED =====")
 			print("\n".join(flight.debug_hud.hud_lines(false)))
+			var outcome: Dictionary = flight.simulation.get_mission_outcome()
+			if not outcome.is_empty():
+				print("predicted vs actual: %s" % outcome)
 			print("===== end =====")
+			# E PARA de warpar.
+			#
+			# Sem isto a corrida continua a 1e7x até esgotar a contagem de quadros,
+			# e 15 000 quadros a 1,67e5 s cada são 79 ANOS de tempo simulado: sai da
+			# cobertura do de440s, que acaba em 2150, e paga uma propagação de
+			# décadas para não mostrar nada. Medido: 20 minutos de relógio de parede
+			# depois de a nave já estar em órbita de Marte.
+			flight.controls.warp_index = 0
+			flight.simulation.set_time_warp(1.0)

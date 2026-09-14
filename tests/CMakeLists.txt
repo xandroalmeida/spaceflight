@@ -150,12 +150,19 @@ endforeach()
 # uma suíte não a reprovou.
 #
 #   cmake --build build --target godot-tests
-add_test(NAME "godot.m7" COMMAND "${CMAKE_SOURCE_DIR}/scripts/godot_tests.sh")
-set_tests_properties("godot.m7" PROPERTIES
-    SKIP_RETURN_CODE 77
-    LABELS "godot"
-    TIMEOUT 300
-    ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
+# Uma entrada por milestone, e não uma só, porque um `godot.*` vermelho tem de
+# dizer QUAL camada quebrou: a do cockpit do M7 ou a do sistema solar do M8.
+foreach(godot_suite m7 m8)
+    add_test(NAME "godot.${godot_suite}"
+             COMMAND "${CMAKE_SOURCE_DIR}/scripts/godot_tests.sh" "${godot_suite}")
+    set_tests_properties("godot.${godot_suite}" PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "godot"
+        # O M8 inclui uma busca Terra->Marte cancelada a meio, que o worker leva
+        # um voo a abandonar.
+        TIMEOUT 600
+        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
+endforeach()
 
 # ---------------------------------------------------------------------------
 # As texturas, conferidas antes de serem ligadas (Milestone 7, regras 40 e 47).

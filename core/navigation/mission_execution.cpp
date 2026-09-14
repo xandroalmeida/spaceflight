@@ -1,5 +1,7 @@
 #include "core/navigation/mission_execution.hpp"
 
+#include "core/celestial/solar_system.hpp"
+
 #include "core/coordinates/reference_frame.hpp"
 #include "core/trajectory/orbital_elements.hpp"
 #include "core/units/constants.hpp"
@@ -134,7 +136,21 @@ std::optional<attitude::PointingCommand> MissionExecution::pointing_command() co
         case MissionPhase::MidcourseCorrection:
         case MissionPhase::Approach:
         case MissionPhase::CaptureOrienting:
-        case MissionPhase::CaptureBurn: {
+        case MissionPhase::CaptureBurn:
+        case MissionPhase::OrbitInsertion: {
+            // While the TRIM burn is running the nose belongs to it and not to
+            // the capture: the two point in different directions when the trim
+            // is prograde, and pointing retrograde through a prograde burn would
+            // fly the mission backwards.
+            const auto* circularisation = find(plan_, "circularisation");
+            if (phase_ == MissionPhase::OrbitInsertion && circularisation != nullptr) {
+                attitude::PointingCommand command{};
+                command.mode = circularisation->guidance == GuidanceMode::Hull
+                                   ? GuidanceMode::Retrograde
+                                   : circularisation->guidance;
+                command.reference = circularisation->reference;
+                return command;
+            }
             if (insertion == nullptr) {
                 return std::nullopt;
             }
@@ -153,7 +169,6 @@ std::optional<attitude::PointingCommand> MissionExecution::pointing_command() co
         // attitude belongs to whoever is flying.  Holding a command here would
         // mean a finished mission still steering the ship.
         case MissionPhase::Idle:
-        case MissionPhase::OrbitInsertion:
         case MissionPhase::Complete:
         case MissionPhase::Aborted:
         case MissionPhase::Failed:
@@ -177,6 +192,10 @@ void MissionExecution::update(const ephemeris::EphemerisProvider& provider,
     const auto* injection = find(plan_, "injection");
     const auto* midcourse = find(plan_, "midcourse");
     const auto* insertion = find(plan_, "insertion");
+    // The second capture burn, when the plan has one (Milestone 8). Named rather
+    // than inferred: the pilot is told which burn is running, and "CAPTURE BURN"
+    // while the trim is firing would be the wrong one.
+    const auto* circularisation = find(plan_, "circularisation");
 
     // A burn that is running outranks every geometric test: whatever else is
     // true, the engine is on and the pilot needs to be told which burn it is.
@@ -192,6 +211,10 @@ void MissionExecution::update(const ephemeris::EphemerisProvider& provider,
         phase_ = MissionPhase::CaptureBurn;
         return;
     }
+    if (circularisation != nullptr && circularisation->active_at(now)) {
+        phase_ = MissionPhase::OrbitInsertion;
+        return;
+    }
 
     // ---- before the injection ---------------------------------------------
     if (injection != nullptr && now < injection->ignition) {
@@ -205,23 +228,40 @@ void MissionExecution::update(const ephemeris::EphemerisProvider& provider,
 
     // ---- after the injection ----------------------------------------------
     const auto frame = coordinates::ReferenceFrame::ssb_j2000();
-    const auto origin_state = provider.state(origin_, now, frame);
     const auto destination_state = provider.state(destination_, now, frame);
-    const double gm_origin = provider.gravitational_parameter(origin_);
     const double gm_destination = provider.gravitational_parameter(destination_);
     const double radius_destination = provider.mean_radius(destination_);
+
+    // Whose gravity the destination's own neighbourhood is measured against: the
+    // body it ORBITS, read from the directory.
+    //
+    // ⚠️ This used to be the mission's origin, which is right for the Moon --
+    // the Moon orbits the Earth -- and nonsense for Mars. A Hill radius computed
+    // from Mars against the Earth asks how big Mars's neighbourhood is inside a
+    // gravity well Mars is not in, and since Mars is ten times the Earth's mass
+    // it comes out larger than the separation itself: the ship would be reported
+    // as "on approach" from the moment it left Earth orbit.
+    //
+    // `common_primary` is the SAME rule the planner's geometry uses, so the two
+    // cannot disagree about what orbits what.
+    const auto primary = celestial::common_primary(origin_, destination_)
+                             .value_or(origin_);
+    const auto primary_state = provider.state(primary, now, frame);
+    const double gm_primary = provider.gravitational_parameter(primary);
 
     const Vec3 to_destination = state.state.position - destination_state.state.position;
     const double distance = to_destination.norm();
     const double separation =
-        (destination_state.state.position - origin_state.state.position).norm();
+        (destination_state.state.position - primary_state.state.position).norm();
     const double hill =
-        hill_radius(gm_origin, gm_destination, separation) * config_.approach_hill_fraction;
+        hill_radius(gm_primary, gm_destination, separation) * config_.approach_hill_fraction;
 
     const bool inside_sphere = hill > 0.0 && distance < hill;
 
     // After the capture burn: is it an orbit yet, and is it the right one?
-    if (insertion != nullptr && now >= insertion->cutoff()) {
+    const Maneuver* last_capture_burn =
+        circularisation != nullptr ? circularisation : insertion;
+    if (last_capture_burn != nullptr && now >= last_capture_burn->cutoff()) {
         if (!(mass_after_capture_ > 0.0)) {
             mass_after_capture_ = state.mass;
         }
@@ -243,7 +283,7 @@ void MissionExecution::update(const ephemeris::EphemerisProvider& provider,
         if (!has_settle_time_) {
             // One revolution, so that what is recorded is an ORBIT and not the
             // instant the engine stopped.  The planner reads it the same way.
-            settle_at_ = insertion->cutoff() +
+            settle_at_ = last_capture_burn->cutoff() +
                          time::Duration::seconds(elements.period *
                                                  config_.orbit_settling_revolutions);
             has_settle_time_ = true;
