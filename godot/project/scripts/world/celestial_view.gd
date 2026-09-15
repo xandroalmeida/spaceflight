@@ -112,6 +112,7 @@ func _apply_surface(name: String, material: ShaderMaterial) -> void:
 			# intensidade é um número de desenho. Não há física atmosférica aqui
 			# e a regra 31 diz que não deve haver.
 			material.set_shader_parameter("atmosphere_strength", 0.55)
+			material.set_shader_parameter("atmosphere_haze", 0.06)
 			material.set_shader_parameter("atmosphere_colour", Color(0.30, 0.52, 0.95))
 		"Moon":
 			material.set_shader_parameter("albedo_map",

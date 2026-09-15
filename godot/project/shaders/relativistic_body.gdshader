@@ -116,6 +116,21 @@ uniform float normal_strength = 1.0;
 // saturados e a 1,4 o lado noturno ficava âmbar de costa a costa.
 uniform float night_energy = 0.75;
 uniform float atmosphere_strength = 0.0;
+// A dispersão sobre o DISCO, não só no limbo.
+//
+// `atmosphere_strength` acende a borda, onde a linha de vista atravessa mais ar.
+// Mas há ar sobre o disco inteiro, e é ele que faz um oceano -- cujo albedo real
+// é 0,06, quase preto -- ler azul-marinho numa fotografia de órbita em vez de
+// ler betume. Sem este termo a Terra fica correta no albedo e escura demais na
+// imagem, que foi o que apareceu quando as texturas geradas deram lugar às
+// medidas: a cobertura de nuvens caiu de quase total para os 42 % reais, e o que
+// ficou à vista foi oceano cru.
+//
+// ⚠️ DESENHO, e não física, exatamente como o termo do limbo ao lado: não há
+// modelo atmosférico neste projeto e a regra 31 diz que não deve haver. É um
+// número escolhido para que a imagem se pareça com uma fotografia, e está
+// separado do outro para que se possa mexer num sem mexer no outro.
+uniform float atmosphere_haze = 0.0;
 uniform vec3 atmosphere_colour : source_color = vec3(0.35, 0.55, 0.95);
 
 // Planets reflect; they are not black bodies.  The illuminant is, so the shift
@@ -290,6 +305,9 @@ void fragment() {
             float limb = pow(clamp(grazing, 0.0, 1.0), 3.0);
             float lit = clamp(sun * 1.4 + 0.25, 0.0, 1.0);
             emitted += atmosphere_colour * limb * lit * atmosphere_strength;
+            // Sem o `limb`: o ar do disco inteiro, apagando-se no terminador
+            // pelo mesmo `lit`, porque um céu no lado escuro não dispersa nada.
+            emitted += atmosphere_colour * lit * atmosphere_haze;
         }
 
         EMISSION = emitted;
