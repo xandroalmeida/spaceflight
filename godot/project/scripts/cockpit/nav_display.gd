@@ -287,29 +287,47 @@ func _draw_apsides(origin: Vector2, extent: float, box: float, resolved: bool,
 	var scale: float = data.get("render_scale", 1.0)
 	if bound:
 		var apoapsis := float(data.get("apoapsis_m", 0.0)) * scale
-		_apsis(origin + Vector2(-apoapsis / extent * box, 0.0), "AP",
-			Fmt.distance(data.get("apoapsis_altitude_m", 0.0)))
+		_apsis(origin + Vector2(-apoapsis / extent * box, 0.0), "AP")
+		_apsis_readout(Vector2(unit() * 3.0, unit() * 27.0), "AP",
+			Fmt.distance(data.get("apoapsis_altitude_m", 0.0)), HORIZONTAL_ALIGNMENT_LEFT)
 	var periapsis := float(data.get("periapsis_m", 0.0)) * scale
-	_apsis(origin + Vector2(periapsis / extent * box, 0.0), "PE",
-		Fmt.distance(data.get("periapsis_altitude_m", 0.0)))
+	_apsis(origin + Vector2(periapsis / extent * box, 0.0), "PE")
+	_apsis_readout(Vector2(size.x - unit() * 3.0, unit() * 27.0), "PE",
+		Fmt.distance(data.get("periapsis_altitude_m", 0.0)), HORIZONTAL_ALIGNMENT_RIGHT)
 
 
 func _draw_circular_note() -> void:
-	## A resposta que substitui os dois marcadores, na COR deles: quem procurava o
-	## apsis encontra ali por que é que ele não está lá. O valor é a altitude, que
-	## numa órbita circular é a mesma em toda a volta -- e continua no seu lugar,
-	## em baixo, para quem não olhou para aqui.
-	var u := unit()
-	draw_text_at(Vector2(u * 3.0, u * 27.0), "CIRCULAR", 4.6, Palette.PLAN)
-	draw_text_at(Vector2(u * 3.0, u * 33.0),
-		Fmt.distance(data.get("altitude_m", 0.0)), 4.2, Palette.SECONDARY)
+	## A resposta que substitui os dois marcadores: no lugar do "AP", com a mesma
+	## forma e na mesma cor, porque quem procurava o apoapsis é quem tem de
+	## encontrar ali por que é que ele não está lá. O valor é a altitude, que numa
+	## órbita circular é a mesma em toda a volta -- e continua no seu lugar, em
+	## baixo, para quem não olhou para aqui.
+	_apsis_readout(Vector2(unit() * 3.0, unit() * 27.0), "CIRCULAR",
+		Fmt.distance(data.get("altitude_m", 0.0)), HORIZONTAL_ALIGNMENT_LEFT)
 
 
-func _apsis(at: Vector2, label: String, value: String) -> void:
+func _apsis(at: Vector2, label: String) -> void:
+	## O marcador diz ONDE, e só. O número saiu daqui: colado ao ponto ele ficava
+	## a 3,8 unidades de altura, num painel de 0,58 m lido de um metro e dez --
+	## pequeno demais para se ler sem sair do assento, que é o contrário do que um
+	## instrumento de voo faz. As duas letras ficam, porque são elas que ligam o
+	## ponto ao valor do lado.
 	var r := maxf(unit() * 1.6, 2.0)
 	draw_circle(at, r, Palette.PLAN)
 	draw_text_at(at + Vector2(r * 2.0, -r), label, 3.8, Palette.PLAN)
-	draw_text_at(at + Vector2(r * 2.0, r * 2.0 + unit() * 3.4), value, 3.8, Palette.SECONDARY)
+
+
+func _apsis_readout(at: Vector2, label: String, value: String, align: int) -> void:
+	## A altitude do apsis, do tamanho a que os outros números do mostrador são
+	## lidos -- o mesmo 5.0 do ALT lá em baixo -- e na cor do marcador, que é o que
+	## diz qual dos dois pontos amarelos este número descreve.
+	##
+	## À ESQUERDA o apoapsis e à DIREITA o periapsis, porque é aí que eles estão
+	## desenhados: o eixo do desenho é a linha dos apsides com o periapsis em +x,
+	## então o "AP" cai sempre à esquerda do anel e o "PE" sempre à direita. Uma
+	## legenda que trocasse os lados obrigaria a lê-la em vez de a reconhecer.
+	draw_text_at(at, label, 3.6, Palette.SECONDARY, align)
+	draw_text_at(at + Vector2(0.0, unit() * 6.0), value, 5.0, Palette.PLAN, align)
 
 
 func _draw_ship(at: Vector2, origin: Vector2) -> void:
