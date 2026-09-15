@@ -260,6 +260,14 @@ func _build_near_field() -> void:
 	near_viewport.handle_input_locally = false
 	near_viewport.gui_disable_input = true
 	near_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# Anti-aliasing AQUI e não no viewport do mundo. O que a cabine tem são
+	# arestas finas, longas e quase verticais -- montantes de janela, o aro de um
+	# mostrador, um parafuso de dois centímetros --, e é exatamente essa a forma
+	# que sem MSAA sai em degraus. Numa captura, uma escada num montante lê como
+	# "gráfico de brinquedo" antes de o observador conseguir dizer porquê. O
+	# viewport do mundo não precisa: lá o que há são estrelas (pontos) e o limbo
+	# de um planeta, que já é suave.
+	near_viewport.msaa_3d = Viewport.MSAA_4X
 	container.add_child(near_viewport)
 
 	var environment_node := WorldEnvironment.new()
