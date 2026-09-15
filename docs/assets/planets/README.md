@@ -67,12 +67,20 @@ ela girou, que tamanho tem e por que órbita anda vem de `core/` e de
 
 | | destino |
 |---|---|
-| [earth-albedo](earth-albedo-codex-prompt.md) | `assets/textures/earth/earth_albedo.png` |
-| [earth-clouds](earth-clouds-codex-prompt.md) | `assets/textures/earth/earth_clouds.png` |
-| [earth-night-lights](earth-night-lights-codex-prompt.md) | `assets/textures/earth/earth_night.png` |
+| [earth-albedo](earth-albedo-codex-prompt.md) — **superado**, ver abaixo | `assets/textures/earth/earth_albedo.jpg` |
+| [earth-clouds](earth-clouds-codex-prompt.md) — **superado**, ver abaixo | `assets/textures/earth/earth_clouds.jpg` |
+| [earth-night-lights](earth-night-lights-codex-prompt.md) — **superado**, ver abaixo | `assets/textures/earth/earth_night.jpg` |
 | [moon-albedo](moon-albedo-codex-prompt.md) | `assets/textures/moon/moon_albedo.png` |
 | **`moon_normal` não vem de prompt**: `scripts/make_moon_normal.py`, a partir do LOLA | `assets/textures/moon/moon_normal.png` |
 
 Quando o arquivo existir no caminho de destino, `CelestialView._apply_surface`
 carrega-o e o gerador procedural deixa de ser chamado — sem mudar nenhuma outra
 linha, que é o ponto da regra 81.
+
+
+## Os três prompts da Terra estão superados
+
+As texturas da Terra deixaram de ser geradas e passam a vir medidas do arquivo
+público da NASA (`scripts/fetch_earth_textures.sh`). Os prompts ficam como
+registo do que foi pedido e do que o pedido produziu -- ver
+[a secção no manifesto](../manifest.md#as-texturas-da-terra-sao-medidas).

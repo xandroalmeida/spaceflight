@@ -24,6 +24,11 @@ kernels/*.log
 # o repositório guarda é o normal map DERIVADO dele, que tem 2,9 MB.
 external/lola/
 
+# Earth imagery: NASA Blue Marble NG, composto MODIS de nuvens e VIIRS Black
+# Marble, obtidas por scripts/fetch_earth_textures.sh (68 MB). Mesma política.
+# O que o repositório guarda são as três texturas DERIVADAS, com 10,4 MB.
+external/nasa-earth/
+
 # Star catalogue: data, fetched by scripts/fetch_star_catalog.sh
 catalogs/bsc5.*
 catalogs/SHA256SUMS

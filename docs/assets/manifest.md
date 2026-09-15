@@ -46,9 +46,9 @@ passar em tudo, ele foi regerado e o manifesto é que está desatualizado.
 
 | asset | estado | verificação | prompt | destino |
 |---|---|---|---|---|
-| `earth_albedo` | `INTEGRATED` | 2048×1024, 2:1, polos uniformes; o subsolar cai no Pacífico e o antissolar no Saara | [prompt](planets/earth-albedo-codex-prompt.md) | `assets/textures/earth/earth_albedo.png` |
-| `earth_clouds` | `INTEGRATED` | cinza de 1 canal; histograma p25 38 / p50 115 / p75 191, remapeado 82..204 no shader | [prompt](planets/earth-clouds-codex-prompt.md) | `assets/textures/earth/earth_clouds.png` |
-| `earth_night_lights` | `INTEGRATED` | 90,6 % preto, âmbar (R>G>B); registra com o albedo em longitude (dx = 0) | [prompt](planets/earth-night-lights-codex-prompt.md) | `assets/textures/earth/earth_night.png` |
+| `earth_albedo` | `MEASURED` | **NASA Blue Marble NG**, dezembro/2004, 21600×10800 → 8192×4096. Polos colapsados; o subsolar cai no Pacífico e o antissolar no Saara | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_albedo.jpg` |
+| `earth_clouds` | `MEASURED` | **composto MODIS da NASA**, 8192×4096 → 4096×2048, cinza de 1 canal; histograma p25 14 / p50 60 / p75 128, remapeado 41..153 no shader | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_clouds.jpg` |
+| `earth_night_lights` | `MEASURED` | **VIIRS Black Marble 2016**, 3600×1800 → 4096×2048; registra com o albedo em longitude (0,0°, terra 0,997 contra 0,911 a −8,4°) | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_night.jpg` |
 | `earth_normal` | `OPTIONAL` | sem relevo | — | `godot/project/assets/textures/earth/earth_normal.png` |
 | `moon_albedo` | `INTEGRATED` | mares no centro (face visível), terras altas nas bordas, raios de Tycho | [prompt](planets/moon-albedo-codex-prompt.md) | `assets/textures/moon/moon_albedo.png` |
 | `moon_normal` | `INTEGRATED` | **derivado**, não pintado: LOLA LDEM_16 → `scripts/make_moon_normal.py`. Mares em (127–131, 126–128, 254–255), \|n\| = 1,000 | [como](#o-normal-map-nao-e-uma-imagem) | `assets/textures/moon/moon_normal.png` |
@@ -181,3 +181,37 @@ O que cada um tem de dizer, e porquê, está em
 Uma imagem gerada nunca é fonte de física (regra 47). A textura da Terra diz
 como a Terra **parece**; onde ela está, quanto ela gira e que tamanho tem vem
 de `core/` e de `kernels/spice`, sempre.
+
+
+## As texturas da Terra são medidas
+
+As três vieram de prompts no Milestone 7 (`planets/earth-*-codex-prompt.md`, que
+ficam como registo). Elas eram boas de perto e erradas de longe: o mapa de nuvens
+gerado tinha cobertura quase total, sem as regiões limpas que a circulação
+atmosférica produz, e de uma órbita de 400 km o que se via pela janela era uma
+pasta branca sem estrutura nenhuma. Uma nuvem não é ruído bonito -- ela tem
+ciclones, frentes, a ZCIT e os anticiclones subtropicais, e nada disso sai de um
+gerador que nunca mediu o planeta.
+
+Agora vêm do arquivo público da NASA, de domínio público (NASA Earth Observatory
+/ Visible Earth, crédito a NASA Goddard Space Flight Center):
+
+    scripts/fetch_earth_textures.sh     # 68 MB, fora do Git
+    scripts/make_earth_textures.sh      # deriva o que entra no Git
+
+Dezembro de 2004 e não uma média de meses: um mapa estático não segue as
+estações, então vale escolher a estação certa para a época de partida -- a missão
+começa em 1 de janeiro -- em vez de um mês que não é nenhum.
+
+**São JPEG, e o resto do projeto é PNG.** As outras texturas foram AUTORADAS: um
+gerador entregou pixels exatos e um PNG guarda exatamente esses. Estas foram
+MEDIDAS e a NASA já as distribui em JPEG -- recodificá-las em PNG são cinco vezes
+os bytes (31 MB contra 6,7 MB só no albedo) para preservar informação que nunca
+existiu, e o que chega à GPU é BPTC ou S3TC, que perde muito mais.
+
+`scripts/validate_textures.py` decodifica PNG e só PNG, porque não tem
+dependências e essa é a regra dele. Então a conferência das três corre dentro de
+`make_earth_textures.sh`, sobre os intermediários PNG, com os mesmos pixels que a
+seguir viram JPEG: o encoder não move um pixel de longitude. As medidas são as de
+sempre -- proporção 2:1, costura de longitude, polos uniformes, e o registo
+cruzado entre o albedo e as luzes noturnas.

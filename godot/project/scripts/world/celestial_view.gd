@@ -97,15 +97,15 @@ func _apply_surface(name: String, material: ShaderMaterial) -> void:
 	match name:
 		"Earth":
 			material.set_shader_parameter("albedo_map",
-				_texture_or("res://assets/textures/earth/earth_albedo.png",
+				_texture_or("res://assets/textures/earth/earth_albedo.jpg",
 					func() -> Texture2D: return PlanetTextures.earth_albedo()))
 			material.set_shader_parameter("use_albedo_map", true)
 			material.set_shader_parameter("cloud_map",
-				_texture_or("res://assets/textures/earth/earth_clouds.png",
+				_texture_or("res://assets/textures/earth/earth_clouds.jpg",
 					func() -> Texture2D: return PlanetTextures.earth_clouds()))
 			material.set_shader_parameter("use_cloud_map", true)
 			material.set_shader_parameter("night_map",
-				_texture_or("res://assets/textures/earth/earth_night.png",
+				_texture_or("res://assets/textures/earth/earth_night.jpg",
 					func() -> Texture2D: return PlanetTextures.earth_night()))
 			material.set_shader_parameter("use_night_map", true)
 			# O limbo: espalhamento de Rayleigh é azul porque o céu é azul, e a

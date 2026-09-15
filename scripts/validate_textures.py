@@ -224,6 +224,16 @@ def check_normal_map(report, name, w, h, ch, px, flat_spots):
                  f"(|n| desvia até {worst_length:.3f})")
 
 
+## O varrimento de longitude, em GRAUS: de onde até onde, e de quanto em quanto.
+##
+## Eram 13 deslocamentos de 8 px num mapa de 2048, ou seja 1,4 grau cada, até
+## 8,4 graus para cada lado. Os números continuam a ser esses; passaram a estar
+## escritos na unidade em que o desalinhamento existe, que não depende de quantas
+## colunas cada mapa tem.
+REGISTRATION_STEP_DEG = 1.4
+REGISTRATION_SPAN_DEG = 8.4
+
+
 def check_registration(report, albedo, night):
     """As luzes noturnas caem em terra, e a longitude não está deslocada.
 
@@ -231,25 +241,32 @@ def check_registration(report, albedo, night):
     o classificador de oceano é grosseiro -- então o que se verifica é que
     NENHUM deslocamento em longitude melhora o alinhamento. Se algum melhorasse,
     ELE seria o desalinhamento.
+
+    ⚠️ Os dois mapas NÃO precisam de ter o mesmo tamanho. São a mesma projeção,
+    então um pixel do mapa de luzes tem um lugar bem definido no albedo seja qual
+    for a resolução de cada um, e exigir tamanhos iguais confundia a pergunta
+    ("estão alinhados?") com uma coincidência de formato. A exigência reprovou o
+    primeiro par vindo da NASA -- Blue Marble a 8192 contra VIIRS a 4096 -- sem
+    que houvesse nada de errado com o alinhamento deles.
     """
     wa, ha, ca, alb = albedo
     wn, hn, cn, nit = night
-    if (wa, ha) != (wn, hn):
-        report.check(False, "albedo e luzes noturnas têm o mesmo tamanho",
-                     f"({wa}x{ha} contra {wn}x{hn})")
-        return
+    scale_x = wa / float(wn)
+    scale_y = ha / float(hn)
 
     lit = []
     for y in range(2, hn - 2, 3):
         for x in range(0, wn, 3):
             i = (y * wn + x) * cn
             if (nit[i] + nit[i + 1] + nit[i + 2]) // 3 >= 55:
-                lit.append((x, y))
+                lit.append((int((x + 0.5) * scale_x),
+                            min(int((y + 0.5) * scale_y), ha - 1)))
     if not lit:
         report.check(False, "há luzes noturnas para conferir")
         return
 
-    def land_fraction(dx):
+    def land_fraction(shift_deg):
+        dx = int(round(shift_deg * wa / 360.0))
         hits = 0
         for x, y in lit:
             j = (y * wa + (x + dx) % wa) * ca
@@ -258,12 +275,15 @@ def check_registration(report, albedo, night):
                 hits += 1
         return hits / len(lit)
 
-    scores = {dx: land_fraction(dx) for dx in range(-48, 49, 8)}
+    steps = int(round(REGISTRATION_SPAN_DEG / REGISTRATION_STEP_DEG))
+    shifts = [i * REGISTRATION_STEP_DEG for i in range(-steps, steps + 1)]
+    scores = {shift: land_fraction(shift) for shift in shifts}
     best = max(scores, key=scores.get)
-    report.check(abs(best) <= 8,
+    report.check(abs(best) <= REGISTRATION_STEP_DEG + 1e-9,
                  "as luzes noturnas registram com o albedo em longitude",
-                 f"(melhor deslocamento {best:+d} px = {best * 360.0 / wa:+.1f}°, "
-                 f"terra {scores[best]:.2f} contra {scores[0]:.2f} em zero)")
+                 f"(melhor deslocamento {best:+.1f}°, terra {scores[best]:.4f} "
+                 f"contra {scores[0.0]:.4f} em zero e "
+                 f"{scores[shifts[0]]:.4f} a {shifts[0]:+.1f}°)")
 
 
 # --- as texturas conhecidas ----------------------------------------------
@@ -287,7 +307,26 @@ LUNAR_MARIA = {
 
 def main(argv):
     report = Report()
-    paths = [pathlib.Path(a) for a in argv[1:]]
+    argv = list(argv[1:])
+
+    # `--textures DIR` aponta a suíte inteira -- incluindo o registro cruzado,
+    # que precisa de duas imagens ao mesmo tempo e por isso não cabe no modo
+    # avulso -- para outro diretório.
+    #
+    # É o que `scripts/make_earth_textures.sh` usa: as texturas da Terra passaram
+    # a ser JPEG (a fonte da NASA já é JPEG, e um PNG delas são cinco vezes os
+    # bytes por informação que nunca existiu), este decodificador só lê PNG, e
+    # então a conferência corre sobre os intermediários PNG da conversão -- os
+    # mesmos pixels, antes do encoder, que não move um pixel de longitude.
+    textures = TEXTURES
+    if argv and argv[0] == "--textures":
+        if len(argv) < 2:
+            print("--textures precisa de um diretório", file=sys.stderr)
+            return 2
+        textures = pathlib.Path(argv[1])
+        argv = argv[2:]
+
+    paths = [pathlib.Path(a) for a in argv]
 
     if paths:
         for path in paths:
@@ -300,16 +339,21 @@ def main(argv):
                 check_tileable(report, path.stem, w, h, ch, px)
         return 1 if report.failures else 0
 
-    if not TEXTURES.exists() or not any(TEXTURES.rglob("*.png")):
-        print("SKIP: não há texturas em godot/project/assets/textures "
+    if not textures.exists() or not any(textures.rglob("*.png")):
+        print(f"SKIP: não há texturas em {textures} "
               "(docs/assets/manifest.md diz como gerá-las)", file=sys.stderr)
         return SKIP
 
     decoded = {}
     for rel, pole_limit in EQUIRECTANGULAR.items():
-        path = TEXTURES / rel
+        path = textures / rel
         if not path.exists():
-            print(f"\n{rel}: ausente -- o simulador usa o substituto procedural")
+            fetched = path.with_suffix(".jpg")
+            if fetched.exists():
+                print(f"\n{fetched.relative_to(textures)}: da NASA, conferida na conversão "
+                      "(scripts/make_earth_textures.sh) -- este decodificador só lê PNG")
+            else:
+                print(f"\n{rel}: ausente -- o simulador usa o substituto procedural")
             continue
         w, h, ch, px = decode(path)
         decoded[rel] = (w, h, ch, px)
@@ -318,7 +362,7 @@ def main(argv):
         check_equirectangular(report, path.stem, w, h, ch, px, pole_limit)
 
     for rel in TILEABLE:
-        path = TEXTURES / rel
+        path = textures / rel
         if not path.exists():
             print(f"\n{rel}: ausente -- o material fica liso")
             continue
@@ -332,7 +376,7 @@ def main(argv):
                            decoded["earth/earth_night.png"])
 
     rel = "moon/moon_normal.png"
-    normal = TEXTURES / rel
+    normal = textures / rel
     if normal.exists():
         w, h, ch, px = decode(normal)
         print(f"\n{rel}  {w}x{h}  {ch} canais")

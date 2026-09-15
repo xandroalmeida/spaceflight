@@ -38,7 +38,7 @@ func _initialize() -> void:
 	# Pacífico -- azul escuro --, e o antissolar na Europa ou em África.
 	var mesh := CelestialView._mesh_basis(basis)
 	var albedo := Image.load_from_file(
-		ProjectSettings.globalize_path("res://assets/textures/earth/earth_albedo.png"))
+		ProjectSettings.globalize_path("res://assets/textures/earth/earth_albedo.jpg"))
 	if albedo == null:
 		print("(no albedo texture to sample)")
 		quit(0)

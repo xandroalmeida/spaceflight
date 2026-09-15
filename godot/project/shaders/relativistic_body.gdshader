@@ -75,14 +75,22 @@ uniform float cloud_offset = 0.0;
 
 // A curva da máscara, medida e não escolhida.
 //
-// O histograma do mapa entregue, em bytes: p05 21, p25 38, p50 115, p75 191,
-// p95 230. Usado cru, o cinza médio de 115/255 = 0,45 cobriria o planeta inteiro
-// com 38 % de branco e a Terra ficaria leitosa de polo a polo. Remapeado para
-// 82..204, sobram 42 % de cobertura e 41 % de céu genuinamente limpo -- menos
-// que os 67 % reais da Terra, e é isso que se quer: as nuvens têm de deixar ver
-// os continentes que estão por baixo.
-uniform float cloud_low = 0.32;
-uniform float cloud_high = 0.80;
+// ⚠️ Ela é medida CONTRA UM MAPA. Trocar o mapa sem refazer a medida põe a
+// cobertura onde calhar, e foi o que aconteceu quando o mapa gerado deu lugar ao
+// composto MODIS: com a curva antiga (82..204) o mapa novo dava 58 % de céu
+// limpo e 4 % de nuvem cheia, uma Terra quase sem nuvens.
+//
+// Histograma do composto MODIS da NASA, em bytes: p10 2, p25 14, p50 60, p75
+// 128, p90 178. Remapeado para 41..153, sobram 42 % de cobertura e 42 % de céu
+// genuinamente limpo -- menos que os 67 % reais da Terra, e é isso que se quer:
+// as nuvens têm de deixar ver os continentes que estão por baixo. São os mesmos
+// dois números que o mapa anterior produzia, sobre um mapa com outro histograma.
+//
+// (O mapa gerado, para comparação: p05 21, p25 38, p50 115, p75 191, p95 230 --
+// muito mais claro, porque a cobertura dele era quase total e sem as regiões
+// limpas que a circulação atmosférica produz.)
+uniform float cloud_low = 0.16;
+uniform float cloud_high = 0.60;
 uniform float cloud_opacity = 0.88;
 
 // The Sun, as a direction in scene coordinates. Used for the night side and for
