@@ -23,7 +23,7 @@ extends SceneTree
 ##
 ## Um número esperado transforma cobertura perdida em falha, que é o que ela é.
 ## Sobe quando se acrescentam testes; nunca desce em silêncio.
-const EXPECTED_CHECKS := 156
+const EXPECTED_CHECKS := 160
 
 var failures := 0
 var checks := 0
@@ -270,6 +270,47 @@ func _test_apsis_markers(simulation: SpaceflightSimulation) -> void:
 			worst = maxf(worst, rad_to_deg(previous.angle_to(axis)))
 		previous = axis
 	check(worst < 0.01, "o eixo do desenho não roda entre quadros (%.4f°)" % worst)
+
+	# O caso do meio, que é o que se vê a pilotar: as perturbações abrem alguns
+	# centenas de metros entre os apsides, o mostrador VOLTA a apontá-los, e é aí
+	# que o marcador tem de estar quieto. Medido antes da correção, com o apsis
+	# procurado pelo ponto mais distante da amostra: 1,7 graus de salto por
+	# quadro no eixo, e o "AP" -- que vinha de uma segunda busca independente --
+	# a deslizar pelo anel enquanto o "PE" do outro lado estava parado.
+	for i in range(120):
+		simulation.advance(0.5)
+	centre = simulation.get_body_position(reference)
+	track = simulation.get_orbit_track(128)
+	check(spread.call() > 300.0 and spread.call() < 5.0e3,
+		"as perturbações abriram os apsides (%.0f m)" % spread.call())
+	check(NavDisplay.apsides_resolved(spread.call(), extent.call(track, centre), scale),
+		"e o mostrador volta a apontá-los")
+
+	# Os dois marcadores vivem NA linha dos apsides, a um raio que vem do
+	# snapshot em dupla precisão -- não de uma busca na amostra. O que pode mexer
+	# é o eixo, e só o eixo.
+	worst = 0.0
+	previous = Vector3.ZERO
+	var marker := 0.0
+	var previous_marker := INF
+	for frame in range(30):
+		simulation.advance(0.016)
+		centre = simulation.get_body_position(reference)
+		track = simulation.get_orbit_track(128)
+		var axis: Vector3 = nav._plane_from(track, centre, true, true)[0]
+		if previous != Vector3.ZERO:
+			worst = maxf(worst, rad_to_deg(previous.angle_to(axis)))
+		previous = axis
+		# Onde o "AP" cai, na mesma conta que `_draw_apsides` faz: −r_ap ao longo
+		# do eixo, em fração da caixa de desenho.
+		var here: float = (float(simulation.get_snapshot()["apoapsis_m"]) * scale
+			/ extent.call(track, centre))
+		if previous_marker != INF:
+			marker = maxf(marker, absf(here - previous_marker))
+		previous_marker = here
+	check(worst < 1.5, "o eixo fica dentro de um grau e meio por quadro (%.3f°)" % worst)
+	check(marker < 1.0e-4,
+		"e o raio do marcador não respira (%.8f da caixa)" % marker)
 
 	# E o outro lado: uma órbita com apsis a sério tem de CONTINUAR a mostrá-lo.
 	# Um limiar que apagasse o marcador em toda a parte passaria a metade de cima

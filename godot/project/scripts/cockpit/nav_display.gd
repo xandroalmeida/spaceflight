@@ -19,23 +19,26 @@ extends Instrument
 
 const MARGIN := 0.12
 
-## O epsilon do float de 32 bits, e quantos deles a separação dos apsides tem de
-## valer para que o marcador signifique alguma coisa.
+## O epsilon do float de 32 bits, o ganho de ruído do estimador do apsis, e
+## quanto o marcador pode mexer-se entre quadros sem que isso se note.
 ##
 ## ⚠️ Os pontos da órbita chegam aqui em UNIDADES DE CENA e em float de 32 bits.
 ## Numa órbita quase circular a diferença entre o raio no apoapsis e no periapsis
-## é da ordem do ulp desse float, e então o ponto "mais distante da amostra" é
-## decidido pelo arredondamento e não pela geometria. Medido numa órbita de
-## estacionamento a 400 km (ecc 3e-7, ulp 0,8 m, amplitude de raio de toda a
-## volta entre 1,4 e 6,2 m): o índice do apoapsis saltava entre 0, 3, 115 e 119
-## de um quadro para o outro, e o marcador amarelo dava voltas à elipse a cada
-## fração de segundo.
+## é da ordem do ulp desse float, e a direção do apsis deixa de estar nos dados.
 ##
-## Oito ulps era ruído puro. Uma órbita com excentricidade 1e-3 -- a menor que
-## alguém pilota -- dá dezasseis mil. Entre as duas não há nada, e 64 está
-## confortavelmente no vazio entre elas.
+## `APSIS_NOISE_GAIN` é MEDIDO, não deduzido: o erro angular do estimador cai com
+## 1/separação, e sobre uma órbita de estacionamento a 400 km (ulp 0,8 m) o
+## produto (erro × separação) fica entre 224 e 320 graus·metro em toda a faixa de
+## 7 m a 9 km de separação. Em radianos e por ulp, isso é 6,5. A conta fecha:
+##
+##     erro ≈ 6,5 × ulp / separação
+##
+## Um grau é o limite porque é o que se vê: neste mostrador o anel tem 110 px de
+## raio, e um grau são dois píxeis. Abaixo disso o marcador está parado para quem
+## olha, e acima disso ele treme.
 const FLOAT32_EPSILON := 1.1920929e-7
-const APSIS_RESOLUTION_ULPS := 64.0
+const APSIS_NOISE_GAIN := 6.5
+const APSIS_STABILITY_DEG := 1.0
 
 
 func _draw() -> void:
@@ -62,11 +65,12 @@ func _draw() -> void:
 		_draw_numbers_only()
 		return
 
+	var bound: bool = data.get("bound", true)
 	var resolved := apsides_resolved(
 		absf(data.get("apoapsis_altitude_m", 0.0) - data.get("periapsis_altitude_m", 0.0)),
 		extent, data.get("render_scale", 1.0))
 
-	var frame := _plane_from(track, centre_3d, resolved)
+	var frame := _plane_from(track, centre_3d, resolved, bound)
 	var u: Vector3 = frame[0]
 	var v: Vector3 = frame[1]
 
@@ -97,7 +101,7 @@ func _draw() -> void:
 		draw_line(previous, current, Palette.NAV, maxf(unit() * 0.30, 1.0))
 		previous = current
 
-	_draw_apsides(track, centre_3d, to_screen, resolved)
+	_draw_apsides(origin, extent, box, resolved, bound)
 	_draw_ship(to_screen.call(ship_3d), origin)
 	_draw_readouts()
 
@@ -107,8 +111,9 @@ func _draw() -> void:
 ##
 ## `spread_m` é (apoapsis − periapsis) em metros, do snapshot, que é exato.
 ## `extent_scene` é o raio da órbita em unidades de cena, que é onde o float de
-## 32 bits está. A conta compara os dois na mesma moeda -- metros -- e é a única
-## coisa que decide se este mostrador tem direito a apontar para um apsis.
+## 32 bits está. A conta pergunta quanto o marcador tremeria e compara isso com o
+## que se vê, e é a única coisa que decide se este mostrador tem direito a
+## apontar para um apsis.
 ##
 ## Escala-livre de propósito: ela não pergunta "a excentricidade é pequena?", que
 ## dependeria do corpo, mas "o número que eu quero desenhar sobrevive à precisão
@@ -118,10 +123,11 @@ static func apsides_resolved(spread_m: float, extent_scene: float,
 	if render_scale <= 0.0 or extent_scene <= 0.0:
 		return false
 	var ulp_m := extent_scene * FLOAT32_EPSILON / render_scale
-	return spread_m > ulp_m * APSIS_RESOLUTION_ULPS
+	return spread_m > APSIS_NOISE_GAIN * ulp_m / deg_to_rad(APSIS_STABILITY_DEG)
 
 
-func _plane_from(track: PackedVector3Array, centre: Vector3, resolved: bool) -> Array:
+func _plane_from(track: PackedVector3Array, centre: Vector3, resolved: bool,
+		bound: bool = true) -> Array:
 	## Dois eixos ortonormais no plano da órbita, a partir dos pontos recebidos.
 	##
 	## A normal vem primeiro, do produto vetorial de dois raios bem separados:
@@ -133,11 +139,16 @@ func _plane_from(track: PackedVector3Array, centre: Vector3, resolved: bool) -> 
 	w = w.normalized()
 
 	var u := Vector3.ZERO
-	if resolved:
-		# O periapsis, quando ele existe: assim a elipse sai sempre na mesma
+	if resolved and bound:
+		# O periapsis, de TODAS as amostras: assim a elipse sai sempre na mesma
 		# orientação e não roda sob os olhos do piloto a cada quadro, que é o que
 		# um `u` tirado de "o primeiro ponto da amostra" faria numa órbita
 		# reamostrada.
+		u = _periapsis_from_centroid(track, centre)
+	elif resolved:
+		# Hipérbole: a média não serve, porque o arco é um pedaço e não uma volta.
+		# Mas aqui não faz falta -- o periapsis de uma hipérbole é um bico, o raio
+		# à volta dele varia depressa, e o extremo da amostra acerta-o.
 		var best := 0
 		var near := INF
 		for i in range(track.size()):
@@ -166,7 +177,35 @@ func _plane_from(track: PackedVector3Array, centre: Vector3, resolved: bool) -> 
 	return [u, v]
 
 
-## O ponto do apsis, ENTRE as amostras e não em cima de uma delas.
+## A direção do periapsis, de TODAS as amostras e não das duas mais próximas.
+##
+## `get_orbit_track` amostra uniformemente em ANOMALIA VERDADEIRA, e para essa
+## amostragem a média das posições cai em −p·e/2 ao longo da direção do
+## periapsis: proporcional à excentricidade, e -- por ser uma média de N pontos
+## -- com o ruído de cada amostra dividido pela raiz de N.
+##
+## ⚠️ Procurar o ponto MAIS PRÓXIMO era o contrário disto. Perto de um apsis o
+## raio é estacionário, ou seja, a grandeza que distingue o apsis dos vizinhos é
+## a menor da curva inteira -- o pior sítio possível para ir buscar um extremo
+## num sinal com ruído. Medido, entre quadros, numa órbita a 400 km com 7 a 19 km
+## de separação entre apsides: o extremo saltava 0,24° a 1,75°; a média, 0,017° a
+## 0,033°. Cinquenta a cem vezes menos, e o que sobra já é a precessão a sério.
+func _periapsis_from_centroid(track: PackedVector3Array, centre: Vector3) -> Vector3:
+	# O último ponto REPETE o primeiro (ν = −π e ν = +π são o mesmo sítio da
+	# órbita): contá-lo duas vezes põe um apoapsis a mais na média.
+	var count := maxi(track.size() - 1, 1)
+	var sum := Vector3.ZERO
+	for i in range(count):
+		sum += track[i] - centre
+	var offset := sum / float(count)
+	if offset.length() < 1.0e-12:
+		return (track[0] - centre).normalized()
+	# A média cai do lado do APOAPSIS; o periapsis é do outro.
+	return -offset.normalized()
+
+
+## O ponto do apsis, ENTRE as amostras e não em cima de uma delas. Só para a
+## hipérbole: a órbita fechada usa a média, que é melhor.
 ##
 ## ⚠️ `get_orbit_track` amostra uniformemente em ANOMALIA VERDADEIRA de −π a +π,
 ## e o periapsis está em ν = 0 -- que com 128 amostras cai no índice 63,5, ou
@@ -223,40 +262,35 @@ func _draw_reference_banner() -> void:
 		Palette.WARNING if reference == "SUN" else Palette.SECONDARY)
 
 
-func _draw_apsides(track: PackedVector3Array, centre: Vector3, to_screen: Callable,
-		resolved: bool) -> void:
-	## Apoapsis e periapsis são os pontos mais e menos distantes DA AMOSTRA que o
-	## core mandou. Não são recalculados: se a amostra tem 128 pontos o marcador
-	## fica a menos de três graus do apsis verdadeiro, e o NÚMERO ao lado dele vem
-	## do snapshot, que é exato. O marcador diz onde; o número diz quanto.
+func _draw_apsides(origin: Vector2, extent: float, box: float, resolved: bool,
+		bound: bool) -> void:
+	## Os apsides estão na LINHA DOS APSIDES, que é o eixo `u` do desenho, e a que
+	## distância eles estão vem do snapshot, em dupla precisão. Então não há nada
+	## para procurar: o periapsis fica a +r_pe de `u` e o apoapsis a −r_ap.
 	##
-	## Quando os dois não se separam o suficiente para serem encontrados na
-	## amostra, não há "onde": a órbita é circular e o mostrador diz isso em vez
-	## de apontar para um sítio ao acaso. Uma hipérbole escapa a esta regra porque
-	## o periapsis de uma hipérbole é sempre nítido -- o que ela não tem é
-	## apoapsis, e disso já trata `bound`.
-	var bound: bool = data.get("bound", true)
+	## ⚠️ A versão anterior ia buscar os dois à amostra, pelo ponto mais e menos
+	## distante. O periapsis saía sempre no sítio certo por acidente (é ele que
+	## define `u`), mas o APOAPSIS vinha de uma segunda busca independente, e como
+	## perto de um apsis o raio é estacionário essa busca é ruído: o ponto amarelo
+	## do "AP" deslizava alguns graus pelo anel acima e abaixo enquanto o "PE" do
+	## outro lado estava quieto.
+	##
+	## Quando os dois não se separam o suficiente para que a direção seja
+	## conhecível, não há "onde": a órbita é circular e o mostrador diz isso em
+	## vez de apontar para um sítio ao acaso. Uma hipérbole escapa à regra porque
+	## o periapsis dela é sempre nítido -- o que ela não tem é apoapsis, e disso já
+	## trata `bound`.
 	if bound and not resolved:
 		_draw_circular_note()
 		return
 
-	var apo := 0
-	var peri := 0
-	var far := -1.0
-	var near := INF
-	for i in range(track.size()):
-		var distance := (track[i] - centre).length()
-		if distance > far:
-			far = distance
-			apo = i
-		if distance < near:
-			near = distance
-			peri = i
-
+	var scale: float = data.get("render_scale", 1.0)
 	if bound:
-		_apsis(to_screen.call(_refined_apsis(track, centre, apo)), "AP",
+		var apoapsis := float(data.get("apoapsis_m", 0.0)) * scale
+		_apsis(origin + Vector2(-apoapsis / extent * box, 0.0), "AP",
 			Fmt.distance(data.get("apoapsis_altitude_m", 0.0)))
-	_apsis(to_screen.call(_refined_apsis(track, centre, peri)), "PE",
+	var periapsis := float(data.get("periapsis_m", 0.0)) * scale
+	_apsis(origin + Vector2(periapsis / extent * box, 0.0), "PE",
 		Fmt.distance(data.get("periapsis_altitude_m", 0.0)))
 
 
