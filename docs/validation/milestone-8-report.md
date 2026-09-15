@@ -240,6 +240,11 @@ medido no primeiro passe, em vez de zero, é o caminho evidente. `IMPROVEMENT`.
 **A época de chegada é resolvida à granularidade do warp.** Ver acima.
 `IMPROVEMENT`.
 
+**Entre as duas queimas de captura a fase dizia `APPROACH`.** Corrigido: o trecho
+entre o corte da inserção e o corte do trim é `ORBIT_INSERTION`. A aproximação
+acabou quando o motor acendeu, e o mostrador dizia o contrário a 801 km de
+altitude marciana com a órbita já fechada.
+
 **A captura interplanetária não está disponível sob `AUTOPILOT`.** Os voos curtos
 que tornam o solver de captura viável não montam a pilha de atitude, e uma queima
 guiada pelo casco sem ela aponta para lugar nenhum — foi assim que o caso lunar
@@ -305,12 +310,26 @@ disco. Reconhecíveis a distância e nada mais, que é o que a regra 69 pede.
 [PASS] capture burn executes physically           7516 m/s + trim de 15 s
 [PASS] spacecraft reaches Mars orbit
 [PASS] complete vertical slice can be reproduced  scripts/run_godot_headless.sh
-[    ] screenshots exist for the complete sequence  scripts/m8_screenshots.sh,
-                                                    precisa de tela
+[PASS] screenshots exist for the complete sequence  docs/validation/m8/, 12 imagens
 [    ] manual playtest checklist passes             docs/validation/m8-playtest.md,
                                                     precisa de uma pessoa
 ```
 
-As duas últimas linhas precisam de uma tela e de alguém a olhar para ela. O
-roteiro fotográfico e a lista existem e estão escritos; correr o primeiro e
-seguir a segunda é o passo que não se automatiza (regra 60).
+A última linha precisa de uma tela e de alguém a olhar para ela. A lista existe e
+está escrita; segui-la é o passo que não se automatiza (regra 60).
+
+## FOTOGRAFIAS
+
+Doze, de `01-earth-orbit` a `12-mars-orbit-external`, em `docs/validation/m8/`.
+Cada uma condicionada ao ESTADO da simulação e não a um número de quadros — a
+sequência é reproduzível e diz quando uma condição não foi atingida em vez de
+abortar.
+
+Três delas custaram uma lição sobre o warp e uma sobre a leitura de empuxo; estão
+registradas em `docs/validation/m8/README.md`, porque são sobre o simulador e não
+sobre as imagens.
+
+O que elas mostram e que nenhum número acima mostra: **Marte cresce**. Em
+`10-mars-capture` o disco tem terminador, regiões de albedo escuro e um fio de
+calota, com a nave em silhueta contra ele e `INSERTION T−00:29:46` no canto. O
+apoapsis lê `--`, porque a órbita ainda é uma hipérbole.

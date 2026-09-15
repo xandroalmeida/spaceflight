@@ -11,6 +11,17 @@ extends SceneTree
 ##
 ##     scripts/godot_tests.sh m8
 
+## Quantas asserções esta suíte tem de correr.
+##
+## ⚠️ Um `SCRIPT ERROR` no Godot não reprova nada: ele imprime, a função aborta,
+## e a suíte segue e termina com "0 failed" -- com menos verificações do que
+## tinha antes. Foi assim que um erro de análise no `orbit_map.gd` tirou seis
+## asserções desta suíte sem que ela ficasse vermelha.
+##
+## Um número esperado transforma cobertura perdida em falha, que é o que ela é.
+## Sobe quando se acrescentam testes; nunca desce em silêncio.
+const EXPECTED_CHECKS := 73
+
 var failures := 0
 var checks := 0
 
@@ -38,7 +49,12 @@ func _initialize() -> void:
 	_test_system_map(simulation)
 	_test_system_orbit_paths(simulation)
 	_test_async_search_can_be_cancelled(simulation)
+	_test_planned_arc_lands_on_the_destination(simulation)
 
+	if checks < EXPECTED_CHECKS:
+		failures += 1
+		printerr("\nFAIL só %d de %d verificações correram -- algo abortou a meio"
+			% [checks, EXPECTED_CHECKS])
 	print("\n%d checks, %d failure(s)" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -266,3 +282,76 @@ func _test_async_search_can_be_cancelled(simulation: SpaceflightSimulation) -> v
 		"uma busca cancelada não devolve um plano")
 	_check(not simulation.has_planned_transfer(),
 		"e não deixa um plano armado para trás")
+
+
+func _test_planned_arc_lands_on_the_destination(simulation: SpaceflightSimulation) -> void:
+	## Regra 31, verificada em vez de comentada.
+	##
+	## O arco planejado chega ao mapa do sistema em metros heliocêntricos, e cada
+	## amostra foi reconstruída somando a posição do corpo de ORIGEM na época
+	## DAQUELA amostra. Se essa reconstrução usasse a época errada -- a de agora,
+	## por exemplo -- o arco sairia deslocado pelo que a Terra anda no intervalo:
+	## 12,7 milhões de km numa transferência lunar, 500 milhões numa marciana.
+	##
+	## O teste é geométrico e não precisa de Marte: o arco tem de COMEÇAR na nave
+	## e TERMINAR no destino, e essas duas condições apanham qualquer erro de
+	## frame ou de época. A Lua serve, e planeja em três segundos em vez de um
+	## minuto.
+	print("\narco planejado, no frame do mapa (regra 31)")
+	simulation.set_target_body("Moon")
+	if not simulation.start_planning("Moon", 100.0, 100.0, 2.0):
+		_check(false, "start_planning(\"Moon\") aceita")
+		return
+	var waited := 0.0
+	while simulation.is_planning() and waited < 180.0:
+		OS.delay_msec(50)
+		waited += 0.05
+	var plan: Dictionary = simulation.collect_plan()
+	if plan.is_empty() or not plan.get("valid", false):
+		_check(false, "o plano lunar foi encontrado (%s)" % simulation.get_last_error())
+		return
+	_check(true, "plano lunar em %.1f s" % waited)
+
+	var map: Dictionary = simulation.get_system_map()
+	var arc: PackedVector3Array = map.get("planned_trajectory", PackedVector3Array())
+	_check(arc.size() > 32, "o arco chega ao mapa do sistema (%d amostras)" % arc.size())
+	if arc.size() < 2:
+		return
+
+	# ⚠️ Contra as ÂNCORAS, e contra a âncora da ÉPOCA CERTA.
+	#
+	# Este teste esteve errado duas vezes, pela mesma razão, e as duas vezes deu
+	# o código correto por partido:
+	#
+	#   1. comparou a última amostra com a posição da Terra AGORA e mediu
+	#      13 233 000 km. O arco acaba onde a Lua ESTARÁ, e entre a partida e a
+	#      chegada a Terra anda 12,7 milhões de quilômetros.
+	#
+	#   2. comparou-a com a Lua à CHEGADA e mediu 438 979 km. O arco corre duas
+	#      revoluções para além da queima de captura -- 3,9 horas -- e num frame
+	#      heliocêntrico 3,9 horas são 424 000 km, porque a Lua orbita o SOL a
+	#      30 km/s junto com a Terra, e tudo o mais neste mapa também.
+	#
+	# Duas posições do mesmo corpo em duas épocas nunca são comparáveis aqui sem
+	# dizer quais épocas. É esse o assunto da regra 31.
+	_check(map.get("origin_at_departure_valid", false), "o mapa traz a âncora de partida")
+	_check(map.get("destination_at_arrival_valid", false), "o mapa traz a âncora de chegada")
+	_check(map.get("destination_at_trajectory_end_valid", false),
+		"e a âncora do fim do arco, que é uma época diferente")
+
+	var departure: Vector3 = map.get("origin_at_departure", Vector3.ZERO)
+	var at_end: Vector3 = map.get("destination_at_trajectory_end", Vector3.ZERO)
+
+	# A primeira amostra é a nave a sair de uma órbita de 400 km: 6771 km do
+	# centro da Terra, onde a Terra estava à partida.
+	var start_gap := (arc[0] - departure).length()
+	_check(start_gap < 5.0e7,
+		"o arco COMEÇA junto da Terra à partida (%.0f km)" % (start_gap / 1000.0))
+
+	# A última é a nave em órbita de 100 km em torno da Lua, onde a Lua está
+	# naquele instante.
+	var end_gap := (arc[arc.size() - 1] - at_end).length()
+	_check(end_gap < 2.0e7,
+		"o arco TERMINA junto da Lua no fim do arco (%.0f km)" % (end_gap / 1000.0))
+
+	simulation.clear_plan()

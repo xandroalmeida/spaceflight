@@ -1570,7 +1570,11 @@ godot::PackedVector3Array SpaceflightSimulation::get_body_orbit_track(int index,
         // perturbed by the Sun and by the Earth's figure, and the difference
         // between the two answers is hundreds of kilometres. Drawing the ellipse
         // would be drawing a trajectory the simulation does not fly.
-        const auto body_state = provider_->state(body.id, t, frame);
+        // The SOURCE id, not the body's own: Jupiter is drawn at its system
+        // barycentre because no loaded kernel can place 599, and asking for 599
+        // here would throw an exception across the C ABI that GDExtension is
+        // built on -- this method is not inside `guarded`.
+        const auto body_state = provider_->state(body.ephemeris_source, t, frame);
         const auto reference_state = provider_->state(craft.reference, t, frame);
         out[i] = to_godot(transform_.to_render(
             centre + (body_state.state.position - reference_state.state.position)));
@@ -1719,6 +1723,51 @@ godot::Dictionary SpaceflightSimulation::get_system_map() const {
         arc.resize(index);
     }
     out["planned_trajectory"] = arc;
+
+    // Onde a origem ESTAVA à partida e onde o destino ESTARÁ à chegada.
+    //
+    // Rule 30 asks the map to mark the departure and the arrival, and neither is
+    // where the body is drawn: the Earth moves 500 million kilometres while the
+    // ship is in transit and Mars moves a third of its orbit. An arc that ends
+    // nowhere near the Mars marker is not a bug -- it ends where Mars will BE --
+    // and the only way a reader can see that is if the map draws both.
+    if (planned_.ok()) {
+        const auto frame = sf::coordinates::ReferenceFrame::ssb_j2000();
+        auto anchor = [&](sf::celestial::BodyId body, sf::time::CoordinateTime t,
+                          const char* key) {
+            try {
+                const auto there = provider_->position(body, t, frame);
+                const auto sun_then = provider_->position(sf::celestial::bodies::sun, t, frame);
+                out[key] = to_metres(there - sun_then);
+                out[godot::String{key} + "_valid"] = true;
+            } catch (const std::exception&) {
+                out[godot::String{key} + "_valid"] = false;
+            }
+        };
+        anchor(planned_.metrics.origin, planned_.metrics.departure, "origin_at_departure");
+        anchor(planned_.metrics.destination, planned_.metrics.arrival, "destination_at_arrival");
+
+        // And where the destination is at the epoch the ARC ENDS, which is not
+        // the arrival: the trajectory runs two revolutions past the capture burn
+        // so that what it shows is an orbit and not the instant one closed.
+        //
+        // ⚠️ Three point nine hours, in a heliocentric frame, is 424 000
+        // kilometres -- because the Moon orbits the SUN at 30 km/s along with the
+        // Earth, and so does everything else on this map. Two positions of the
+        // same body at two epochs are never comparable here without saying which
+        // epochs, and the difference is not small: it is larger than the
+        // Earth-Moon distance.
+        //
+        // This is the same mistake, in a bigger frame, that Milestone 6.2 made
+        // when it drew a translunar arc in absolute coordinates and got a line
+        // reaching 13.2 million kilometres. It was made twice more while writing
+        // THIS map -- both times in a test that then reported the correct code as
+        // broken. Hence this anchor, and hence the note.
+        if (!planned_.trajectory.empty()) {
+            anchor(planned_.metrics.destination, planned_.trajectory.samples.back().time,
+                   "destination_at_trajectory_end");
+        }
+    }
 
     // The burns, each where the ship will be when it lights.
     godot::Array maneuvers;

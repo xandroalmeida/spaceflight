@@ -264,28 +264,42 @@ func _draw_system() -> void:
 	var ship: Vector3 = system.get("ship_position", Vector3.ZERO)
 	var plan: PackedVector3Array = system.get("planned_trajectory", PackedVector3Array())
 
-	# O plano do desenho: a eclíptica, aproximada pelo plano que contém o Sol, a
-	# nave e o destino -- pelo mesmo motivo que no modo local, e com o mesmo
-	# aviso. O que se perde é a inclinação relativa, que este mapa não promete.
-	var second := Vector3.ZERO
-	for entry in bodies:
-		var body: Dictionary = entry
-		if body.get("is_destination", false):
-			second = body["position"]
-			break
-	if second.length() < 1.0e-9 and bodies.size() > 1:
-		second = bodies[1]["position"]
+	# O plano do desenho: a ECLÍPTICA.
+	#
+	# ⚠️ A primeira versão construía o plano a partir da nave e do destino, como o
+	# mapa local faz -- e ali isso é certo, porque garante que nenhum dos dois é
+	# encurtado. Aqui é errado, e a razão é geométrica: num mapa heliocêntrico a
+	# nave e o destino podem estar em CONJUNÇÃO. Em 2026-01-01 a Terra e Marte
+	# estão a 178 graus um do outro vistos do Sol, o produto vetorial entre eles é
+	# quase nulo, e o plano que sobra é seja lá qual for a componente fora da
+	# eclíptica que calhou de dominar. Medido: o marcador de chegada, que está a
+	# 1,47 UA do Sol, era desenhado a 1,30 -- e o arco inteiro saía encurtado.
+	#
+	# A eclíptica não tem essa degenerescência e é o plano em que o sistema solar
+	# de facto está: nenhum planeta se afasta dela mais de 7 graus. O que se perde
+	# é a inclinação das órbitas, que este mapa não promete mostrar.
 	_u = ship.normalized() if ship.length() > 1.0e-9 else Vector3.RIGHT
-	var w := _u.cross(second)
-	if w.length() < 1.0e-12:
-		w = _u.cross(Vector3(0.0, 0.0, 1.0))
-	_v = w.normalized().cross(_u).normalized()
+	# A normal da eclíptica em J2000 equatorial: o eixo z rodado pela obliquidade.
+	const OBLIQUITY := 0.40909280422232897   # 23,4393 graus, em radianos
+	var pole := Vector3(0.0, -sin(OBLIQUITY), cos(OBLIQUITY))
+	# `_u` projetado NA eclíptica, para que a nave fique à direita do mapa e o
+	# plano continue a ser o da eclíptica.
+	_u = (_u - pole * _u.dot(pole)).normalized()
+	_v = pole.cross(_u).normalized()
 	_centre = Vector3.ZERO
 
 	# A extensão: o que precisa caber. As órbitas planetárias inteiras entrariam
 	# em Netuno e esmagariam tudo o mais num ponto, então o que manda é a nave, o
 	# destino e o arco planejado -- e as órbitas são recortadas contra a caixa.
-	_extent = maxf(ship.length(), second.length())
+	_extent = ship.length()
+	for entry in bodies:
+		var body: Dictionary = entry
+		if body.get("is_destination", false):
+			_extent = maxf(_extent, Vector3(body["position"]).length())
+	# E as ÂNCORAS: o destino à chegada pode estar bem mais longe do que ele está
+	# agora, e um arco que sai da caixa é um arco que não se lê.
+	if system.get("destination_at_arrival_valid", false):
+		_extent = maxf(_extent, Vector3(system["destination_at_arrival"]).length())
 	for point in plan:
 		_extent = maxf(_extent, point.length())
 	if _extent <= 0.0:
@@ -328,6 +342,7 @@ func _draw_system() -> void:
 				String(body["name"]).to_upper(), 3.4, colour,
 				HORIZONTAL_ALIGNMENT_CENTER)
 
+	_draw_system_anchors()
 	_draw_system_maneuvers()
 
 	var ship_at := _screen(ship)
@@ -393,6 +408,34 @@ func _label_fits(at: Vector2, placed: Array[Vector2]) -> bool:
 	return true
 
 
+func _draw_system_anchors() -> void:
+	## Onde a origem ESTAVA à partida e onde o destino ESTARÁ à chegada (regra 30).
+	##
+	## ⚠️ Nenhum dos dois é onde o corpo está desenhado, e é por isso que eles
+	## existem. A Terra anda 500 milhões de quilômetros enquanto a nave vai a
+	## Marte, e Marte anda um terço da órbita: um arco que acaba longe do marcador
+	## de MARS não é um defeito -- ele acaba onde Marte vai estar. Sem estes dois
+	## anéis, quem olha para o mapa tem todo o direito de concluir o contrário.
+	if system.get("origin_at_departure_valid", false):
+		_draw_anchor(system["origin_at_departure"], "DEPARTURE", Palette.NAV)
+	if system.get("destination_at_arrival_valid", false):
+		_draw_anchor(system["destination_at_arrival"], "ARRIVAL", Palette.TARGET)
+
+
+func _draw_anchor(at: Vector3, label: String, colour: Color) -> void:
+	var screen := _screen(at)
+	if not _near_screen(screen):
+		return
+	var r := maxf(unit() * 2.2, 4.0)
+	# Um anel tracejado, para não se confundir com o corpo: o corpo é onde ele
+	# está, isto é onde ele estará.
+	for i in range(8):
+		var a0 := TAU * float(i) / 8.0
+		draw_arc(screen, r, a0, a0 + TAU / 16.0, 6, colour.darkened(0.2),
+			maxf(unit() * 0.18, 1.0))
+	draw_text_at(screen + Vector2(r * 1.6, -r), label, 3.2, colour.darkened(0.2))
+
+
 func _draw_system_maneuvers() -> void:
 	var maneuvers: Array = system.get("maneuvers", [])
 	for entry in maneuvers:
@@ -429,7 +472,8 @@ func _draw_system_legend() -> void:
 
 	var legend := [["planned transfer", Palette.PLAN], ["planet orbits",
 		Palette.PANEL_EDGE.lightened(0.10)], ["destination", Palette.TARGET],
-		["burn", Palette.WARNING]]
+		["burn", Palette.WARNING],
+		["○ departure / arrival: where the bodies WILL be", Palette.NAV]]
 	var y := size.y - u * 6.0
 	for item in legend:
 		draw_line(Vector2(u * 4.0, y - u * 1.2), Vector2(u * 10.0, y - u * 1.2),

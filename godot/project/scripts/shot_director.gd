@@ -234,7 +234,7 @@ func _script() -> Array[Dictionary]:
 			# que a queima a fecha -- a fotografia saía a `CAPTURE_BURN`, com o
 			# motor ainda aceso e a nave apontada a retrógrado, ou seja, de costas
 			# para a Lua.
-			"until": _settled_in_lunar_orbit,
+			"until": _settled_in_orbit,
 			"limit": 9000,
 			"shot": "lunar-orbit",
 		},
@@ -317,7 +317,8 @@ func _m8_script() -> Array[Dictionary]:
 			"name": "the solar system map, with the transfer on it",
 			"setup": func() -> void:
 				flight._show_panel(flight.mission_panel, false)
-				flight._cycle_map_mode()
+				flight._show_panel(flight.orbit_map, true)
+				flight.set_map_mode(OrbitMap.Mode.SYSTEM)
 				flight.orbit_map.zoom = 1.0,
 			"frames": 40,
 			"shot": "05-solar-system-map",
@@ -330,8 +331,15 @@ func _m8_script() -> Array[Dictionary]:
 				flight.camera_rig.set_mode(CameraRig.Mode.EXTERNAL_ORBIT)
 				flight.camera_rig.orbit_zoom = 1.25
 				_set_warp(2),
-			"until": _engine_running,
-			"limit": 12000,
+			# A FASE da missão e não `_engine_running`.
+			#
+			# ⚠️ `thrust_n` vem de `main_engine_->current_thrust()`, que é o
+			# acelerador MANUAL. Uma queima que o executor de manobras conduz não
+			# aparece ali, e a primeira versão deste passo esgotou doze mil
+			# quadros à espera de um empuxo que nunca ia ser reportado -- enquanto
+			# a nave, a 117 825 km de altitude, já tinha feito a injeção.
+			"until": _injection_burning,
+			"limit": 24000,
 			"shot": "06-departure-burn",
 		},
 		{
@@ -348,21 +356,62 @@ func _m8_script() -> Array[Dictionary]:
 		{
 			"name": "the solar system map, mid-cruise",
 			"setup": func() -> void:
-				flight._cycle_map_mode()
-				flight.orbit_map.zoom = 1.0,
+				# O modo posto DIRETAMENTE e não alternado.
+				#
+				# ⚠️ `_cycle_map_mode()` alterna, e o passo 5 já tinha deixado o
+				# mapa em SYSTEM: alternar aqui devolvia-o a LOCAL e fotografava o
+				# mapa errado. Um roteiro que descreve estados não pode chamar uma
+				# função que descreve transições.
+				flight._show_panel(flight.orbit_map, true)
+				flight.set_map_mode(OrbitMap.Mode.SYSTEM)
+				flight.orbit_map.zoom = 1.0
+				# E o warp desce: quarenta quadros a 1e7x são setenta e sete DIAS,
+				# e a nave chegaria a Marte durante a fotografia do cruzeiro.
+				_set_warp(5),
 			"frames": 40,
 			"shot": "08-cruise-map",
 		},
 		{
-			"name": "Mars approach",
+			# Dois passos SEM fotografia, só para travar antes da chegada.
+			#
+			# ⚠️ A 1e6x um quadro são 16 700 s, e da esfera de Hill de Marte até
+			# ao periapsis são cerca de 56 000 s: a aproximação, as três queimas e
+			# a inserção cabiam TODAS entre dois quadros.
+			#
+			# E travar num passo só não bastou, por uma razão que só aparece a
+			# correr: os três quadros de ASSENTAMENTO -- os que deixam o que a
+			# condição descreve chegar à tela -- correm no warp ANTIGO. A 1e6x são
+			# 50 000 s, quase todo o encontro. A primeira versão desta travagem
+			# disparou a 3e9 m e fotografou a captura com a missão já COMPLETE, em
+			# órbita, a 495 km.
+			#
+			# Então a descida é em dois degraus, cada um com folga para o
+			# assentamento do anterior: 2e10 m a 1e6x deixa 125 quadros de
+			# margem contra 3 de assentamento, e 1e9 m a 1e4x deixa 6000 contra 3.
+			"name": "first slowdown, still far out",
 			"setup": func() -> void:
 				flight._show_panel(flight.orbit_map, false)
-				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE)
-				# O warp desce quando há algo para ver: as três queimas de
-				# captura duram doze minutos, doze minutos e quinze segundos, e a
-				# 1e7x um quadro são 0,87 DIA -- todas as três caberiam entre
-				# dois quadros e a sequência fotografaria o antes e o depois.
+				_set_warp(6),
+			"until": func() -> bool: return _closer_than(2.0e10),
+			"limit": 24000,
+			"shot": "",
+		},
+		{
+			"name": "second slowdown, near the encounter",
+			"setup": func() -> void:
 				_set_warp(4),
+			"until": func() -> bool: return _closer_than(1.0e9),
+			"limit": 24000,
+			"shot": "",
+		},
+		{
+			"name": "Mars approach",
+			"setup": func() -> void:
+				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE)
+				flight._show_panel(flight.orbit_map, false)
+				# Já dentro de um milhão de quilômetros: 1e3x, para que a esfera
+				# de Hill não seja atravessada num quadro.
+				_set_warp(3),
 			"until": _within_approach,
 			"limit": 24000,
 			"shot": "09-mars-approach",
@@ -370,24 +419,37 @@ func _m8_script() -> Array[Dictionary]:
 		{
 			"name": "capture burn",
 			"setup": func() -> void:
-				_set_warp(2),
+				# A queima de captura dura 735 s. A 1e3x um quadro são 16,7 s, e
+				# ela abrange quarenta quadros -- o suficiente para a fotografia
+				# cair DENTRO dela.
+				_set_warp(3),
 			"until": _close_to_target,
 			"limit": 24000,
 			"shot": "10-mars-capture",
 		},
 		{
 			"name": "settled Mars orbit",
+			# A FASE, e não a geometria.
+			#
+			# ⚠️ `_settled_in_orbit` pergunta se há uma órbita fechada e se o
+			# motor está apagado, e numa captura de DUAS queimas as duas coisas
+			# são verdade entre elas: a fotografia saiu a 763 km com a queima de
+			# captura ainda a correr. `COMPLETE` é a única leitura sem ambiguidade,
+			# e é a que o core produz.
 			"setup": func() -> void:
-				_set_warp(2)
+				# 1e3x: as três queimas duram 735 s, 15 s e a órbita final tem
+				# 7366 s de período. A 1e3x um quadro são 16,7 s -- a queima de
+				# captura abrange quarenta quadros e a de trim um.
+				_set_warp(3)
 				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE),
-			"until": _settled_in_lunar_orbit,
+			"until": _mission_complete,
 			"limit": 24000,
 			"shot": "11-mars-orbit",
 		},
 		{
 			"name": "the ship in Mars orbit, with Mars behind it",
 			"setup": func() -> void:
-				_set_warp(1)
+				_set_warp(2)
 				flight.camera_rig.set_mode(CameraRig.Mode.TARGET_REFERENCE)
 				flight.camera_rig.orbit_azimuth = PI
 				flight.camera_rig.orbit_elevation = 0.34
@@ -397,6 +459,23 @@ func _m8_script() -> Array[Dictionary]:
 			"shot": "12-mars-orbit-external",
 		},
 	]
+
+
+## Em METROS e não em fases, porque a fase só muda DENTRO da esfera de influência
+## -- e a esta altura o problema é justamente chegar lá devagar o bastante para a
+## ver mudar.
+func _closer_than(metres: float) -> bool:
+	var s: Dictionary = flight.simulation.get_snapshot()
+	var distance: float = s.get("target_distance_m", INF)
+	return distance > 0.0 and distance < metres
+
+
+func _mission_complete() -> bool:
+	return flight.simulation.get_mission_phase() == "COMPLETE"
+
+
+func _injection_burning() -> bool:
+	return flight.simulation.get_mission_phase() in ["INJECTION_BURN", "COAST", "APPROACH"]
 
 
 func _plan_ready() -> bool:
@@ -518,7 +597,7 @@ func _close_to_target() -> bool:
 	return not orbit.is_empty() and float(orbit.get("distance_m", INF)) < CAPTURE_RANGE_M
 
 
-func _settled_in_lunar_orbit() -> bool:
+func _settled_in_orbit() -> bool:
 	var orbit: Dictionary = flight.simulation.get_orbit_about_target()
 	if orbit.is_empty() or not orbit.get("captured", false):
 		return false

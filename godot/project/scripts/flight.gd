@@ -808,6 +808,17 @@ func plan_mission(target: String = "", periapsis_km: float = MISSION_PERIAPSIS_K
 	return true
 
 
+func set_map_mode(mode: int) -> void:
+	## Põe o modo do mapa, em vez de o alternar.
+	##
+	## `_cycle_map_mode()` é o que a tecla faz e descreve uma TRANSIÇÃO; isto
+	## descreve um ESTADO, que é o que um roteiro ou um teste precisa. Os dois
+	## carregam os caminhos planetários da mesma maneira.
+	if orbit_map.mode == mode:
+		return
+	_cycle_map_mode()
+
+
 func _cycle_map_mode() -> void:
 	## Alterna LOCAL / SISTEMA SOLAR (regra 26). Abre o mapa se estiver fechado:
 	## pedir o modo de um mostrador invisível e não ver nada acontecer é uma

@@ -14,6 +14,17 @@ extends SceneTree
 ##
 ##     scripts/godot_tests.sh
 
+## Quantas asserções esta suíte tem de correr.
+##
+## ⚠️ Um `SCRIPT ERROR` no Godot não reprova nada: ele imprime, a função aborta,
+## e a suíte segue e termina com "0 failed" -- com menos verificações do que
+## tinha antes. Foi assim que um erro de análise no `orbit_map.gd` tirou seis
+## asserções desta suíte sem que ela ficasse vermelha.
+##
+## Um número esperado transforma cobertura perdida em falha, que é o que ela é.
+## Sobe quando se acrescentam testes; nunca desce em silêncio.
+const EXPECTED_CHECKS := 150
+
 var failures := 0
 var checks := 0
 
@@ -49,6 +60,10 @@ func _initialize() -> void:
 	_test_cockpit_hit_test()
 	_test_instrument_data_survives_a_display(simulation)
 
+	if checks < EXPECTED_CHECKS:
+		failures += 1
+		printerr("\nFAIL só %d de %d verificações correram -- algo abortou a meio"
+			% [checks, EXPECTED_CHECKS])
 	print("\n%d checks, %d failed" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 

@@ -351,6 +351,18 @@ void MissionExecution::update(const ephemeris::EphemerisProvider& provider,
             return;
         }
     }
+
+    // Between the two capture burns the ship is already captured and coasting to
+    // the trim. Falling through to the geometric test would report APPROACH --
+    // which is what it did, and it is false: the approach ended when the engine
+    // lit. Measured on the Mars sequence, the readout said APPROACH at 801 km of
+    // Mars altitude with the orbit already closed.
+    if (circularisation != nullptr && insertion != nullptr &&
+        now >= insertion->cutoff() && now < circularisation->cutoff()) {
+        phase_ = MissionPhase::OrbitInsertion;
+        return;
+    }
+
     phase_ = inside_sphere ? MissionPhase::Approach : MissionPhase::Coast;
 }
 
