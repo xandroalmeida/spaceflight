@@ -371,6 +371,7 @@ func _wire_controls() -> void:
 			MessageLog.Level.INFO))
 
 	mission_panel.search_cancelled.connect(func() -> void: cancel_planning())
+	mission_panel.alternative_chosen.connect(func(index: int) -> void: choose_alternative(index))
 	mission_panel.plan_requested.connect(func(target: String, pe: float, ap: float) -> void:
 		plan_mission(target, pe, ap))
 	mission_panel.execute_requested.connect(func() -> void: arm_mission())
@@ -839,6 +840,20 @@ func _cycle_map_mode() -> void:
 	else:
 		messages.post("LOCAL MAP", MessageLog.Level.INFO)
 	orbit_map.queue_redraw()
+
+
+func choose_alternative(index: int) -> void:
+	## Replaneja UMA das geometrias que a busca voou, fixada (regra 42).
+	##
+	## Passa pelo mesmo caminho de qualquer outro plano -- a mesma thread, o mesmo
+	## progresso, o mesmo `collect_plan()` -- e custa uma candidata em vez de 768,
+	## o que são segundos em vez de um minuto.
+	if simulation == null or simulation.is_planning():
+		return
+	if not simulation.start_planning_alternative(index):
+		messages.post(simulation.get_last_error(), MessageLog.Level.WARNING)
+		return
+	messages.post("REPLANNING THE CHOSEN TRAJECTORY", MessageLog.Level.MISSION)
 
 
 func cancel_planning() -> void:

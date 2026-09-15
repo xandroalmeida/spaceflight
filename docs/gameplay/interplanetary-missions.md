@@ -54,6 +54,21 @@ seria inventar uma comparação.
 Abaixo delas vem a lista das **recusadas**, com o motivo de cada uma. Uma busca
 que encontra pouco diz o que tentou.
 
+### Escolher uma
+
+Uma linha de botões `USE` por baixo da tabela, um por coluna. Escolher uma
+replaneja **aquela** geometria — o ponto de partida, o tempo de voo e o ramo de
+Lambert ficam fixados — em vez de procurar de novo.
+
+Custa uma candidata em vez de 768: cerca de um segundo, não um minuto.
+
+O crivo continua a correr. Uma geometria fixada que viole uma restrição rígida é
+recusada na mesma; isto é uma escolha de pergunta, não uma maneira de contornar a
+resposta. E as recusadas não têm botão: elas já foram voadas e já disseram o que
+tinham a dizer.
+
+Com **uma** opção só a linha fica vazia, porque não há escolha a oferecer.
+
 ---
 
 ## Não há janela de lançamento

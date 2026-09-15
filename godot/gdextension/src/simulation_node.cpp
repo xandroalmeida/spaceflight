@@ -180,6 +180,8 @@ void SpaceflightSimulation::_bind_methods() {
                  "apoapsis_altitude_km", "search_hours"),
         &SpaceflightSimulation::start_planning);
     godot::ClassDB::bind_method(D_METHOD("is_planning"), &SpaceflightSimulation::is_planning);
+    godot::ClassDB::bind_method(D_METHOD("start_planning_alternative", "index"),
+                                &SpaceflightSimulation::start_planning_alternative);
     godot::ClassDB::bind_method(D_METHOD("get_planning_progress"),
                                 &SpaceflightSimulation::get_planning_progress);
     godot::ClassDB::bind_method(D_METHOD("collect_plan"), &SpaceflightSimulation::collect_plan);
@@ -893,9 +895,51 @@ double SpaceflightSimulation::get_throttle() const {
 // there is exactly one of them and what it is allowed to touch.
 // ---------------------------------------------------------------------------
 
+bool SpaceflightSimulation::start_planning_alternative(int index) {
+    if (!planned_.ok() || !last_request_.valid) {
+        last_error_ = "start_planning_alternative: there is no search to choose from";
+        return false;
+    }
+    if (index < 0 || index >= static_cast<int>(planned_.alternatives.size())) {
+        last_error_ = "start_planning_alternative: no alternative " + std::to_string(index);
+        return false;
+    }
+    const auto& alternative = planned_.alternatives[static_cast<std::size_t>(index)];
+    if (!alternative.feasible) {
+        last_error_ = "start_planning_alternative: \"" + alternative.label +
+                      "\" was flown and refused (" +
+                      std::string{sf::navigation::to_string(alternative.failure)} + ")";
+        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+        return false;
+    }
+
+    sf::navigation::TransferConfig::PinnedDeparture pin{};
+    pin.active = true;
+    pin.coast_s = alternative.departure_coast_s;
+    pin.time_of_flight_days = alternative.time_of_flight_s / 86400.0;
+    pin.direction = alternative.branch;
+
+    return begin_planning(last_request_.target, last_request_.periapsis_altitude_km,
+                          last_request_.apoapsis_altitude_km, last_request_.search_hours, pin);
+}
+
 bool SpaceflightSimulation::start_planning(const godot::String& target_body,
                                            double periapsis_altitude_km,
                                            double apoapsis_altitude_km, double search_hours) {
+    const std::string name{target_body.utf8().get_data()};
+    const auto lookup = sf::celestial::body_from_name(name);
+    if (!lookup.ok) {
+        last_error_ = "start_planning: no body named \"" + name + "\"";
+        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
+        return false;
+    }
+    return begin_planning(lookup.id, periapsis_altitude_km, apoapsis_altitude_km, search_hours,
+                          sf::navigation::TransferConfig::PinnedDeparture{});
+}
+
+bool SpaceflightSimulation::begin_planning(
+    sf::celestial::BodyId target, double periapsis_altitude_km, double apoapsis_altitude_km,
+    double search_hours, const sf::navigation::TransferConfig::PinnedDeparture& pin) {
     if (builder_ == nullptr) {
         last_error_ = "start_planning: configure() first";
         return false;
@@ -906,13 +950,11 @@ bool SpaceflightSimulation::start_planning(const godot::String& target_body,
     }
     join_worker();
 
-    const std::string name{target_body.utf8().get_data()};
-    const auto lookup = sf::celestial::body_from_name(name);
-    if (!lookup.ok) {
-        last_error_ = "start_planning: no body named \"" + name + "\"";
-        godot::UtilityFunctions::push_error(godot::String{last_error_.c_str()});
-        return false;
-    }
+    last_request_.valid = true;
+    last_request_.target = target;
+    last_request_.periapsis_altitude_km = periapsis_altitude_km;
+    last_request_.apoapsis_altitude_km = apoapsis_altitude_km;
+    last_request_.search_hours = search_hours;
 
     job_ = std::make_unique<PlanningJob>();
 
@@ -931,12 +973,13 @@ bool SpaceflightSimulation::start_planning(const godot::String& target_body,
     request.initial = state_;
     request.epoch = clock_->coordinate_time();
     request.center = sf::celestial::bodies::earth;
-    request.target = lookup.id;
+    request.target = target;
     request.target_periapsis_altitude_m = periapsis_altitude_km * 1000.0;
     request.target_apoapsis_altitude_m = apoapsis_altitude_km * 1000.0;
     request.search_window_s = search_hours * 3600.0;
     request.execution = execution_;
     request.pointing = pointing_->gains();
+    request.pinned = pin;
 
     PlanningJob* job = job_.get();
     request.cancelled = [job] { return job->cancel.load(); };
@@ -1215,6 +1258,7 @@ godot::Array SpaceflightSimulation::get_plan_alternatives() const {
         entry["departure_tdb_s"] = alternative.departure.seconds_since_j2000();
         entry["time_of_flight_days"] = alternative.time_of_flight_s / 86400.0;
         entry["time_of_flight_s"] = alternative.time_of_flight_s;
+        entry["departure_coast_s"] = alternative.departure_coast_s;
         entry["branch"] =
             godot::String{alternative.branch == sf::trajectory::TransferDirection::Prograde
                               ? "prograde"

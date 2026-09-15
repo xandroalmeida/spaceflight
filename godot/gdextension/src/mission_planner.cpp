@@ -87,6 +87,7 @@ sf::navigation::MissionRequest request_for(const SceneTransferRequest& request) 
 
     plan.effort.cancelled = request.cancelled;
     plan.effort.on_progress = request.on_progress;
+    plan.pinned = request.pinned;
     return plan;
 }
 

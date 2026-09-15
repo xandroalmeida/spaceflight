@@ -53,6 +53,10 @@ testar o M8 e Marte não está lá, é o kernel que falta.
 - [ ] os tempos de voo e os Δv das colunas são **diferentes entre si** — se forem
       iguais, a tabela está a repetir a mesma trajetória
 - [ ] as recusadas aparecem com o motivo, e o motivo é uma frase e não "falhou"
+- [ ] há um botão `USE` por coluna, e só quando há mais de uma opção
+- [ ] escolher uma delas replaneja em **segundos** e o resumo passa a mostrar o
+      tempo de voo daquela coluna, não o da anterior
+- [ ] escolher a mesma duas vezes dá o mesmo resultado
 
 ### O mapa
 

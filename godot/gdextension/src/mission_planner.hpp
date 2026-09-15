@@ -107,6 +107,16 @@ struct SceneTransferRequest {
     // learn that a thread exists.
     std::function<bool()> cancelled{};
     std::function<void(const sf::navigation::SearchProgress&)> on_progress{};
+
+    // Fly ONE named geometry instead of searching for it (Milestone 8 rule 42
+    // and the vertical slice's step 8: "select an alternative").
+    //
+    // The screen still runs -- a pinned geometry that violates a hard constraint
+    // is still refused -- so this is not a way round the planner's judgement. It
+    // is a way to ask for the candidate the pilot picked out of the table rather
+    // than the one the cost function preferred, and it costs one candidate
+    // instead of 768.
+    sf::navigation::TransferConfig::PinnedDeparture pinned{};
 };
 
 // The translation, in two halves, EXPOSED.

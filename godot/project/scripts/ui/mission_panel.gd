@@ -24,6 +24,10 @@ signal plan_requested(target: String, periapsis_km: float, apoapsis_km: float)
 signal execute_requested()
 signal cancel_requested()
 signal search_cancelled()
+## O piloto escolheu uma das trajetórias da tabela. `index` é o índice em
+## `get_plan_alternatives()`, não a coluna: a tabela mostra as viáveis ordenadas
+## por tempo de voo e o índice de origem viaja com o botão.
+signal alternative_chosen(index: int)
 signal target_changed(target: String)
 signal closed()
 
@@ -52,6 +56,7 @@ var _cancel_button: Button
 var _status: Label
 var _pending_plan := false
 var _searching := false
+var _choices: HBoxContainer
 var _font: Font
 
 
@@ -128,6 +133,16 @@ func _ready() -> void:
 	_summary.add_theme_font_override("normal_font", _font)
 	_summary.add_theme_font_size_override("normal_font_size", 14)
 	column.add_child(_summary)
+
+	# Uma linha de botões, um por alternativa viável (regra 42 e o passo 8 do
+	# vertical slice: "selecionar uma alternativa").
+	#
+	# A tabela sozinha é um relatório. Isto torna-a uma escolha -- e escolher
+	# custa uma candidata em vez de 768, porque a geometria é FIXADA e o
+	# planejador replaneja só aquela.
+	_choices = HBoxContainer.new()
+	_choices.add_theme_constant_override("separation", 10)
+	column.add_child(_choices)
 
 	_status = _label("", 13, Palette.WARNING)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -256,6 +271,7 @@ func show_plan(plan: Dictionary, error: String) -> void:
 	_searching = false
 	_plan_button.text = "SEARCH"
 	_plan_button.disabled = false
+	_clear_choices()
 
 	if plan.is_empty() or not plan.get("valid", false):
 		_summary.text = ""
@@ -285,13 +301,19 @@ func show_alternatives(alternatives: Array) -> void:
 	## Cada número vem do planejador. Este painel não estima tempo de voo nem Δv
 	## e não inventa uma linha quando a busca só encontrou uma opção (regra 47:
 	## "não escrever valores fictícios estáticos").
+	_clear_choices()
 	if alternatives.is_empty():
 		return
 
 	var feasible: Array = []
 	var refused: Array = []
-	for entry in alternatives:
-		var alternative: Dictionary = entry
+	for i in range(alternatives.size()):
+		var alternative: Dictionary = alternatives[i]
+		# O índice de ORIGEM viaja com a linha: a tabela reordena por tempo de
+		# voo, e um botão que mandasse a posição na coluna escolheria outra
+		# trajetória.
+		alternative = alternative.duplicate()
+		alternative["source_index"] = i
 		if alternative.get("feasible", false):
 			feasible.append(alternative)
 		else:
@@ -323,6 +345,7 @@ func show_alternatives(alternatives: Array) -> void:
 				float(a["predicted_apoapsis_m"]) / 1000.0]))])
 		lines.append("  %-12s %s" % ["INC", _row_of(_column(shown, func(a: Dictionary) -> String:
 			return "%.1f°" % float(a["predicted_inclination_deg"])))])
+		_build_choices(shown)
 
 	if not refused.is_empty():
 		lines.append("")
@@ -332,6 +355,29 @@ func show_alternatives(alternatives: Array) -> void:
 			lines.append("  %-22s %s" % [_short_label(String(alternative["label"])),
 				String(alternative.get("failure", "?"))])
 	_summary.text += "\n".join(lines)
+
+
+func _clear_choices() -> void:
+	if _choices == null:
+		return
+	for child in _choices.get_children():
+		child.queue_free()
+
+
+func _build_choices(shown: Array) -> void:
+	## Um botão por coluna. Com uma opção só não há escolha a oferecer -- ela já
+	## é o plano -- e a linha fica vazia em vez de oferecer um botão que não muda
+	## nada.
+	if shown.size() < 2:
+		return
+	_choices.add_child(_label("USE", 13, Palette.SECONDARY))
+	for i in range(shown.size()):
+		var alternative: Dictionary = shown[i]
+		var index: int = alternative["source_index"]
+		var button := _button(_alternative_name(i, shown.size()),
+			func() -> void: alternative_chosen.emit(index))
+		button.custom_minimum_size = Vector2(140, 0)
+		_choices.add_child(button)
 
 
 func _alternative_name(index: int, total: int) -> String:

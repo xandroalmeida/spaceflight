@@ -321,6 +321,21 @@ public:
                         double apoapsis_altitude_km, double search_hours);
     bool is_planning() const;
 
+    // Replan ONE of the geometries the last search flew (rule 42, and step 8 of
+    // the vertical slice: "select an alternative").
+    //
+    // `index` is into get_plan_alternatives(). The search is pinned to that
+    // candidate's departure point, flight time and Lambert branch -- so it costs
+    // one candidate instead of 768, a few seconds instead of a minute -- and it
+    // runs through the SAME path as any other plan. A pinned geometry that
+    // violates a hard constraint is still refused; this is a choice of question,
+    // not a way round the answer.
+    //
+    // Refuses an infeasible alternative: the ones the table marks REFUSED were
+    // flown and found wanting, and replanning them would spend seconds arriving
+    // at the same word.
+    bool start_planning_alternative(int index);
+
     // Counts, and the stage the search is in. Empty when nothing is running.
     godot::Dictionary get_planning_progress() const;
 
@@ -524,11 +539,31 @@ private:
         double wall_seconds{0.0};
     };
     std::unique_ptr<PlanningJob> job_;
+
+    // What the last search was ASKED for, so that replanning one of its
+    // alternatives asks the same question about the same orbit. Not read from
+    // planned_.metrics: those are what the planner ACHIEVED, and a replan that
+    // silently retargeted itself at what it happened to hit would be a different
+    // mission wearing the same label.
+    struct LastRequest {
+        bool valid{false};
+        sf::celestial::BodyId target{};
+        double periapsis_altitude_km{0.0};
+        double apoapsis_altitude_km{0.0};
+        double search_hours{0.0};
+    };
+    LastRequest last_request_{};
     bool auto_reference_{true};
 
     [[nodiscard]] sf::celestial::BodyId natural_reference() const;
 
     void join_worker();
+
+    // The one body of start_planning() and start_planning_alternative(): the
+    // only difference between them is the pin.
+    bool begin_planning(sf::celestial::BodyId target, double periapsis_altitude_km,
+                        double apoapsis_altitude_km, double search_hours,
+                        const sf::navigation::TransferConfig::PinnedDeparture& pin);
 };
 
 }  // namespace spaceflight_godot

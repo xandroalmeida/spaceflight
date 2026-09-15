@@ -20,7 +20,7 @@ extends SceneTree
 ##
 ## Um número esperado transforma cobertura perdida em falha, que é o que ela é.
 ## Sobe quando se acrescentam testes; nunca desce em silêncio.
-const EXPECTED_CHECKS := 73
+const EXPECTED_CHECKS := 79
 
 var failures := 0
 var checks := 0
@@ -50,6 +50,7 @@ func _initialize() -> void:
 	_test_system_orbit_paths(simulation)
 	_test_async_search_can_be_cancelled(simulation)
 	_test_planned_arc_lands_on_the_destination(simulation)
+	_test_choosing_an_alternative(simulation)
 
 	if checks < EXPECTED_CHECKS:
 		failures += 1
@@ -353,5 +354,69 @@ func _test_planned_arc_lands_on_the_destination(simulation: SpaceflightSimulatio
 	var end_gap := (arc[arc.size() - 1] - at_end).length()
 	_check(end_gap < 2.0e7,
 		"o arco TERMINA junto da Lua no fim do arco (%.0f km)" % (end_gap / 1000.0))
+
+	simulation.clear_plan()
+
+
+func _test_choosing_an_alternative(simulation: SpaceflightSimulation) -> void:
+	## Regra 42 e o passo 8 do vertical slice: a tabela de alternativas é uma
+	## ESCOLHA e não um relatório.
+	##
+	## O que isto tem de provar não é que o botão existe: é que escolher a
+	## alternativa `i` devolve a geometria `i` e não a que o custo preferia. As
+	## duas coisas que a identificam -- o tempo de voo e o instante da partida --
+	## têm de bater.
+	print("\nescolher uma alternativa (regra 42)")
+	if not simulation.start_planning("Moon", 100.0, 100.0, 2.0):
+		_check(false, "a busca lunar começa")
+		return
+	var waited := 0.0
+	while simulation.is_planning() and waited < 180.0:
+		OS.delay_msec(50)
+		waited += 0.05
+	var first: Dictionary = simulation.collect_plan()
+	if first.is_empty() or not first.get("valid", false):
+		_check(false, "a busca lunar encontrou um plano")
+		return
+
+	var alternatives: Array = simulation.get_plan_alternatives()
+	_check(alternatives.size() >= 2, "a busca voou %d geometrias" % alternatives.size())
+	_check(alternatives[0].has("departure_coast_s"),
+		"cada alternativa traz a geometria que a reproduz")
+
+	# Uma que NÃO seja a que o planejador escolheu. Se fosse a mesma, o teste
+	# passaria sem provar nada.
+	var wanted := -1
+	for i in range(alternatives.size()):
+		var a: Dictionary = alternatives[i]
+		if a.get("feasible", false) \
+				and absf(float(a["time_of_flight_days"]) - float(first["time_of_flight_days"])) > 0.1:
+			wanted = i
+			break
+	if wanted < 0:
+		_check(true, "só uma geometria viável nesta época -- nada a escolher")
+		simulation.clear_plan()
+		return
+
+	var chosen: Dictionary = alternatives[wanted]
+	_check(simulation.start_planning_alternative(wanted),
+		"escolher a alternativa %d é aceito" % wanted)
+	waited = 0.0
+	while simulation.is_planning() and waited < 180.0:
+		OS.delay_msec(50)
+		waited += 0.05
+	var second: Dictionary = simulation.collect_plan()
+	_check(not second.is_empty() and second.get("valid", false),
+		"a geometria fixada replaneja em %.1f s" % waited)
+	if second.is_empty():
+		return
+
+	# É a geometria PEDIDA e não a que o custo preferia.
+	_check(absf(float(second["time_of_flight_days"]) - float(chosen["time_of_flight_days"])) < 0.01,
+		"o tempo de voo é o da escolhida: %.3f d (pedido %.3f d)"
+			% [second["time_of_flight_days"], chosen["time_of_flight_days"]])
+	_check(absf(float(second["time_of_flight_days"]) - float(first["time_of_flight_days"])) > 0.1,
+		"e NÃO é o da que o planejador tinha preferido (%.3f d)"
+			% first["time_of_flight_days"])
 
 	simulation.clear_plan()

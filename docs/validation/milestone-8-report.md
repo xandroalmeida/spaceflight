@@ -198,6 +198,16 @@ Os rótulos `FAST` / `BALANCED` / `LOW ΔV` só aparecem quando há três opçõ
 nomear; com duas são `FASTER` e `CHEAPER`. Chamar uma trajetória de "equilibrada"
 quando não há nada com que a equilibrar seria inventar uma comparação.
 
+E a tabela é uma **escolha**, não um relatório: um botão `USE` por coluna
+replaneja aquela geometria fixada — ponto de partida, tempo de voo e ramo de
+Lambert — em vez de procurar de novo. Uma candidata em vez de 768: medido,
+**1,1 s** contra 3,0 s de uma busca lunar completa e 64 s de uma marciana. O
+crivo continua a correr, então uma geometria fixada que viole uma restrição
+rígida é recusada na mesma.
+
+Verificado que escolher a alternativa `i` devolve a geometria `i`: pedidos
+5,000 d, entregues 5,000 d, contra os 4,750 d que o custo tinha preferido.
+
 A órbita-alvo passa a 500 km ao escolher Marte e a 100 km ao voltar para a Lua.
 
 ---

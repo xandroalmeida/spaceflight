@@ -471,6 +471,14 @@ struct MissionAlternative {
     double time_of_flight_s{0.0};
     trajectory::TransferDirection branch{trajectory::TransferDirection::Prograde};
 
+    // How far into the departure window this geometry left, in seconds.
+    //
+    // Carried so that a caller can ASK FOR THIS ONE: the three numbers here --
+    // coast, time of flight, branch -- are exactly TransferConfig::PinnedDeparture,
+    // and pinning them replans this single candidate instead of searching again.
+    // Without it the alternatives are a report; with it they are a choice.
+    double departure_coast_s{0.0};
+
     double injection_delta_v{0.0};
     double capture_delta_v{0.0};
     double total_delta_v{0.0};

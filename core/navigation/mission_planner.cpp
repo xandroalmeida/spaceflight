@@ -186,6 +186,7 @@ MissionAlternative alternative_from(const TransferRecord& record) {
     alternative.feasible = record.success;
     alternative.departure = record.departure_epoch;
     alternative.time_of_flight_s = record.time_of_flight_s;
+    alternative.departure_coast_s = record.departure_coast_s;
     alternative.branch = record.lambert_direction;
     alternative.injection_delta_v = record.departure_delta_v;
     alternative.capture_delta_v = record.required_capture_delta_v;
