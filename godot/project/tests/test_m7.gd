@@ -23,7 +23,7 @@ extends SceneTree
 ##
 ## Um número esperado transforma cobertura perdida em falha, que é o que ela é.
 ## Sobe quando se acrescentam testes; nunca desce em silêncio.
-const EXPECTED_CHECKS := 150
+const EXPECTED_CHECKS := 156
 
 var failures := 0
 var checks := 0
@@ -53,6 +53,7 @@ func _initialize() -> void:
 	_test_target_selection(simulation)
 	_test_flight_directions(simulation)
 	_test_orbit_track(simulation)
+	_test_apsis_markers(simulation)
 	_test_planned_trajectory_frame(simulation)
 	_test_rcs_actuator_mapping(simulation)
 	_test_engine_plume()
@@ -218,6 +219,99 @@ func _test_orbit_track(simulation: SpaceflightSimulation) -> void:
 	check(lunar_near > 3.4e8 and lunar_far < 4.2e8, "the lunar path has the right size")
 	check(lunar_far - lunar_near > 1.0e7, "and it is not a circle")
 
+
+func _test_apsis_markers(simulation: SpaceflightSimulation) -> void:
+	## Regra 20: o instrumento diz o que sabe, e uma órbita circular NÃO SABE onde
+	## está o apsis.
+	##
+	## ⚠️ Os pontos da órbita chegam ao mostrador em float de 32 bits e em unidades
+	## de cena. Numa órbita de estacionamento a 400 km a amplitude do raio em toda
+	## a volta são METROS -- da ordem do próprio ulp --, e o "ponto mais distante
+	## da amostra" passa a ser decidido pelo arredondamento. Medido antes da
+	## correção: o índice do apoapsis saltava entre 0, 3, 115 e 119 e o eixo do
+	## desenho girava até 37 graus de um quadro para o seguinte, com o marcador
+	## amarelo a dar voltas à elipse e a nave a saltar com ele.
+	print("\numa órbita circular não tem apsis para apontar (regra 20)")
+
+	var reference := _index_of(simulation, simulation.get_snapshot()["reference"])
+	var scale: float = simulation.get_render_scale()
+	var nav := NavDisplay.new()
+	root.add_child(nav)
+
+	var spread := func() -> float:
+		var s := simulation.get_snapshot()
+		return absf(float(s["apoapsis_m"]) - float(s["periapsis_m"]))
+	var extent := func(track: PackedVector3Array, centre: Vector3) -> float:
+		var out := 0.0
+		for point in track:
+			out = maxf(out, (point - centre).length())
+		return out
+
+	var centre := simulation.get_body_position(reference)
+	var track := simulation.get_orbit_track(128)
+	check(spread.call() < 1.0e3,
+		"a órbita de partida é circular a menos de um km (%.1f m)" % spread.call())
+	check(not NavDisplay.apsides_resolved(spread.call(), extent.call(track, centre), scale),
+		"e o mostrador recusa-se a apontar um apsis nela")
+
+	# O eixo do desenho tem de ser o mesmo no quadro seguinte. Ele é o que leva a
+	# nave e os marcadores ao sítio; se ele roda, tudo o que está em cima dele
+	# salta, mesmo que a curva desenhada seja um círculo e não se note.
+	var worst := 0.0
+	var previous := Vector3.ZERO
+	for frame in range(20):
+		simulation.advance(0.016)
+		centre = simulation.get_body_position(reference)
+		track = simulation.get_orbit_track(128)
+		var resolved: bool = NavDisplay.apsides_resolved(
+			spread.call(), extent.call(track, centre), scale)
+		var axis: Vector3 = nav._plane_from(track, centre, resolved)[0]
+		if previous != Vector3.ZERO:
+			worst = maxf(worst, rad_to_deg(previous.angle_to(axis)))
+		previous = axis
+	check(worst < 0.01, "o eixo do desenho não roda entre quadros (%.4f°)" % worst)
+
+	# E o outro lado: uma órbita com apsis a sério tem de CONTINUAR a mostrá-lo.
+	# Um limiar que apagasse o marcador em toda a parte passaria a metade de cima
+	# deste teste sem fazer nada de útil.
+	simulation.set_pointing_mode("prograde")
+	for i in range(400):
+		simulation.advance(0.5)
+	simulation.set_throttle(1.0)
+	for i in range(600):
+		simulation.advance(0.5)
+	simulation.set_throttle(0.0)
+	simulation.set_pointing_mode("")   # sem comando: a atitude volta ao piloto
+
+	centre = simulation.get_body_position(reference)
+	track = simulation.get_orbit_track(128)
+	check(float(simulation.get_snapshot()["eccentricity"]) > 0.5,
+		"a queima deixou uma elipse franca (ecc %.3f)"
+			% simulation.get_snapshot()["eccentricity"])
+	check(NavDisplay.apsides_resolved(spread.call(), extent.call(track, centre), scale),
+		"e aí o apsis volta a ser apontável")
+
+	# ⚠️ E não salta TAMBÉM aqui. `get_orbit_track` amostra em anomalia verdadeira
+	# de −π a +π, e com 128 amostras o periapsis (ν = 0) cai no índice 63,5 --
+	# exatamente entre duas. Sem interpolação, qual delas ganha a comparação é
+	# arredondamento, e a elipse inteira balançava 2,83 graus, que é um
+	# espaçamento de amostra.
+	worst = 0.0
+	previous = Vector3.ZERO
+	for frame in range(20):
+		simulation.advance(0.016)
+		centre = simulation.get_body_position(reference)
+		track = simulation.get_orbit_track(128)
+		var axis: Vector3 = nav._plane_from(track, centre, true)[0]
+		if previous != Vector3.ZERO:
+			worst = maxf(worst, rad_to_deg(previous.angle_to(axis)))
+		previous = axis
+	check(worst < 0.01, "nem numa elipse o eixo salta de amostra (%.4f°)" % worst)
+
+	nav.queue_free()
+	simulation.start_circular_orbit(400_000.0, 51.6)
+	simulation.align_attitude_to_flight(25.0)
+	simulation.advance(0.016)
 
 func _test_planned_trajectory_frame(simulation: SpaceflightSimulation) -> void:
 	## O arco planejado e os marcadores de queima têm de estar no MESMO
