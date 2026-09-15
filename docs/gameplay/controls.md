@@ -87,6 +87,7 @@ câmera não muda um número do estado.
 | `Shift+K` | ABORTA a missão |
 | `Tab` | computador de navegação |
 | `M` | mapa orbital |
+| `Shift+M` | mapa local / sistema solar |
 
 ## TEMPO
 

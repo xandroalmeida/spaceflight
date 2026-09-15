@@ -79,6 +79,11 @@
     "group": "INTERFACE",
     "key": "QuoteLeft"
   },
+  "map_mode": {
+    "description": "mapa local / sistema solar",
+    "group": "MISSÃO",
+    "key": "Shift+M"
+  },
   "menu": {
     "description": "menu",
     "group": "TEMPO",
