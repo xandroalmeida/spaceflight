@@ -3,8 +3,8 @@
 ## Onde as coisas estão, e porquê
 
 O painel não está onde ficaria bonito: está onde cabe no campo de visão. A câmera
-tem 75 graus verticais e a cabeça repousa 10 graus abaixo da linha do nariz, o
-que torna visível a faixa de +27,5 a −47,5 graus. Daí saem as fileiras:
+tem 75 graus verticais e a cabeça repousa 11 graus abaixo da linha do nariz, o
+que torna visível a faixa de +26,5 a −48,5 graus. Daí saem as fileiras:
 
 ```
 janelas             +2  a  +21 graus
@@ -55,7 +55,7 @@ sobre o estado da nave.
 | `NAV` | computador de missão | `{{key:nav_panel}}` |
 | `MAP` | mapa orbital | `{{key:orbit_map}}` |
 | `WARP` | sobe o time warp | `{{key:warp_up}}` |
-| `MODE` | alterna `IMPULSO` / `CRUZEIRO` | `{{key:engine_mode}}` |
+| `MODE` | alterna `IMPULSE` / `CRUISE` | `{{key:engine_mode}}` |
 
 ## A luz
 

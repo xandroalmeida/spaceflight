@@ -28,7 +28,8 @@ que o motor nunca acende no meio de um passo.
 
 ## Pausar
 
-Pausar para o **tempo da simulação**, e só ele. A câmera continua respondendo, a
+`{{key:pause}}` — ou `{{key:menu}}` sem nenhum painel aberto — para o **tempo da
+simulação**, e só ele, e mostra o menu de pausa. A câmera continua respondendo, a
 interface continua viva, e nada no motor gráfico é congelado — o que tem de parar
 é o relógio da nave, não o programa.
 

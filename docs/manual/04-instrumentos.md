@@ -21,6 +21,7 @@ e 90 graus.
 | triângulo para cima / para baixo | ciano | normal / anti-normal, o polo da órbita |
 | círculo com haste | ciano escuro | radial para fora / para dentro |
 | círculo com quatro hastes | violeta | o alvo |
+| X de quatro hastes | violeta | o anti-alvo, a direção oposta ao alvo |
 | barra com haste | branco | o nariz, sempre no centro |
 
 Os marcadores vêm da **mesma rotina pela qual o piloto automático guia**.
@@ -30,8 +31,16 @@ levaria, por construção e não por coincidência.
 Direções a mais de 90 graus do nariz são desenhadas na borda, esmaecidas, em vez
 de descartadas: "está atrás de você" é informação.
 
-Com um modo de apontamento armado, uma linha âmbar liga o nariz ao alvo dele.
-Siga a linha e o erro fecha.
+Com um modo de apontamento armado, uma linha âmbar liga o nariz ao alvo dele, e
+o canto inferior direito mostra o modo e o erro em graus — âmbar acima de 2°,
+verde abaixo. Siga a linha e o erro fecha.
+
+No canto inferior esquerdo, `SPIN` é a velocidade de rotação da nave, em graus
+por segundo; fica âmbar acima de 2 °/s. No alto, à direita, a velocidade.
+
+Todas as direções são relativas ao **corpo de referência** — o que aparece em
+`NAVIGATION` como `REFERENCE`. Em órbita da Lua, prógrado é o prógrado em torno
+da Lua, e é para lá que o apontamento automático leva o nariz.
 
 ## `NAVIGATION` — a órbita
 
@@ -50,7 +59,8 @@ afastando. O círculo à direita mostra onde o alvo está em relação ao nariz,
 mesma convenção de tela do mostrador de voo.
 
 > `CLOSE IN ... (linear)` é uma extrapolação: a distância dividida pela taxa a que
-> ela cai, **ignorando a gravidade inteira**. Está rotulada porque não é uma
+> ela cai, **ignorando a gravidade inteira**. Quando a distância está a crescer, a
+> linha diz `NO INTERCEPT -- opening`. Está rotulada porque não é uma
 > previsão de chegada. Com um plano armado, a linha passa a mostrar a chegada do
 > planejador, que é uma trajetória de verdade.
 
@@ -59,8 +69,10 @@ mesma convenção de tela do mostrador de voo.
 Seis células: motor, empuxo, propelente, massa, RCS, relatividade.
 
 A barra do acelerador é o **comando**; `THRUST` é o que o motor está de fato
-produzindo. Os dois podem divergir — tanque vazio, motor desarmado — e é
-exatamente aí que ver os dois importa.
+produzindo. Os dois podem divergir — com o tanque vazio a barra sobe e o empuxo
+fica em zero — e é exatamente aí que ver os dois importa. Ao lado da barra, o
+estado: `RUNNING` com empuxo, `ARMED` sem. Com o motor aceso, a barra e o empuxo
+tomam a cor do modo: rosa em `IMPULSE`, azul em `CRUISE` (ver *A nave*).
 
 As doze lâmpadas de RCS acendem pelo **acionamento**, não pela tecla. Um comando
 puro em um eixo abre dois propulsores; um comando diagonal abre quatro, em

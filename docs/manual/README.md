@@ -1,11 +1,21 @@
 # O manual do usuário
 
-Fonte do `manual.pdf`. Um capítulo por arquivo, em Markdown, numerados pela ordem
-em que aparecem.
+Fonte do `manual.pdf` e da `atalhos.pdf`. Um capítulo por arquivo, em Markdown,
+numerados pela ordem em que aparecem.
 
 ```bash
-./scripts/build_manual.sh     # regenera as teclas e compila o PDF
+./scripts/build_manual.sh           # regenera as teclas e compila os dois PDFs
+./scripts/build_manual.sh --sheet   # só a folha de atalhos
+./scripts/build_manual.sh --only 05 # um capítulo, em build/manual/preview.pdf
 ```
+
+## A folha de atalhos
+
+`atalhos.pdf` é uma página A4 deitada, para imprimir. Os cartões de teclas saem
+de `docs/gameplay/controls.md`, na ordem do jogo; os demais cartões (mouse,
+computador de bordo, cores do motor, `FLIGHT`, lâmpadas) vêm de `_atalhos.md` —
+cada `##` é um cartão —, e o estilo, de `atalhos.css`. As mesmas substituições
+verificadas do manual valem ali.
 
 ## Como isto se mantém vivo
 

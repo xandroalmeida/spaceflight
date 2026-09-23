@@ -84,6 +84,12 @@ void MissionPanel::request_plan() {
     searching_ = true;
 }
 
+void MissionPanel::request_pointing(const std::string& mode) {
+    if (on_point_requested) {
+        on_point_requested(mode);
+    }
+}
+
 void MissionPanel::advance() {
     if (!pending_plan_) {
         return;

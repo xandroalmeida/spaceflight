@@ -655,13 +655,17 @@ bool FlightSession::set_pointing_mode(const std::string& mode) {
     // in -- the same class of quiet lie as a label that keeps saying "prograde"
     // after the ship has stopped being prograde.
     if (mission_.armed() && mission_.pointing_command().has_value()) {
-        last_error_ = "the flight computer is steering: abandon the plan (K) to take the attitude back";
+        last_error_ = "the flight computer is steering: abandon the plan (Shift+K) to take the attitude back";
         report(last_error_, false);
         return false;
     }
 
     attitude::PointingCommand command{};
-    command.reference = celestial::bodies::earth;
+    // Prograde about the body the ship is orbiting -- the one the readouts and
+    // the FLIGHT display's markers are relative to. Hard-wired to the Earth, the
+    // command in lunar orbit aimed at the Earth-relative prograde while the
+    // display drew the Moon-relative one, and the nose never met the marker.
+    command.reference = snapshot_.spacecraft.reference;
     if (!mode.empty()) {
         const auto parsed = navigation::guidance_from_string(mode);
         if (!parsed.has_value()) {

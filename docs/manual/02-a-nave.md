@@ -41,17 +41,38 @@ de uma cápsula e apertada pelos de uma estação, que é a proporção certa pa
 ## O motor
 
 Um reator de fusão com dois pontos de operação, e `{{key:engine_mode}}` alterna
-entre eles.
+entre eles. Os dois convertem a mesma potência (900 GW); o que muda é como ela é
+gasta — muita massa devagar, ou pouca massa depressa.
 
 | modo | empuxo | exaustão | para quê |
 |---|---|---|---|
-| `IMPULSO` | 200 kN | 0,030 c | manobras. Um g nesta nave; queima em minutos |
-| `CRUZEIRO` | 11,2 kN | 0,5 c | viagem longa. Um terço de g caindo a nada ao longo de anos |
+| `IMPULSE` | 200 kN | 0,030 c | manobras. Um g nesta nave; queima em minutos |
+| `CRUISE` | 11,2 kN | 0,5 c | viagem longa. Um terço de g caindo a nada ao longo de anos |
 
-O orçamento de Δv é absurdo para uma viagem à Lua: 0,0899 c em `IMPULSO`, que são
+O orçamento de Δv é absurdo para uma viagem à Lua: cerca de 0,09 c em `IMPULSE`,
 vinte e seis mil quilômetros por segundo. Uma transferência translunar inteira
-custa **14,5 kg** de propelente dos 19 000 kg a bordo. Isso não é um erro do
+custa **uns 14 kg** de propelente dos 19 000 kg a bordo. Isso não é um erro do
 mostrador: é a equação do foguete com uma velocidade de exaustão de 0,03 c.
+
+### A cor da exaustão
+
+A pluma não é um cone pintado: é gás que brilha, mais denso no eixo, que se
+abre e se apaga à medida que se afasta do bocal. A cor diz em que regime o motor
+está, e a mesma cor aparece na barra do acelerador e no empuxo do painel.
+
+| cor | regime | por quê |
+|---|---|---|
+| rosa-magenta | `IMPULSE` — plasma de fusão denso | hidrogênio que esfria e se recombina brilha nas linhas de Balmer: o vermelho H-alfa mais o azul-violeta, que o olho soma em rosa |
+| azul-branco | `CRUISE` — feixe relativístico | a 0,5 c o jato é tão fino e rápido que nada se recombina à vista da nave: brilha o feixe ionizado, estreito e longo |
+| âmbar | motores químicos | uma chama no vácuo, que sem ar em volta se abre num cone largo e tênue |
+
+Em `CRUISE` a pluma a pleno acelerador é uma pluma inteira, não uma pluma
+dezoito vezes menor: o empuxo é medido contra o máximo do modo, e o jato carrega
+a mesma potência. Contra a Terra iluminada de dia, a pluma fica discreta — gás
+quente e rarefeito contra um fundo claro —, e no espaço escuro ela aparece.
+
+Não há anéis de choque na pluma, e isso é deliberado: eles precisam de ar em
+volta para refletir, e no vácuo não há.
 
 ## O RCS
 
