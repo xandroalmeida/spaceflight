@@ -150,7 +150,7 @@ Mostra a órbita projetada no **próprio plano orbital** (uma projeção XY de u
 órbita inclinada aparece achatada e convida a concluir que a excentricidade está
 errada), o corpo central em escala, e as derivas de energia e momento angular.
 
-Isto **não** é o renderizador: não sabe o que é câmera, floating origin ou Godot
+Isto **não** é o renderizador: não sabe o que é câmera, floating origin ou renderizador
 (ADR-0002). Serve para um humano olhar para números e reconhecer uma trajetória
 errada.
 

@@ -20,7 +20,7 @@ namespace sf::math {
 // Angles as a TYPE, not as a comment.
 //
 // The units audit of Milestone 6 found the B-plane angle crossing the core /
-// CLI / Godot boundary as radians on one side and degrees on the other, and
+// CLI / presentation boundary as radians on one side and degrees on the other, and
 // recorded the quaternion and orbital-element angles as the same risk still
 // open (docs/physics/units-audit.md).  A comment saying `[rad]` is checked by
 // nobody; units::Angle is checked by the compiler, and it costs nothing at run

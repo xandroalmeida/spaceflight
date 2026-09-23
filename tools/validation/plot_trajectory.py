@@ -10,7 +10,7 @@ self-contained file with inline SVG -- no network, no assets, no build step.
     ./tools/validation/plot_trajectory.py /tmp/leo.csv -o /tmp/leo.html
 
 This draws what the core computed.  It is NOT the renderer: nothing here knows
-about cameras, floating origin or Godot (ADR-0002).  It exists to make numbers
+about cameras, floating origin or the renderer (ADR-0009).  It exists to make numbers
 look like a trajectory, which is how a human spots a wrong one.
 """
 

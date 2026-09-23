@@ -1,6 +1,6 @@
 # Mars albedo — prompt para o Codex
 
-**Destino:** `godot/project/assets/textures/mars/mars_albedo.png`
+**Destino:** `assets/textures/mars/mars_albedo.png`
 
 Enquanto o arquivo não existir, `CelestialView` usa o substituto procedural de
 `PlanetTextures.mars_albedo()`. Ele acerta a cor, o contraste entre planícies
@@ -87,7 +87,7 @@ OUTPUT FILE
 mars_albedo.png
 
 DESTINATION PATH
-godot/project/assets/textures/mars/mars_albedo.png
+assets/textures/mars/mars_albedo.png
 
 WHAT TO AVOID
 - No shadows, no shading, no terminator, no directional light of any kind.

@@ -1,6 +1,6 @@
 # Hull panels — prompt para o Codex
 
-**Destino:** `godot/project/assets/textures/spacecraft/hull_panels.png`
+**Destino:** `assets/textures/spacecraft/hull_panels.png`
 
 Textura **ladrilhável** para o casco. Sem ela a nave usa `HullPaint` liso, que já
 lê bem à distância mas não tem escala de perto.
@@ -76,7 +76,7 @@ OUTPUT FILE
 hull_panels.png  (PNG, 8 bits per channel, RGB, sRGB colour space)
 
 DESTINATION PATH
-godot/project/assets/textures/spacecraft/hull_panels.png
+assets/textures/spacecraft/hull_panels.png
 ```
 
 ---
@@ -85,5 +85,5 @@ godot/project/assets/textures/spacecraft/hull_panels.png
 
 1. Ladrilhe 4 × 4 num editor e procure a emenda. Se aparecer, refaça.
 2. Ligar exige acrescentar `albedo_texture` e `uv1_scale` a `HullPaint` em
-   `scripts/world/materials.gd`. As primitivas do Godot já trazem UV.
+   `app/presentation/scene/ship_materials.cpp`. As malhas de `app/presentation/scene/mesh.cpp` já trazem UV.
 3. Import settings: seção "Texturas de cor", com `Repeat: Enabled`.

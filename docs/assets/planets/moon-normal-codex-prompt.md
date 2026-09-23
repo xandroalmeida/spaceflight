@@ -82,7 +82,7 @@ OUTPUT FILE
 moon_normal.png  (PNG, 8 bits per channel, RGB, LINEAR colour space -- NOT sRGB)
 
 DESTINATION PATH
-godot/project/assets/textures/moon/moon_normal.png
+assets/textures/moon/moon_normal.png
 ```
 
 ---

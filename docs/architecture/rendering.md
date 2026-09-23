@@ -169,7 +169,9 @@ parte que importa.
   inclusive ao passar perto do Sol.
 * **Estrelas são corpos negros.** Não têm linhas espectrais, e o deslocamento de
   uma linha não é deslocamento de temperatura.
-* **Sem extinção interestelar, sem atmosfera, sem eclipses.** Nada disso afeta a
+* **Sem extinção interestelar, sem atmosfera física, sem eclipses.** O limbo da
+  Terra e de Marte é desenho (`app/shaders/body.frag`, regra 31), e o mapa de
+  sombras cobre só a nave — um planeta não faz sombra noutro. Nada disso afeta a
   dinâmica; tudo isso afeta a imagem.
 
 ## 7. Limites da camada
