@@ -34,7 +34,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE="${ROOT}/external/nasa-earth"
 STAGE="${SOURCE}/stage"
-DEST="${ROOT}/godot/project/assets/textures/earth"
+DEST="${ROOT}/assets/textures/earth"
 SKIP=77
 
 if ! command -v magick >/dev/null 2>&1; then

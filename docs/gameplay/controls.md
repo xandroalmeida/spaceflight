@@ -1,7 +1,7 @@
 # Controles
 
-> Gerado por `godot/project/scripts/dump_controls.gd` a partir de
-> `godot/project/scripts/input_actions.gd`. Não editar à mão: rode
+> Gerado por `spaceflight --dump-controls` a partir de
+> `app/presentation/input_actions.cpp`. Não editar à mão: rode
 > `scripts/dump_controls.sh` depois de mudar um atalho.
 
 O mouse:

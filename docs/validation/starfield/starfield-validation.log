@@ -1,6 +1,6 @@
 starfield validation harness
-Godot 4.5-stable (official), Apple M5 Pro (Apple9)
-viewport (1024.0, 640.0)
+SDL_GPU metal, cocoa
+viewport (1024, 640)
 
 ---- 1. six stars on six axes  (prompt 19)
   star_right(+x)       1 blobs, centred to 0.71 px, peak 1.000   ok
@@ -11,28 +11,29 @@ viewport (1024.0, 640.0)
   star_down(-z)        1 blobs, centred to 0.71 px, peak 1.000   ok
 
 ---- 2. sky radius is arithmetically irrelevant  (prompt 20)
-  radius        1.0 : near 0.00000026315789 far 1.10000002384186, 2 stars rendered
-  radius     1000.0 : near 0.00026315788273 far 1100.0, 2 stars rendered
-  radius   190000.0 : near 0.05000000074506 far 209000.0, 2 stars rendered
-  radius     1000.0 : 2 stars, worst move vs radius 1.0 is 0.000 px   ok
-  radius   190000.0 : 2 stars, worst move vs radius 1.0 is 0.000 px   ok
+  radius          1 : near 2.6315789e-07 far 1.1, 2 stars rendered
+  radius       1000 : near 0.00026315789 far 1100, 2 stars rendered
+  radius     190000 : near 0.05 far 209000, 2 stars rendered
+  radius       1000 : 2 stars, worst move vs radius 1 is 0.000 px   ok
+  radius     190000 : 2 stars, worst move vs radius 1 is 0.000 px   ok
 
 ---- 3. clip space  (prompt 20)
   stars                 : 8786
   w <= 0 (behind camera): 4439   -- expected, half the sky is behind
-  closer than near=0.05000000074506 : 0
-  farther than far=200000.0 : 0
-  w in front of camera  : [25.9609375, 189931.78125]
-  ndc z                 : [0.996148, 1.000000]
+  closer than near=0.05 : 0
+  farther than far=200000 : 0
+  w in front of camera  : [25.965625, 189931.78]
+  ndc z (reverse)       : [1.325242e-08, 1.925373e-03]
   every visible star inside [near, far]: yes
 
 ---- 3b. depth headroom against the near plane  (prompt 20)
-  near 0.00999999977648 : depth 5.2631577770960957e-08 =  0.88 steps,   83 in frame,  59 rendered   LOSES 24
-  near 0.01200000010431 : depth 6.315789528583225e-08 =  1.06 steps,   83 in frame,  83 rendered   complete
-  near 0.01999999955297 : depth 1.0526315554192191e-07 =  1.77 steps,   83 in frame,  83 rendered   complete
-  near 0.05000000074506 : depth 2.631578986582003e-07 =  4.42 steps,   83 in frame,  83 rendered   complete
-  near 0.5     : depth 2.631578947368421e-06 = 44.15 steps,   83 in frame,  83 rendered   complete
-  one 24-bit depth step is 5.960464477539063e-08; the sky sphere sits at near/190000.0
+  near 0.0001  : depth 5.2632e-10,   83 in frame,  83 rendered   complete
+  near 0.001   : depth 5.2632e-09,   83 in frame,  83 rendered   complete
+  near 0.01    : depth 5.2632e-08,   83 in frame,  83 rendered   complete
+  near 0.02    : depth 1.0526e-07,   83 in frame,  83 rendered   complete
+  near 0.05    : depth 2.6316e-07,   83 in frame,  83 rendered   complete
+  near 0.5     : depth 2.6316e-06,   83 in frame,  83 rendered   complete
+  the world depth is D32_FLOAT, reverse-Z: the sky sphere sits at near/190000
 
 ---- 4. star count ladder  (prompt 19)
   6 synthetic            loaded     6,    2 in frame,    2 found,    2 blobs,     18 lit px   ok
@@ -50,14 +51,14 @@ viewport (1024.0, 640.0)
   6 of 6 rendered, strictly decreasing: yes, worst response error 0.0141 (budget 0.030)
 
 ---- 6. one effect at a time at beta = 0.9  (prompt 22)
-  baseline    aberration false doppler false beaming false : 1714 blobs, energy       84.8
-  aberration  aberration true  doppler false beaming false : 4574 blobs, energy      246.2
-  doppler     aberration false doppler true  beaming false :  746 blobs, energy       25.3
-  beaming     aberration false doppler false beaming true  : 1899 blobs, energy     5589.6
-  all         aberration true  doppler true  beaming true  : 3978 blobs, energy     4737.5
+  baseline    aberration false doppler false beaming false : 1709 blobs, energy       84.7
+  aberration  aberration true  doppler false beaming false : 4575 blobs, energy      245.8
+  doppler     aberration false doppler true  beaming false :  743 blobs, energy       25.2
+  beaming     aberration false doppler false beaming true  : 1900 blobs, energy     5590.0
+  all         aberration true  doppler true  beaming true  : 3977 blobs, energy     4738.2
 
 ---- 7. aberration: rendered angle vs core/relativity/optics.hpp  (prompt 23)
-  beta 0.0   : 5/5 stars, worst GPU-vs-CPU angle 0.19873 deg (budget 0.35938)  star 2  ok
+  beta 0     : 5/5 stars, worst GPU-vs-CPU angle 0.19873 deg (budget 0.35938)  star 2  ok
   beta 0.1   : 5/5 stars, worst GPU-vs-CPU angle 0.19597 deg (budget 0.36092)  star 2  ok
            rest angle -> apparent: 30->27.25, 55->50.43, 80->74.40, 105->99.38, 130->125.46   (90 deg lands at 84.261)
   beta 0.5   : 5/5 stars, worst GPU-vs-CPU angle 0.14829 deg (budget 0.33651)  star 2  ok
@@ -89,10 +90,10 @@ viewport (1024.0, 640.0)
   4 ratios, worst ratio error 0.0146 (budget 0.1200), worst absolute response error 0.0086 (budget 0.0300)   ok
 
 ---- 10. reference snapshots  (prompt 26)
-  beta 0.0   :   1176 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
-  beta 0.5   :   3435 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
-  beta 0.9   :  13604 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
-  beta 0.99  :  23184 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
+  beta 0     :   1175 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
+  beta 0.5   :   3426 lit pixels   vs reference: 0.00001 (budget 0.020)  ok
+  beta 0.9   :  13588 lit pixels   vs reference: 0.00003 (budget 0.020)  ok
+  beta 0.99  :  23179 lit pixels   vs reference: 0.00003 (budget 0.020)  ok
 
 ================================================================
 STARFIELD: PASS  -- every stage measured, nothing outside budget

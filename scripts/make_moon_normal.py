@@ -31,8 +31,8 @@ mesma quantidade de chão em todo o lado, que é o que uma derivada quer.
 
 ## A convenção
 
-Espaço tangente, convenção OpenGL (o Godot usa esta; `normal_map_invert_y` fica
-desligado):
+Espaço tangente, convenção OpenGL (a que app/shaders/body.frag lê, sem inverter
+o y):
 
     +x  cresce com `u` -- para leste
     +y  aponta para "cima" no espaço UV, que é `-v` -- para norte
@@ -60,7 +60,7 @@ import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "external/lola"
-DESTINATION = ROOT / "godot/project/assets/textures/moon/moon_normal.png"
+DESTINATION = ROOT / "assets/textures/moon/moon_normal.png"
 
 OUT_WIDTH = 2048
 OUT_HEIGHT = 1024
@@ -148,7 +148,7 @@ def roll_longitude(height, out_w, shift):
     O DEM tem a longitude 0 na coluna 0; as texturas deste projeto têm -180 na
     borda esquerda, o que foi CONFERIDO e não assumido: o ponto subsolar de
     2026-01-01 00:00 UTC, que está a 180,9 E, cai em `u = 0,003`
-    (`godot/project/tests/probe_orientation.gd`).
+    (`tests/presentation/test_presentation_flight.cpp`).
     """
     for oy in range(len(height)):
         row = height[oy]

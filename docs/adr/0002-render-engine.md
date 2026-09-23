@@ -1,6 +1,10 @@
 # ADR-0002 — Engine gráfico: Godot 4.x via GDExtension
 
-Status: **aceito** · Data: 2026-09-13 · Decisor: definido no enunciado do projeto
+Status: **substituído** pelo [ADR-0009](0009-render-stack.md) em 2026-09-23 · Data: 2026-09-13 · Decisor: definido no enunciado do projeto
+
+> Mantido como registro. O Godot saiu do projeto; as proibições abaixo (nenhuma
+> física na apresentação, a posição na tela é uma projeção) continuam valendo e
+> estão no ADR-0009.
 
 ## Contexto
 

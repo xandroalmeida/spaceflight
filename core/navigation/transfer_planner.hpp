@@ -536,7 +536,7 @@ struct TransferConfig {
     PinnedDeparture pinned{};
 
     // The ship the autopilot flies, and the numbers are the scene's
-    // (godot/gdextension/src/simulation_node.cpp) rather than new ones: a 1000 kg
+    // (app/session/flight_session.cpp) rather than new ones: a 1000 kg
     // box 8 x 3 x 3 m with twelve RCS thrusters in six couples on a 2 m arm.
     // They are here as configuration and not as constants because the autopilot's
     // whole subject is the LAG, and the lag is a property of the inertia and the
@@ -759,7 +759,7 @@ struct TransferRecord {
     PinnedDeparture pinned{};
 
     // The ship the autopilot flies, and the numbers are the scene's
-    // (godot/gdextension/src/simulation_node.cpp) rather than new ones: a 1000 kg
+    // (app/session/flight_session.cpp) rather than new ones: a 1000 kg
     // box 8 x 3 x 3 m with twelve RCS thrusters in six couples on a 2 m arm.
     // They are here as configuration and not as constants because the autopilot's
     // whole subject is the LAG, and the lag is a property of the inertia and the

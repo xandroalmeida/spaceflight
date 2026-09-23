@@ -1,6 +1,6 @@
 # Áudio
 
-Os sete arquivos em `godot/project/assets/audio/` são **placeholders gerados**,
+Os sete arquivos em `assets/audio/` são **placeholders gerados**,
 e o arquivo que os gera diz isso em voz alta: ruído filtrado e envelopes,
 sintetizados por `scripts/generate_audio_placeholders.py`, não gravações.
 
@@ -31,7 +31,7 @@ de imperceptível a insuportável em trinta segundos.
 **Nada soa através do vácuo.** Não há som de motor "de fora", não há explosão,
 não há passagem de nave. O que existe são sons ESTRUTURAIS — o que se ouve dentro
 do casco porque o casco está a vibrar — e sons de interface. Na câmera externa,
-`AudioDirector.set_interior(false)` cala tudo o que é da nave e deixa apenas a
+`AudioDirector::set_interior(false)` cala tudo o que é da nave e deixa apenas a
 interface, que não está no espaço: está no monitor de quem joga (regra 36).
 
 ## O volume do motor segue o EMPUXO
@@ -42,13 +42,14 @@ motor apagado.
 
 O tom sobe um pouco com o empuxo — 0,92× em marcha lenta, 1,08× no máximo. É a
 única coisa no áudio que não corresponde a nada físico, e está dita em voz alta
-em `scripts/audio/audio_director.gd` em vez de embutida.
+em `app/presentation/audio_director.cpp` em vez de embutida.
 
 ## Substituir
 
 Troque o arquivo e mantenha o nome. Nenhuma linha de código conhece o conteúdo.
-O modo de laço é definido em `audio_director.gd` e não num `.import` versionado,
-pela razão de sempre: a propriedade fica onde ela é lida.
+O que toca em laço é decidido em `app/presentation/audio_director.cpp` (os dois
+clips que ele pede por `set_loop`), e não num ajuste do arquivo, pela razão de
+sempre: a propriedade fica onde ela é lida.
 
 Se um dia houver som de verdade, o que se quer é:
 

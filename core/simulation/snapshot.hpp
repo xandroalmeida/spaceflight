@@ -149,7 +149,7 @@ struct DisplayBody {
 // Builds snapshots from the authoritative state.  Holds references to the
 // provider, the catalogue and the force model, all of which must outlive it.
 //
-// It is the ONLY path from the core to a display: Godot never calls spkez_c and
+// It is the ONLY path from the core to a display: the app never calls spkez_c and
 // never sees a ForceModel.
 class SnapshotBuilder {
 public:

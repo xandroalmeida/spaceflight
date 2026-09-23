@@ -11,7 +11,7 @@ para produzir sete segundos de áudio seria caro pelo que entrega.
 
     python3 scripts/generate_audio_placeholders.py
 
-Escreve em godot/project/assets/audio/.
+Escreve em assets/audio/.
 
 ## O que NÃO está aqui
 
@@ -30,7 +30,7 @@ import struct
 import wave
 
 RATE = 22050
-OUT = pathlib.Path(__file__).resolve().parent.parent / "godot/project/assets/audio"
+OUT = pathlib.Path(__file__).resolve().parent.parent / "assets/audio"
 
 
 def write(name: str, samples: list[float]) -> None:

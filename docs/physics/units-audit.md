@@ -4,7 +4,7 @@ Data: 2026-09-13
 
 O core usa SI internamente. A busca por interfaces ambíguas encontrou uma falha
 de alto risco no plano B: o ângulo era um `double` em radianos enquanto CLI e
-Godot recebem graus. Ele agora é `units::Angle`, construído explicitamente com
+apresentação (então o Godot) recebem graus. Ele agora é `units::Angle`, construído explicitamente com
 `Angle::radians()` ou `Angle::degrees()`.
 
 Proteções já existentes:

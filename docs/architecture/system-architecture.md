@@ -17,21 +17,22 @@ documentada.
 ## 2. Regra de dependência
 
 ```
-godot/gdextension  ──► spaceflight_core ──► CSPICE
+app/ (spaceflight) ──► spaceflight_core ──► CSPICE
 tools/orbit-cli    ──► spaceflight_core ──► CSPICE
 tests/*            ──► spaceflight_core ──► CSPICE
 ```
 
 Invariantes:
 
-* `spaceflight_core` **não** inclui, linka ou conhece Godot;
+* `spaceflight_core` **não** inclui, linka ou conhece SDL, GPU ou a apresentação;
 * `spaceflight_core` **não** possui `main()`, loop de frame, nem estado global mutável;
 * CSPICE aparece **apenas** dentro de `core/ephemeris/` (arquivos `.cpp`);
   nenhum header público do core inclui `SpiceUsr.h`;
 * o executável gráfico depende do core; o core nunca depende do executável.
 
 A consequência prática exigida pelo enunciado: o projeto inteiro compila,
-roda e é testado sem abrir o engine gráfico.
+roda e é testado sem abrir o executável gráfico
+(`-DSPACEFLIGHT_BUILD_APP=OFF` compila o core e as suítes de física sem `app/`).
 
 ```bash
 cmake -S . -B build
@@ -96,7 +97,9 @@ vezes por passo) e em qualquer ordem de tempo.
 
 * `tools/orbit-cli` — verificação científica pela linha de comando;
 * `tools/validation` — comparações em lote contra JPL/REBOUND, saída CSV;
-* `godot/gdextension` — Milestone 2 em diante; consome apenas `SimulationSnapshot`.
+* `app/` — o executável `spaceflight` (SDL3 + SDL_GPU + Dear ImGui, ADR-0009;
+  até o Milestone 8 era um projeto Godot com GDExtension, ADR-0002); consome
+  apenas `SimulationSnapshot`.
 
 ## 4. Fluxo de dados de uma avaliação de força
 
@@ -184,11 +187,12 @@ Além dessas, fora do CTest padrão de física:
 
 | Rótulo | Alvo | O que verifica | Precisa de |
 |---|---|---|---|
-| `godot` | `godot-tests` | a camada de apresentação (cockpit, mapa, missão) | Godot + GDExtension |
+| `presentation` | `ctest-headless` | a camada de apresentação (cockpit, mapa, missão), sem GPU nem SDL | nada além do build |
 | `assets` | `asset-validation` | texturas: proporção, costuras, convenção de normal map | `python3` |
-| `gpu` | `gpu-validation` | pixels do céu e da renderização relativística | tela real |
+| `gpu` | `gpu-validation` | pixels do céu e da renderização relativística, fora da tela | um driver de GPU (Metal/Vulkan); sem display |
 
-`ctest-headless` roda só as quatro categorias da tabela anterior.
+`ctest-headless` roda as quatro categorias da tabela anterior mais `presentation`.
+Os testes `gpu` saem com 77 (`Skipped`) quando não há dispositivo de GPU.
 
 Nenhuma tolerância pode ser um número mágico: o harness de testes
 (`tests/support/test_harness.hpp`) **exige** uma string de justificativa em cada
@@ -196,7 +200,7 @@ comparação aproximada. Ver `docs/validation/tolerances.md`.
 
 ## 10. Fora de escopo no Milestone 0
 
-Registrado para evitar ambiguidade: sem Godot, sem atitude/quaternions, sem
+Registrado para evitar ambiguidade: sem apresentação gráfica, sem atitude/quaternions, sem
 propulsão, sem relatividade, sem SOI, sem gráficos, sem gameplay.
 O que existe: tempo, referenciais, efemérides, gravidade de N corpos pontuais,
 propagação com controle de erro, CLI e testes.
@@ -206,14 +210,16 @@ propagação com controle de erro, CLI e testes.
 ```text
 spaceflight/
 ├── CMakeLists.txt          raiz; alvos, opções, política de warnings
-├── cmake/                  cspice.cmake (CSPICE como alvo próprio), warnings.cmake
+├── cmake/                  cspice.cmake (CSPICE como alvo próprio), warnings.cmake,
+│                           third_party.cmake (SDL3, ImGui, stb, glslang, SPIRV-Cross
+│                           por FetchContent, fixados por SHA-256), shaders.cmake
 ├── config/engines/         motores da nave em JSON com comentários (ADR-0007)
 ├── catalogs/               Yale BSC5 (fora do Git; MANIFEST.md)
 ├── kernels/spice/          LSK, PCK, SPK (fora do Git; MANIFEST.md + SHA256SUMS)
-├── external/               CSPICE, godot-cpp, editor Godot, dados brutos (fora do Git)
+├── external/               CSPICE, dados brutos (fora do Git)
 ├── scripts/                fetch_*, campanhas, validação de GPU/texturas, manual
 │
-├── core/                   libspaceflight_core.a -- sem Godot, sem main()
+├── core/                   libspaceflight_core.a -- sem SDL, sem GPU, sem main()
 │   ├── math/               Vec3, Mat3
 │   ├── units/              constantes SI com proveniência, conversões
 │   ├── time/               CoordinateTime (duas partes), Duration, escalas
@@ -242,18 +248,26 @@ spaceflight/
 ├── tests/
 │   ├── support/            harness que exige justificativa de tolerância
 │   ├── unit/ integration/ scientific/ regression/
+│   ├── presentation/       cockpit, instrumentos, roteiros -- sem GPU (label presentation)
+│   ├── gpu/                harness do starfield, fora da tela (label gpu)
 │   └── scenarios/          cenários JSON para orbit-cli
 │
-├── godot/
-│   ├── gdextension/        ponte C++ (godot-cpp); desligada por padrão
-│   └── project/            projeto Godot 4.5: cenas, scripts, shaders, testes
+├── app/                    o executável spaceflight (ADR-0009); ver app/README.md
+│   ├── session/            FlightSession, StarSky, transfer_bridge
+│   ├── presentation/       cockpit, instrumentos, câmeras, cena -- sem GPU, sem SDL
+│   ├── gfx/                renderizador SDL_GPU, renderer do ImGui
+│   ├── shaders/            GLSL 450, compilados no build e embutidos
+│   ├── platform/ ui/       caminhos, áudio, teclado SDL; painéis ImGui
+│   └── main.cpp
+├── assets/                 texturas, áudio, fonte (DejaVu Sans Mono)
+│
 │
 └── docs/
     ├── adr/                decisões de arquitetura
     ├── architecture/       este documento e os demais de arquitetura
     ├── physics/            derivação e domínio de validade de cada modelo
     ├── validation/         relatórios de milestone, campanhas, tolerances.md
-    ├── gameplay/           controles (gerado do Input Map), cockpit, mapa
+    ├── gameplay/           controles (gerado de app/presentation/input_actions.cpp), cockpit, mapa
     ├── assets/             manifesto e especificação de cada asset
     └── manual/             manual do piloto; manual.pdf gerado por scripts/build_manual.sh
 ```

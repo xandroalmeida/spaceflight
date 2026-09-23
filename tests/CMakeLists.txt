@@ -80,15 +80,16 @@ spaceflight_add_test(scientific full_mission)
 set_tests_properties(scientific.full_mission PROPERTIES
     TIMEOUT ${SPACEFLIGHT_FULL_MISSION_TIMEOUT})
 
-# The equivalence test compiles the GDExtension's planner BRIDGE into itself.
+# The equivalence test compiles the cockpit's planner BRIDGE into itself.
 #
-# That is possible because the bridge header has no Godot in it, and it is the
-# whole point: the test exercises the code the engine actually calls rather than
-# a copy of it that happens to agree.  Nothing else in tests/ links anything from
-# godot/, and nothing else should.
+# That is possible because the bridge has nothing but core types in it, and it
+# is the whole point: the test exercises the code the cockpit actually calls
+# rather than a copy of it that happens to agree.  It compiles the one source
+# file and not the application library, so the scientific suite still builds
+# with -DSPACEFLIGHT_BUILD_APP=OFF.
 spaceflight_add_test(scientific planner_equivalence)
 target_sources(test_planner_equivalence PRIVATE
-    "${CMAKE_SOURCE_DIR}/godot/gdextension/src/mission_planner.cpp")
+    "${CMAKE_SOURCE_DIR}/app/session/transfer_bridge.cpp")
 # Flies the full production search twice, once per caller.
 set_tests_properties(scientific.planner_equivalence PROPERTIES TIMEOUT 600)
 spaceflight_add_test(scientific blackbody_colour)
@@ -97,6 +98,36 @@ spaceflight_add_test(scientific relativistic_sky)
 spaceflight_add_test(scientific verification_hardening)
 
 spaceflight_add_test(regression reference_states)
+
+# ---------------------------------------------------------------------------
+# The presentation (ADR-0009): the cockpit, the instruments, the cameras, the
+# panels and the orchestrator, exercised with no window and no GPU.
+#
+# Not `unit` and not `gpu`. It runs without a framebuffer, like the headless
+# suite, but what it checks is not arithmetic: it is the PRESENTATION LAYER --
+# that the snapshot reaches the cockpit with the fields the instruments read,
+# that target selection works, that the jets light by actuation and not by the
+# key, that the camera comes back to its preset, that the map receives
+# trajectory points that close on the ellipse the snapshot reports. It replaced
+# the Godot suites godot.m7 and godot.m8, check for check, when the scene left
+# Godot.
+# ---------------------------------------------------------------------------
+if(SPACEFLIGHT_BUILD_APP)
+    function(spaceflight_add_presentation_test NAME)
+        set(target "test_presentation_${NAME}")
+        add_executable(${target} "presentation/${target}.cpp")
+        target_link_libraries(${target} PRIVATE test_support spaceflight_presentation spaceflight_stb)
+        add_test(NAME "presentation.${NAME}" COMMAND ${target})
+        set_tests_properties("presentation.${NAME}" PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "presentation"
+            TIMEOUT 1200
+            ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
+    endfunction()
+    spaceflight_add_presentation_test(m7)
+    spaceflight_add_presentation_test(m8)
+    spaceflight_add_presentation_test(flight)
+endif()
 
 # ---------------------------------------------------------------------------
 # Headless versus GPU (Milestone 6.2 section 22).
@@ -115,14 +146,18 @@ spaceflight_add_test(regression reference_states)
 # a statement about the graphics.  It is not one.
 #
 #   cmake --build build --target ctest-headless    no display needed, runs anywhere
-#   cmake --build build --target gpu-validation    needs a real framebuffer
+#   cmake --build build --target gpu-validation    needs a GPU (off-screen)
 #
-# The GPU tests SKIP (exit 77) rather than fail when Godot, the GDExtension or a
-# display is missing, which is the same policy the kernel-dependent tests use:
-# a green suite that verified nothing is worse than a red one.
+# The GPU tests SKIP (exit 77) rather than fail when there is no GPU device to
+# run them on, which is the same policy the kernel-dependent tests use: a green
+# suite that verified nothing is worse than a red one.
+#
+# They run OFF-SCREEN (ADR-0009): SDL_GPU renders into a texture and the
+# harness reads it back, so "needs a screen" became "needs a GPU driver" --
+# Metal, Vulkan or Direct3D 12. A CI machine without one skips them.
 # ---------------------------------------------------------------------------
 
-set(SPACEFLIGHT_HEADLESS_LABELS "unit|integration|scientific|regression")
+set(SPACEFLIGHT_HEADLESS_LABELS "unit|integration|scientific|regression|presentation")
 
 add_custom_target(ctest-headless
     COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
@@ -131,47 +166,26 @@ add_custom_target(ctest-headless
     COMMENT "The headless suite: arithmetic only, no claim about anything visible"
     USES_TERMINAL)
 
-foreach(gpu_case starfield relativistic_visual)
-    add_test(NAME "gpu.${gpu_case}"
-             COMMAND "${CMAKE_SOURCE_DIR}/scripts/gpu_validation.sh" "${gpu_case}")
-    set_tests_properties("gpu.${gpu_case}" PROPERTIES
-        SKIP_RETURN_CODE 77
-        LABELS "gpu"
-        # Rendering a ladder of full-sky frames and reading the framebuffer back
-        # is not a millisecond operation, and the default 1500 s is not enough on
-        # an integrated GPU.
-        TIMEOUT 1800
-        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
-endforeach()
+if(SPACEFLIGHT_BUILD_APP)
+    # The starfield harness (docs/validation/starfield-debug.md): ten stages, each
+    # measuring the renderer's own frame against core/.
+    add_executable(spaceflight_starfield_validation gpu/starfield_validation.cpp)
+    target_link_libraries(spaceflight_starfield_validation PRIVATE spaceflight_gfx spaceflight::warnings)
+    target_compile_definitions(spaceflight_starfield_validation PRIVATE
+        SPACEFLIGHT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-# ---------------------------------------------------------------------------
-# A terceira suíte: o Godot sem tela (Milestone 7, regra 62).
-#
-# Não é `unit` e não é `gpu`. Corre sem framebuffer, como a headless, mas o que
-# ela verifica não é aritmética: é a CAMADA DE APRESENTAÇÃO -- que o snapshot
-# chega ao cockpit com os campos que os instrumentos leem, que a seleção de alvo
-# funciona, que os jatos acendem pelo acionamento e não pela tecla, que a câmera
-# volta ao preset, que o mapa recebe pontos de trajetória que fecham na elipse
-# que o snapshot reporta.
-#
-# Precisa do Godot e da GDExtension, e por isso pula (77) quando eles não
-# existem, pela mesma política das outras duas: uma máquina que não pôde correr
-# uma suíte não a reprovou.
-#
-#   cmake --build build --target godot-tests
-# Uma entrada por milestone, e não uma só, porque um `godot.*` vermelho tem de
-# dizer QUAL camada quebrou: a do cockpit do M7 ou a do sistema solar do M8.
-foreach(godot_suite m7 m8)
-    add_test(NAME "godot.${godot_suite}"
-             COMMAND "${CMAKE_SOURCE_DIR}/scripts/godot_tests.sh" "${godot_suite}")
-    set_tests_properties("godot.${godot_suite}" PROPERTIES
-        SKIP_RETURN_CODE 77
-        LABELS "godot"
-        # O M8 inclui uma busca Terra->Marte cancelada a meio, que o worker leva
-        # um voo a abandonar.
-        TIMEOUT 600
-        ENVIRONMENT "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
-endforeach()
+    set(gpu_environment
+        "SPACEFLIGHT_KERNEL_DIR=${SPACEFLIGHT_DEFAULT_KERNEL_DIR};SPACEFLIGHT_CATALOG_DIR=${SPACEFLIGHT_DEFAULT_CATALOG_DIR};SPACEFLIGHT_BIN_DIR=$<TARGET_FILE_DIR:spaceflight>")
+    foreach(gpu_case starfield relativistic_visual)
+        add_test(NAME "gpu.${gpu_case}"
+                 COMMAND "${CMAKE_SOURCE_DIR}/scripts/gpu_validation.sh" "${gpu_case}")
+        set_tests_properties("gpu.${gpu_case}" PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "gpu"
+            TIMEOUT 1800
+            ENVIRONMENT "${gpu_environment}")
+    endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # As texturas, conferidas antes de serem ligadas (Milestone 7, regras 40 e 47).
@@ -195,12 +209,6 @@ set_tests_properties("assets.textures" PROPERTIES
     LABELS "assets"
     TIMEOUT 600)
 
-add_custom_target(godot-tests
-    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
-            --label-regex "godot" --output-on-failure
-    COMMENT "The presentation suite: Godot without a display"
-    USES_TERMINAL)
-
 add_custom_target(asset-validation
     COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
             --label-regex "assets" --output-on-failure
@@ -210,5 +218,5 @@ add_custom_target(asset-validation
 add_custom_target(gpu-validation
     COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
             --label-regex "gpu" --output-on-failure
-    COMMENT "The GPU suite: needs a real framebuffer; qualified on M5 Pro / Metal and HD 4000 / Vulkan"
+    COMMENT "The GPU suite: needs a GPU driver (Metal / Vulkan / D3D12), no display"
     USES_TERMINAL)

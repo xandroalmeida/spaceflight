@@ -1,6 +1,6 @@
 # Nave
 
-A geometria é **procedural** (regras 7, 48): `scripts/world/spacecraft_visual.gd`
+A geometria é **procedural** (regras 7, 48): `app/presentation/scene/spacecraft_visual.cpp`
 constrói 22 metros de veículo com primitivas. Não há modelo artístico e o M7 não
 espera por um.
 
@@ -39,8 +39,8 @@ a nave opera exclusivamente no vácuo (regra 5).
 
 ## A pluma e os jatos
 
-Não são geometria da nave: são `EnginePlume` e `RcsVisual`, e ambos consomem o
-estado do core.
+Não são geometria da nave: são `EnginePlume` e `RcsVisual` (no mesmo
+`spacecraft_visual.cpp`), e ambos consomem o estado do core.
 
 A pluma segue o **empuxo real** (`thrust_n`), não o acelerador — com o tanque
 vazio a tecla continua a funcionar e o empuxo é zero. Os jatos seguem

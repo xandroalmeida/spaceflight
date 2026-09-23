@@ -2,7 +2,7 @@
 
 // The Yale Bright Star Catalogue, read as it is published.
 //
-// The Milestone 2 star field was seeded noise, and godot/README.md said so.  This
+// The Milestone 2 star field was seeded noise, and its README said so.  This
 // reads BSC5 (Hoffleit & Warren 1991, VizieR V/50): 9110 records, fixed-width
 // ASCII, the whole naked-eye sky.
 //

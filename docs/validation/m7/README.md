@@ -1,13 +1,16 @@
 # M7 — a demonstração, fotografada
 
-Produzido por `scripts/m7_screenshots.sh`. Precisa de tela: `--headless` tem um
-rasterizador que não desenha nada, e uma corrida "bem sucedida" sob ele não
-provaria coisa nenhuma — que foi como o starfield ficou partido durante um
-milestone inteiro (`docs/validation/starfield-debug.md`).
+Produzido por `scripts/m7_screenshots.sh` (`spaceflight --shots m7`). Precisa de
+um **driver de GPU**, não de tela: o quadro é desenhado fora da tela numa textura
+e cada fotografia é essa textura lida de volta (ADR-0009). O `--headless` não
+serve: não abre GPU nenhuma, e uma corrida "bem sucedida" sem rasterizar um pixel
+não provaria coisa nenhuma — que foi como o starfield ficou partido durante um
+milestone inteiro (`docs/validation/starfield-debug.md`). Sem GPU o script sai 77
+(Skipped).
 
 A sequência é **reproduzível**: cada passo é uma condição sobre o estado da
 simulação e não um número de quadros escolhido à mão, e o roteiro está em
-`godot/project/scripts/shot_director.gd`. Quando uma condição não é atingida
+`app/presentation/shot_director.cpp` (`m7_script()`). Quando uma condição não é atingida
 dentro do orçamento de quadros, a sequência **fotografa na mesma e diz que não
 foi** — uma corrida que abortasse não deixaria imagem nenhuma do que de facto
 aconteceu, que é justamente o que se quer ver quando algo corre mal.
@@ -40,8 +43,8 @@ Para gerar outra vez:
 ```bash
 ./scripts/m7_screenshots.sh                       # 1920x1080, tudo
 ./scripts/m7_screenshots.sh /tmp/out 2560x1440    # outra resolução
-SPACEFLIGHT_SHOT_STOP=3 ./external/godot/Godot.app/Contents/MacOS/Godot \
-    --path godot/project                          # só os três primeiros passos
+SPACEFLIGHT_SHOT_STOP=3 ./scripts/m7_screenshots.sh   # só os três primeiros passos
+./build/bin/spaceflight --shots m7 /tmp/out --stop 3  # o mesmo, direto
 ```
 
 `SPACEFLIGHT_SHOT_STOP` existe porque iterar na imagem não pode exigir voar até à
@@ -74,7 +77,7 @@ nunca se veem.
 
 ## Como a câmera externa é enquadrada
 
-`_frame_sunlit()` deriva o azimute e a elevação da **direção do Sol** nos eixos
+`ShotDirector::frame_sunlit()` deriva o azimute e a elevação da **direção do Sol** nos eixos
 do casco, em vez de os fixar à mão. O lado contrário ao Sol fica escuro e tem de
 ficar (regra 29) — mas um azimute fixo põe a câmera no lado errado assim que a
 órbita avança, e a fotografia de demonstração sai preta com dois radiadores a

@@ -14,7 +14,7 @@ cobre o subconjunto que o manual usa e nada mais. O PDF sai do Chrome, que é o
 Um manual envelhece de três maneiras, e as três dão erro de compilação aqui:
 
   {{key:acao}}        resolvido a partir de docs/gameplay/controls.json, que sai
-                      do Input Map. Uma ação que não existe mais reprova a
+                      da tabela de teclas do jogo. Uma ação que não existe mais reprova a
                       compilação em vez de imprimir uma tecla errada.
 
   ![](figura.png)     uma figura que não existe reprova. As capturas vêm de
@@ -78,7 +78,7 @@ def expand(text: str, source: pathlib.Path, keys: dict, seen: set) -> str:
         action = match.group(1)
         if action not in keys:
             raise BuildError(f"{source.name}: {{{{key:{action}}}}} -- ação não existe "
-                             f"no Input Map ({CONTROLS.relative_to(ROOT)})")
+                             f"na tabela de teclas ({CONTROLS.relative_to(ROOT)})")
         # A tecla NUA, sem marcação. Quem escreve o capítulo é que decide se ela
         # vai entre crases -- porque dentro de um bloco de código as crases são
         # literais, e a primeira versão imprimia `Tab` com elas à vista.
@@ -359,7 +359,7 @@ def main(argv) -> int:
 {"".join(sections[1:])}
 <footer class="colofon">Compilado de <code>docs/manual/</code> por
 <code>scripts/build_manual.py</code> — revisão {html.escape(revision())}.
-As teclas vêm do Input Map; as figuras, de <code>scripts/m7_screenshots.sh</code>.</footer>
+As teclas vêm da tabela do jogo (app/presentation/input_actions.cpp); as figuras, de <code>scripts/m7_screenshots.sh</code>.</footer>
 </body></html>"""
 
     BUILD.mkdir(parents=True, exist_ok=True)

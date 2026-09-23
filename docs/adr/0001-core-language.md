@@ -6,7 +6,8 @@ Status: **aceito** · Data: 2026-09-13 · Decisor: definido no enunciado do proj
 
 O núcleo é numérico, de longa duração, precisa interoperar com bibliotecas
 científicas escritas em C (CSPICE, potencialmente REBOUND) e precisa ser
-consumido por uma GDExtension do Godot 4 (ABI C++).
+consumido pela camada de apresentação (na época, uma GDExtension do Godot 4,
+ABI C++; desde o ADR-0009, o executável C++20 `spaceflight` em `app/`).
 
 ## Decisão
 

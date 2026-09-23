@@ -5,7 +5,7 @@
 // This is the piece of docs/physics/relativistic-rendering.md section 6 that
 // cannot live anywhere but a vertex shader, because it is per-vertex by
 // definition.  It is also the one formula in this project that exists twice --
-// here and in godot/project/shaders/relativistic_body.gdshader -- and section 5
+// here and in app/shaders/body.vert -- and section 5
 // of docs/architecture/relativistic-shaders.md says what is done about that.
 //
 // The equation is the same |x_obs - x(t_r)| = c (t - t_r) as
