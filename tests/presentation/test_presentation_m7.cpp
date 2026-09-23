@@ -468,13 +468,37 @@ TEST(the_plume_follows_the_thrust_not_the_key_rule_16) {
     // which is what the renderer draws.
     plume.set_thrust(200000.0);
     const auto box = app::mesh::transformed_bounds(*meshes.find(plume.cone_mesh()), plume.cone_transform());
-    CHECK_NEAR_ABS(-box.min.x, app::EnginePlume::MAX_LENGTH, 0.6, "the full plume extends 14 m BEHIND the nozzle");
+    CHECK_NEAR_ABS(-box.min.x, app::EnginePlume::MAX_LENGTH * plume.style().length, 0.6,
+                   "the full plume extends its full length BEHIND the nozzle");
     CHECK(box.max.x <= 0.3);   // and starts at the nozzle, not in front of it
     CHECK(std::max(box.size().y, box.size().z) < box.size().x * 0.5);   // a plume, not a disc
     // The case that separates the thrust from the key: full throttle, empty tank.
     plume.set_thrust(0.0);
     CHECK(!plume.visible());
     CHECK_EQ(plume.light().energy, 0.0);
+}
+
+TEST(the_plume_takes_the_look_of_the_running_mode) {
+    app::MeshLibrary meshes;
+    app::EnginePlume plume(meshes);
+    // torch-mk3.json: IMPULSE 0.03 c at 200 kN, CRUISE 0.5 c at 11 199 N; the
+    // Orbital Tug is chemical at 3e-5 c.
+    plume.set_mode(0.03, 200000.0);
+    CHECK(plume.style().kind == app::EnginePlume::Kind::FusionDense);
+    plume.set_mode(0.5, 11199.0);
+    CHECK(plume.style().kind == app::EnginePlume::Kind::Relativistic);
+    CHECK(plume.style().tail_radius < plume.style().nozzle_radius * 3.0);   // a beam, collimated
+    // Full throttle in CRUISE is a full plume: the thrust is measured against
+    // the mode's own maximum, not against IMPULSE's.
+    plume.set_thrust(11199.0);
+    CHECK_NEAR_ABS(plume.intensity(), 1.0, 1.0e-12, "CRUISE at full throttle");
+    plume.set_mode(3.0e-5, 5000.0);
+    CHECK(plume.style().kind == app::EnginePlume::Kind::Chemical);
+    // The instruments and the plume agree on the colour of each mode.
+    CHECK(app::palette::engine(0.03) == app::palette::ENGINE_FUSION);
+    CHECK(app::palette::engine(0.5) == app::palette::ENGINE_BEAM);
+    CHECK(app::palette::engine(3.0e-5) == app::palette::ENGINE_CHEMICAL);
+    CHECK(plume.light().colour == app::palette::ENGINE_CHEMICAL);
 }
 
 TEST(camera_modes_rule_11) {

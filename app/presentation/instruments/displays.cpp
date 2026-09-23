@@ -272,7 +272,7 @@ void SystemDisplay::engine(double x, double width, double h) {
     // the state says SAFE, which is the only one of the two readings that is
     // about the ship.
     const Rect2 bar{Vec2{x + inset, h * 0.38}, Vec2{width - inset * 2.0, h * 0.16}};
-    draw_bar(bar, throttle, thrust > 0.0 ? palette::ENGINE : palette::DIM);
+    draw_bar(bar, throttle, thrust > 0.0 ? palette::engine(data_->s.exhaust_velocity_c) : palette::DIM);
     const std::string status = thrust > 0.0 ? "RUNNING" : (data_->engine_armed ? "ARMED" : "SAFE");
     const Colour colour = thrust > 0.0 ? palette::OK : palette::SECONDARY;
     value(Vec2{x + inset, h * 0.86}, fmt::percent(throttle) + "  " + status, h, colour, 0.15);
@@ -280,7 +280,8 @@ void SystemDisplay::engine(double x, double width, double h) {
 
 void SystemDisplay::thrust(double x, double width, double h) {
     const double thrust_n = data_->s.thrust_n;
-    cell(x, width, h, "THRUST", fmt::force(thrust_n), thrust_n > 0.0 ? palette::ENGINE : palette::PRIMARY);
+    cell(x, width, h, "THRUST", fmt::force(thrust_n),
+         thrust_n > 0.0 ? palette::engine(data_->s.exhaust_velocity_c) : palette::PRIMARY);
     value(Vec2{x + width * 0.06, h * 0.86}, fmt::sci(data_->s.mass_flow_kg_s, 3) + " kg/s", h, palette::SECONDARY,
           0.125);
 }
@@ -422,7 +423,7 @@ void MinimalHud::throttle(Vec2 at, double width, double u) {
     const double thrust = data_->s.thrust_n;
     draw_text_at(at, "THROTTLE", 3.4, palette::SECONDARY);
     draw_bar(Rect2{at + Vec2{0.0, u * 2.0}, Vec2{width, u * 3.4}}, throttle_value,
-             thrust > 0.0 ? palette::ENGINE : palette::DIM);
+             thrust > 0.0 ? palette::engine(data_->s.exhaust_velocity_c) : palette::DIM);
     draw_text_at(at + Vec2{0.0, u * 9.6}, fmt::percent(throttle_value) + "   " + fmt::force(thrust), 4.0,
                  palette::PRIMARY);
 }

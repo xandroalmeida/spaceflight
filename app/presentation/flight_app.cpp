@@ -282,6 +282,7 @@ void FlightApp::update_ship(double delta) {
     // The hull points where the attitude says it points -- not along the
     // velocity, which is what a simulator without attitude has to pretend.
     const auto s = session_.snapshot();
+    plume_->set_mode(s.exhaust_velocity_c, s.max_thrust_n);
     plume_->set_thrust(s.thrust_n);
     plume_->advance(delta);
     rcs_visual_->set_throttles(rcs_throttles_);
