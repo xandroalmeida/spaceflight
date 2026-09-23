@@ -68,8 +68,17 @@ spaceflight_add_test(scientific lunar_transfer)
 # differential correctors invert.  That costs minutes where the same trajectory
 # under ideal guidance costs seconds, and it is the cost of testing what the
 # scene can actually fly rather than a cheaper thing next to it.
+#
+# The timeout is there to catch a hang, not to grade the hardware.  The run is
+# single-threaded and almost all of it is CSPICE lookups: 853 s on an Apple M5
+# Pro, 9249 s (2 h 34 min, 99 % user time) on an Intel i5-3210M from 2012 --
+# both passing.  Three hours covers the slow end with margin; override with
+# -DSPACEFLIGHT_FULL_MISSION_TIMEOUT=<seconds>.
+set(SPACEFLIGHT_FULL_MISSION_TIMEOUT 10800 CACHE STRING
+    "CTest timeout for scientific.full_mission, in seconds")
 spaceflight_add_test(scientific full_mission)
-set_tests_properties(scientific.full_mission PROPERTIES TIMEOUT 2400)
+set_tests_properties(scientific.full_mission PROPERTIES
+    TIMEOUT ${SPACEFLIGHT_FULL_MISSION_TIMEOUT})
 
 # The equivalence test compiles the GDExtension's planner BRIDGE into itself.
 #
@@ -201,5 +210,5 @@ add_custom_target(asset-validation
 add_custom_target(gpu-validation
     COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${CMAKE_BINARY_DIR}"
             --label-regex "gpu" --output-on-failure
-    COMMENT "The GPU suite: needs a real framebuffer; qualified only on Apple M5 Pro / Metal"
+    COMMENT "The GPU suite: needs a real framebuffer; qualified on M5 Pro / Metal and HD 4000 / Vulkan"
     USES_TERMINAL)

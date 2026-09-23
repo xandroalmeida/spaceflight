@@ -28,7 +28,8 @@
 # has not run them, and those are different facts.  Exit 1 is reserved for a
 # harness that ran and did not like what it saw.
 #
-# Qualification status: Apple M5 Pro, Metal, Godot Forward+ only.  See
+# Qualification status: Godot Forward+ on Apple M5 Pro / Metal and on Intel
+# HD 4000 / Vulkan / Linux.  See
 # docs/validation/graphics-compatibility.md.
 #
 #   scripts/gpu_validation.sh starfield

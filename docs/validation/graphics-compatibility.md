@@ -3,12 +3,14 @@
 **Milestone 6.2, seções 22 e 23.**
 
 Este documento existe para dizer uma coisa que não estava dita em lugar nenhum:
-**a renderização deste simulador foi verificada em exatamente uma configuração**,
+**a renderização deste simulador foi verificada em exatamente duas configurações**,
 e nenhum resultado gráfico deste repositório afirma mais do que isso.
 
 ---
 
-## 1. A configuração qualificada
+## 1. As configurações qualificadas
+
+### 1.1 A de referência
 
 ```text
 Hardware   Apple M5 Pro
@@ -20,7 +22,31 @@ Resolução  1024 x 640 (o arnês), 1920 x 1080 (uso normal)
 
 Tudo em [starfield-debug.md](starfield-debug.md) e em
 [relativistic-rendering-visual.md](relativistic-rendering-visual.md) foi medido
-aí. Nada foi medido em mais lugar nenhum.
+aí, e as imagens versionadas em `docs/validation/starfield/` e
+`docs/validation/scene/` são dela.
+
+### 1.2 A segunda: Linux, Vulkan, Intel
+
+```text
+Hardware   Intel Core i5-3210M, Intel HD Graphics 4000 (Ivy Bridge GT2)
+API        Vulkan 1.2 (Mesa, driver hasvk)
+Renderer   Godot 4.5, Forward+
+SO         Ubuntu 24.04, Linux 6.17, sessão Wayland
+Resolução  1024 x 640 (o arnês)
+```
+
+Qualificada em 2026-09-23. `gpu.starfield` passou nos dez estágios, cada um
+dentro do mesmo orçamento do Mac; `gpu.relativistic_visual` produziu a escada
+inteira de quadros. O log fica em
+[linux/starfield-validation.log](linux/starfield-validation.log). As imagens não
+foram versionadas: as do Mac continuam sendo a referência, e as do Linux diferem
+delas em no máximo 0,00031 no estágio 10 (orçamento 0,020).
+
+É o extremo fraco da matriz, e isso é deliberado: uma GPU integrada de 2012,
+num driver que ao abrir avisa `Ivy Bridge Vulkan support is incomplete`. Os dois
+defeitos da §2 dependiam de renderer e de profundidade, e nenhum reapareceu aqui.
+O que difere do Mac está dentro do ruído de rasterização: 1 591 blobs no
+baseline do estágio 6 contra 1 714, a mesma proporção entre os efeitos.
 
 Isto **não bloqueia** o milestone (§23). É um registro do alcance da evidência.
 
@@ -81,10 +107,10 @@ exatamente como o starfield sobreviveu quebrado a um milestone inteiro.
 
 | eixo | qualificado | não testado |
 |---|---|---|
-| API gráfica | Metal | Vulkan, Direct3D 12, OpenGL |
+| API gráfica | Metal, Vulkan | Direct3D 12, OpenGL |
 | renderer Godot | Forward+ | Mobile, Compatibility |
-| SO | macOS | Windows, Linux |
-| GPU | Apple Silicon (M5 Pro) | AMD, NVIDIA, Intel |
+| SO | macOS, Linux | Windows |
+| GPU | Apple Silicon (M5 Pro), Intel HD 4000 | AMD, NVIDIA, Intel recente |
 | precisão de profundidade | 24 bits, invertida (padrão do Forward+) | tudo o mais |
 
 A suíte já está preparada para essa matriz: `scripts/gpu_validation.sh` não tem

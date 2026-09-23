@@ -38,7 +38,10 @@ DEST="${ROOT}/godot/project/assets/textures/earth"
 SKIP=77
 
 if ! command -v magick >/dev/null 2>&1; then
-    echo "SKIP: ImageMagick não encontrado (brew install imagemagick)" >&2
+    # O `convert` do ImageMagick 6 que o Ubuntu empacota não serve: a policy.xml
+    # da distribuição recusa um JPEG de 21600 px de largura.
+    echo "SKIP: ImageMagick 7 (\`magick\`) não encontrado -- macOS: brew install imagemagick;" >&2
+    echo "      Linux: o AppImage de https://imagemagick.org/script/download.php" >&2
     exit ${SKIP}
 fi
 

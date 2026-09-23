@@ -138,7 +138,13 @@ static func label(action: String) -> String:
 				parts.append("Ctrl")
 			if key.shift_pressed:
 				parts.append("Shift")
-			parts.append(OS.get_keycode_string(key.physical_keycode))
+			# O macOS chama a tecla sozinha de "Option", mas os modificadores acima
+			# dizem "Alt" em toda parte -- e controls.md não pode mudar conforme a
+			# máquina que o gerou.
+			if key.physical_keycode == KEY_ALT:
+				parts.append("Alt")
+			else:
+				parts.append(OS.get_keycode_string(key.physical_keycode))
 			return "+".join(parts)
 	return "?"
 

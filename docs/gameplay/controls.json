@@ -17,7 +17,7 @@
   "camera_free_look": {
     "description": "olhar em volta (mantido)",
     "group": "CÂMERA",
-    "key": "Option"
+    "key": "Alt"
   },
   "camera_recentre": {
     "description": "recentra o olhar",

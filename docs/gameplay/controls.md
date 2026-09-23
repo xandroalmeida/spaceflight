@@ -71,7 +71,7 @@ câmera não muda um número do estado.
 |---|---|
 | `C` | alterna o modo de câmera |
 | `Home` | recentra o olhar |
-| `Option` | olhar em volta (mantido) |
+| `Alt` | olhar em volta (mantido) |
 | `BracketRight` | aproxima |
 | `BracketLeft` | afasta |
 | `F` | foca o próximo corpo |
