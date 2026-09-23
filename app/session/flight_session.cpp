@@ -1833,6 +1833,7 @@ SnapshotView FlightSession::snapshot() const {
     out.thrust_along_track = craft.thrust_along_track;
     out.specific_energy_rate = craft.specific_energy_rate;
     out.exhaust_velocity_c = craft_ != nullptr ? craft_->engine().exhaust_velocity_fraction_c() : 0.0;
+    out.max_thrust_n = craft_ != nullptr ? craft_->engine().max_thrust() : 0.0;
 
     out.apoapsis_m = craft.elements.apoapsis_radius;
     out.periapsis_m = craft.elements.periapsis_radius;

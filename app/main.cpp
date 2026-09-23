@@ -273,6 +273,10 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "window: %s\n", SDL_GetError());
             return 1;
         }
+        // Launched from a terminal, a bare executable is not brought to the
+        // front on macOS: the window opens behind and the keys keep going to the
+        // terminal. Ask for the focus.
+        SDL_RaiseWindow(window);
     }
     std::string error;
     auto gpu = sf::gfx::Gpu::create(window, options.gpu_debug, error);
@@ -291,6 +295,13 @@ int main(int argc, char** argv) {
     }
 
     const std::string assets = options.assets.empty() ? sf::platform::asset_directory() : options.assets;
+    // SDL_Quit runs when this goes out of scope -- AFTER the audio sink and the
+    // app, declared below it. Called by hand before the return, it shut the audio
+    // subsystem down under the sink's streams, and the sink's destructor then
+    // crashed on every exit.
+    struct SdlQuit {
+        ~SdlQuit() { SDL_Quit(); }
+    } sdl_quit;
     std::unique_ptr<sf::app::AudioSink> audio_sink;
     sf::platform::SdlAudio* sdl_audio = nullptr;
     if (!offscreen) {
@@ -516,7 +527,6 @@ int main(int argc, char** argv) {
         if (window != nullptr) {
             SDL_DestroyWindow(window);
         }
-        SDL_Quit();
         return code;
     }
 }

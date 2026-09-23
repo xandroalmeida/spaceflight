@@ -82,6 +82,7 @@ struct SnapshotView {
     double thrust_along_track{0.0};
     double specific_energy_rate{0.0};
     double exhaust_velocity_c{0.0};
+    double max_thrust_n{0.0};          // the current mode's thrust at full throttle
 
     double apoapsis_m{0.0};
     double periapsis_m{0.0};

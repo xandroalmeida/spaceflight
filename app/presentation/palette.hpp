@@ -68,7 +68,27 @@ inline constexpr Colour WARNING{0.949F, 0.678F, 0.267F};      // amber
 inline constexpr Colour CRITICAL{0.902F, 0.361F, 0.333F};     // red
 inline constexpr Colour OK{0.451F, 0.784F, 0.541F};           // state green
 
-inline constexpr Colour ENGINE{0.984F, 0.831F, 0.596F};       // main engine plume
+inline constexpr Colour ENGINE{0.984F, 0.831F, 0.596F};       // main engine, no mode known
+
+// The main engine's colour follows the regime of its exhaust velocity, on the
+// plume and on the instruments alike (scene/spacecraft_visual.cpp says why each
+// gas glows the colour it does): a chemical flame, a dense hydrogen plasma
+// (IMPULSE, the Mk I/II), a relativistic beam (CRUISE).
+inline constexpr double ENGINE_FUSION_FROM_C = 1.0e-3;
+inline constexpr double ENGINE_BEAM_FROM_C = 0.2;
+inline constexpr Colour ENGINE_CHEMICAL{1.0F, 0.60F, 0.26F};
+inline constexpr Colour ENGINE_FUSION{1.0F, 0.52F, 0.84F};
+inline constexpr Colour ENGINE_BEAM{0.36F, 0.62F, 1.0F};
+
+[[nodiscard]] constexpr Colour engine(double exhaust_velocity_c) {
+    if (exhaust_velocity_c <= 0.0) {
+        return ENGINE;
+    }
+    if (exhaust_velocity_c < ENGINE_FUSION_FROM_C) {
+        return ENGINE_CHEMICAL;
+    }
+    return exhaust_velocity_c < ENGINE_BEAM_FROM_C ? ENGINE_FUSION : ENGINE_BEAM;
+}
 inline constexpr Colour RCS{0.761F, 0.878F, 0.976F};          // RCS jet
 
 // The glass of a lit display pushes a little light into the cockpit (rule 51).

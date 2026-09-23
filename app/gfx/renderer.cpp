@@ -127,6 +127,14 @@ struct BodyFragmentBlock {
     Vec4f reflectance;
 };
 
+struct PlumeFragmentBlock {
+    Vec4f camera_position;
+    Vec4f near_colour;
+    Vec4f far_colour;
+    Vec4f flow;
+    Vec4f shape;
+};
+
 struct LitVertexBlock {
     Mat4 model;
     Mat4 view_projection;
@@ -347,6 +355,8 @@ bool Renderer::create_pipelines(SDL_GPUTextureFormat output_format) {
     SDL_GPUShader* lit_fs = make_shader("lit", ShaderStage::Fragment, {2, 1});
     SDL_GPUShader* unlit_vs = make_shader("unlit", ShaderStage::Vertex, {0, 1});
     SDL_GPUShader* unlit_fs = make_shader("unlit", ShaderStage::Fragment, {1, 1});
+    SDL_GPUShader* plume_vs = make_shader("plume", ShaderStage::Vertex, {0, 1});
+    SDL_GPUShader* plume_fs = make_shader("plume", ShaderStage::Fragment, {0, 1});
     SDL_GPUShader* shadow_vs = make_shader("shadow", ShaderStage::Vertex, {0, 1});
     SDL_GPUShader* shadow_fs = make_shader("shadow", ShaderStage::Fragment, {0, 0});
     SDL_GPUShader* composite_vs = make_shader("composite", ShaderStage::Vertex, {0, 0});
@@ -456,6 +466,8 @@ bool Renderer::create_pipelines(SDL_GPUTextureFormat output_format) {
                                    SDL_GPU_CULLMODE_BACK, near_samples_, false});
     additive_pipeline_ = build({unlit_vs, unlit_fs, true, false, additive_blend(), hdr, true, true, false,
                                 SDL_GPU_CULLMODE_NONE, near_samples_, false});
+    plume_pipeline_ = build({plume_vs, plume_fs, true, false, additive_blend(), hdr, true, true, false,
+                             SDL_GPU_CULLMODE_NONE, near_samples_, false});
     shadow_pipeline_ = build({shadow_vs, shadow_fs, true, false, opaque_blend(), hdr, false, true, true,
                               SDL_GPU_CULLMODE_NONE, one, true});
 
@@ -471,7 +483,7 @@ bool Renderer::create_pipelines(SDL_GPUTextureFormat output_format) {
     (void)output_format;
 
     return body_pipeline_ && star_pipeline_ && lit_cull_pipeline_ && lit_double_pipeline_ && lit_alpha_pipeline_ &&
-           unlit_opaque_pipeline_ && unlit_alpha_pipeline_ && additive_pipeline_ && shadow_pipeline_ &&
+           unlit_opaque_pipeline_ && unlit_alpha_pipeline_ && additive_pipeline_ && plume_pipeline_ && shadow_pipeline_ &&
            composite_pipeline_;
 }
 
@@ -1080,12 +1092,42 @@ void Renderer::render_near(SDL_GPUCommandBuffer* cmd, app::FlightApp& app, std::
         SDL_DrawGPUIndexedPrimitives(pass, gm->index_count, 1, 0, 0, 0);
     };
 
+    const auto draw_plume = [&](const DrawItem& item) {
+        const auto& m = item.part->material;
+        const GpuMesh* gm = mesh(item.part->mesh);
+        if (gm == nullptr) {
+            return;
+        }
+        SDL_BindGPUGraphicsPipeline(pass, plume_pipeline_.get());
+        LitVertexBlock vertex{};
+        vertex.model = Mat4::from(item.model);
+        vertex.view_projection = view_projection;
+        vertex.normal_matrix = Mat4::from(Transform3{item.model.basis.inverse().transposed(), Vec3{}});
+        SDL_PushGPUVertexUniformData(cmd, 0, &vertex, sizeof vertex);
+        const auto& look = m.plume;
+        PlumeFragmentBlock fragment{};
+        fragment.camera_position = v4(camera.position);
+        fragment.near_colour = linear(look.near, look.energy);
+        fragment.near_colour.w = static_cast<float>(look.edge_power);
+        fragment.far_colour = linear(look.far, look.energy);
+        fragment.far_colour.w = static_cast<float>(look.decay);
+        fragment.flow = Vec4f{static_cast<float>(look.time), static_cast<float>(look.turbulence),
+                              static_cast<float>(look.streaks), static_cast<float>(look.flow_speed)};
+        fragment.shape = Vec4f{static_cast<float>(look.tail_fade), 0.0F, 0.0F, 0.0F};
+        SDL_PushGPUFragmentUniformData(cmd, 0, &fragment, sizeof fragment);
+        SDL_GPUBufferBinding vb{gm->vertices.get(), 0};
+        SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
+        SDL_GPUBufferBinding ib{gm->indices.get(), 0};
+        SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_DrawGPUIndexedPrimitives(pass, gm->index_count, 1, 0, 0, 0);
+    };
+
     // Opaque first, then the transparent ones from back to front, then light.
     std::vector<const DrawItem*> transparent;
     std::vector<const DrawItem*> additive;
     for (const auto& item : items) {
         const auto& m = item.part->material;
-        if (m.blend == app::Blend::Additive) {
+        if (m.blend == app::Blend::Additive || m.blend == app::Blend::Plume) {
             additive.push_back(&item);
         } else if (m.blend == app::Blend::Alpha) {
             transparent.push_back(&item);
@@ -1105,7 +1147,11 @@ void Renderer::render_near(SDL_GPUCommandBuffer* cmd, app::FlightApp& app, std::
         }
     }
     for (const auto* item : additive) {
-        draw_unlit(*item, additive_pipeline_.get());
+        if (item->part->material.blend == app::Blend::Plume) {
+            draw_plume(*item);
+        } else {
+            draw_unlit(*item, additive_pipeline_.get());
+        }
     }
     SDL_EndGPURenderPass(pass);
 }

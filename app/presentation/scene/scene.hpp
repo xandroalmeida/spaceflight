@@ -17,7 +17,7 @@
 
 namespace sf::app {
 
-enum class Blend { Opaque, Alpha, Additive };
+enum class Blend { Opaque, Alpha, Additive, Plume };
 enum class Cull { Back, None };
 
 // A physically based material in the metallic-roughness form, plus the few
@@ -37,6 +37,21 @@ struct Material {
     // cockpit display, "caption:<n>" a control's label.
     std::string dynamic_texture;
     bool casts_shadow{true};
+    // Blend::Plume only: what the exhaust shader draws (shaders/plume.frag).
+    // Colours are sRGB-encoded like the rest; `near` is at the nozzle, `far` at
+    // the tail.
+    struct PlumeLook {
+        Colour near{1.0F, 1.0F, 1.0F, 1.0F};
+        Colour far{1.0F, 1.0F, 1.0F, 1.0F};
+        double energy{1.0};
+        double edge_power{1.5};    // > 1 concentrates the light on the axis
+        double decay{2.0};         // e-folds of brightness from nozzle to tail; 0 = none
+        double tail_fade{0.6};     // where the far end starts fading to nothing; >= 1 = never
+        double turbulence{0.2};    // amplitude of the streaks carried by the flow
+        double streaks{6.0};       // streak frequency along the jet
+        double flow_speed{3.0};    // how fast they travel, in plume lengths per second
+        double time{0.0};
+    } plume;
 };
 
 struct Part {

@@ -130,6 +130,7 @@ private:
     PipelineHandle unlit_opaque_pipeline_;
     PipelineHandle unlit_alpha_pipeline_;
     PipelineHandle additive_pipeline_;
+    PipelineHandle plume_pipeline_;
     PipelineHandle shadow_pipeline_;
     PipelineHandle composite_pipeline_;
 

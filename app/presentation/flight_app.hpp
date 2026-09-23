@@ -60,7 +60,15 @@ struct FlightConfig {
     // Moon and because it is an orbit that exists.
     double altitude_m{400000.0};
     double inclination_deg{51.6};
-    std::string epoch_utc{"2026-01-01T00:00:00"};
+    // The epoch decides what the window shows first. The orbit starts at +x of
+    // J2000 -- the direction of the March equinox -- so the DATE sets the local
+    // solar time under the ship and the HOUR sets the longitude. On 19 February
+    // the Sun is at 22h of right ascension: 14h local, the Sun behind the ship
+    // and the ground ahead lit from behind the observer. At 12:00 UTC the ship is
+    // over East Africa, heading north-east, with the continent under the window.
+    // 1 January 00:00 put it over the Pacific at 17h, looking into the Sun: a
+    // blue ball with clouds.
+    std::string epoch_utc{"2026-02-19T12:00:00"};
     // How far the nose starts below prograde. From 400 km the Earth's limb is
     // 19.7 degrees below the local horizontal, so a nose exactly on prograde puts
     // the whole planet below the window sill.

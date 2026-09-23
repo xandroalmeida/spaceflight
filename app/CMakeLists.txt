@@ -64,6 +64,8 @@ spaceflight_compile_shaders(
         shaders/lit.frag
         shaders/unlit.vert
         shaders/unlit.frag
+        shaders/plume.vert
+        shaders/plume.frag
         shaders/shadow.vert
         shaders/shadow.frag
         shaders/composite.vert

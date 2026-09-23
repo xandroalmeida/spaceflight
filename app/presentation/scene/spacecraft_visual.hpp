@@ -95,46 +95,78 @@ private:
 // empty the key keeps working and the thrust is zero, and the plume has to go
 // out.
 //
-// It is not plasma. It is an additive cone with a brighter core, a shock disc
-// and a light. M7 asks for no exhaust physics (rule 16); it asks that a running
-// engine look like a running engine -- and that it go out when the engine does.
+// It is not plasma physics. It is glowing gas drawn by shaders/plume.frag: a
+// soft sheath, a hotter core and the bright exit plane of the nozzle, all
+// additive, all without an edge. What it looks like follows the EXHAUST
+// VELOCITY of the mode that is running (`Style`), because that is what changes
+// between operating points: a chemical flame, a dense hydrogen plasma, a
+// relativistic beam. M7 asks for no exhaust physics (rule 16); it asks that a
+// running engine look like a running engine -- and that it go out when the
+// engine does.
 class EnginePlume {
 public:
     static constexpr double IMPULSE_REFERENCE_N = 200000.0;   // IMPULSE mode reference thrust
-    static constexpr double MAX_LENGTH = 14.0;                // [m] at full power
+    static constexpr double MAX_LENGTH = 14.0;                // [m] at full power, before the style's factor
     static constexpr double CORE_FRACTION = 0.42;
+
+    // One look per kind of exhaust. Colours sRGB-encoded.
+    enum class Kind { Chemical, FusionDense, Relativistic };
+    struct Style {
+        Kind kind;
+        const char* name;
+        Colour core;            // the hot inner jet, at the nozzle
+        Colour sheath;          // the expanding outer gas
+        Colour tail;            // what the sheath cools to downstream
+        double length;          // x MAX_LENGTH
+        double nozzle_radius;   // [m] where the jet leaves the bell
+        double tail_radius;     // [m] at the far end: the divergence of the jet
+        double energy;          // brightness of the sheath at full power
+        double turbulence;
+        double flow_speed;      // streaks, in plume lengths per second
+    };
+    // The style for an exhaust velocity: below 0.001 c a chemical flame (the
+    // Orbital Tug's 9 km/s), up to 0.2 c a dense fusion plasma (IMPULSE and the
+    // Mk I/II), above that a relativistic beam (CRUISE, 0.5 c).
+    [[nodiscard]] static const Style& style_for(double exhaust_velocity_c);
 
     explicit EnginePlume(MeshLibrary& meshes);
 
-    // `thrust_n` is the core's instantaneous thrust. The reference is the IMPULSE
-    // operating point (200 kN); in CRUISE the thrust is 18 times lower and the
-    // plume proportionally smaller, which is the truth about the two modes and
-    // not a bug.
+    // `thrust_n` is the core's instantaneous thrust, measured against the running
+    // mode's full-throttle thrust (`set_mode`; 200 kN until told otherwise).
+    // CRUISE at full throttle is a full plume: the jet carries the same power as
+    // in IMPULSE (the equal-power invariant of torch-mk3.json), in a thinner,
+    // faster stream.
     void set_thrust(double thrust_n);
+    void set_mode(double exhaust_velocity_c, double max_thrust_n);
     void set_intensity(double value);
     void advance(double delta);
 
     [[nodiscard]] bool visible() const { return intensity_ > 0.0005; }
     [[nodiscard]] double intensity() const { return intensity_; }
+    [[nodiscard]] const Style& style() const { return *style_; }
     // Parts in the ENGINE MOUNT's frame (the nozzle exit).
     [[nodiscard]] std::vector<Part> parts() const;
-    // The cone's transform, for the test that checks what is drawn.
+    // The sheath's transform, for the test that checks what is drawn.
     [[nodiscard]] Transform3 cone_transform() const;
-    [[nodiscard]] const std::string& cone_mesh() const { return cone_mesh_; }
+    [[nodiscard]] const std::string& cone_mesh() const;
     // The plume's light, in the engine mount's frame; energy zero when out.
     [[nodiscard]] PointLight light() const;
 
 private:
-    // An additive colour at `level`: with additive blending it is the RGB that is
-    // added, not the alpha.
-    [[nodiscard]] static Colour glow(Colour colour, double level);
-    [[nodiscard]] static Transform3 stretch(double length, double width);
+    struct Meshes {
+        std::string sheath;
+        std::string core;
+    };
+    [[nodiscard]] static Transform3 stretch(double length);
+    [[nodiscard]] double length() const;
+    [[nodiscard]] const Meshes& meshes() const;
 
-    std::string cone_mesh_;
-    std::string core_mesh_;
-    std::string shock_mesh_;
+    std::vector<Meshes> meshes_;   // one pair per Kind, in Kind order
+    std::string glow_mesh_;
+    const Style* style_;
+    double reference_n_{IMPULSE_REFERENCE_N};
     double intensity_{0.0};
-    double flicker_{0.0};
+    double time_{0.0};
 };
 
 // The RCS jets, lit by the ACTUATOR (rule 15).

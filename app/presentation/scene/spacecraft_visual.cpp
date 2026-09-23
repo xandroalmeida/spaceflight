@@ -1,6 +1,7 @@
 #include "app/presentation/scene/spacecraft_visual.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -287,82 +288,161 @@ void SpacecraftVisual::build_navigation_lights() {
 
 // --- EnginePlume ------------------------------------------------------------------
 
-EnginePlume::EnginePlume(MeshLibrary& meshes) {
-    // One metre of mesh, stretched by `stretch`. A quarter turn about z takes +y
-    // to -x, which is where the exhaust goes; the TOP of the mesh is therefore at
-    // the far end from the nozzle, and it is the top that has to carry the larger
-    // radius -- an exhaust expands as it leaves.
-    cone_mesh_ = meshes.cylinder(1.0, 0.35, 1.0, 20, 1, true, true);
-    core_mesh_ = meshes.cylinder(0.9, 0.12, 1.0, 20, 1, true, true);
-    shock_mesh_ = meshes.sphere(0.75, 1.5, 16, 8);
+namespace {
+
+// Judged against photographs where there are photographs, and against what the
+// gas is made of where there are none:
+//
+//   Chemical      a vacuum flame. Hot, soot-free, and it balloons: with no air
+//                 to hold it, the jet opens to a wide, faint cone within metres.
+//                 Amber, whiter at the throat.
+//   FusionDense   a hydrogen plasma dense enough to recombine as it cools, and a
+//                 recombining hydrogen gas glows in the Balmer lines -- the red
+//                 H-alpha plus the blue-violet H-beta and H-gamma, which the eye
+//                 adds up to the pink-magenta of a hydrogen discharge tube.
+//                 Collimated by the magnetic nozzle, spreading slowly.
+//   Relativistic  at 0.5 c the stream is so thin and so fast that nothing
+//                 recombines in sight of the ship: what glows is the fully
+//                 ionised beam itself, blue-white, a needle, and very long.
+const std::array<EnginePlume::Style, 3> kStyles = {{
+    {EnginePlume::Kind::Chemical, "chemical", Colour{1.0F, 0.93F, 0.76F}, palette::ENGINE_CHEMICAL,
+     Colour{0.72F, 0.28F, 0.10F}, 0.8, 0.42, 2.8, 0.55, 0.35, 0.6},
+    {EnginePlume::Kind::FusionDense, "fusion", Colour{0.98F, 0.93F, 1.0F}, palette::ENGINE_FUSION,
+     Colour{0.58F, 0.36F, 1.0F}, 1.4, 0.38, 2.0, 0.95, 0.25, 0.9},
+    {EnginePlume::Kind::Relativistic, "relativistic", Colour{0.88F, 0.95F, 1.0F}, palette::ENGINE_BEAM,
+     Colour{0.30F, 0.30F, 0.95F}, 2.6, 0.26, 0.55, 0.75, 0.08, 2.0},
+}};
+
+}  // namespace
+
+const EnginePlume::Style& EnginePlume::style_for(double exhaust_velocity_c) {
+    if (exhaust_velocity_c < palette::ENGINE_FUSION_FROM_C) {
+        return kStyles[0];
+    }
+    if (exhaust_velocity_c < palette::ENGINE_BEAM_FROM_C) {
+        return kStyles[1];
+    }
+    return kStyles[2];
 }
 
-void EnginePlume::set_thrust(double thrust_n) { set_intensity(std::clamp(thrust_n / IMPULSE_REFERENCE_N, 0.0, 1.0)); }
+EnginePlume::EnginePlume(MeshLibrary& meshes) : style_(&style_for(0.03)) {
+    // One metre of open tube per style, stretched along its length by `stretch`.
+    // A quarter turn about z takes +y to -x, which is where the exhaust goes; the
+    // TOP of the mesh is therefore at the far end from the nozzle, and it is the
+    // top that carries the larger radius -- an exhaust expands as it leaves. No
+    // caps: a jet has no end faces, and the shader fades both ends itself.
+    for (const auto& style : kStyles) {
+        meshes_.push_back(Meshes{
+            meshes.cylinder(style.tail_radius, style.nozzle_radius, 1.0, 32, 8, false, false),
+            meshes.cylinder(style.tail_radius * 0.30, style.nozzle_radius * 0.55, 1.0, 24, 4, false, false),
+        });
+    }
+    glow_mesh_ = meshes.sphere(1.0, 2.0, 24, 12);
+}
+
+void EnginePlume::set_thrust(double thrust_n) { set_intensity(thrust_n / reference_n_); }
+
+void EnginePlume::set_mode(double exhaust_velocity_c, double max_thrust_n) {
+    style_ = &style_for(exhaust_velocity_c);
+    if (max_thrust_n > 0.0) {
+        reference_n_ = max_thrust_n;
+    }
+}
 
 void EnginePlume::set_intensity(double value) { intensity_ = std::clamp(value, 0.0, 1.0); }
 
 void EnginePlume::advance(double delta) {
-    if (!visible()) {
-        return;
-    }
-    // Flicker of +-4 %. Without it the plume is a solid cone and reads as
-    // geometry; with more it becomes a campfire. The value feeds NOTHING back:
-    // it is a drawing scale, and the thrust the simulation uses stays constant.
-    flicker_ = std::fmod(flicker_ + delta * 11.0, 2.0 * kPi);
+    // The clock of the streaks. It feeds NOTHING back: it is a drawing time, and
+    // the thrust the simulation uses stays constant. Wrapped well before float
+    // precision would make the streaks stutter.
+    time_ = std::fmod(time_ + delta, 1000.0);
 }
 
-Colour EnginePlume::glow(Colour colour, double level) {
-    const auto l = static_cast<float>(level);
-    return Colour{colour.r * l, colour.g * l, colour.b * l, l};
+const EnginePlume::Meshes& EnginePlume::meshes() const {
+    return meshes_[static_cast<std::size_t>(style_->kind)];
 }
 
-Transform3 EnginePlume::stretch(double length, double width) {
+const std::string& EnginePlume::cone_mesh() const { return meshes().sheath; }
+
+double EnginePlume::length() const {
+    // Square root and not linear: half the thrust does not give half the length
+    // in any engine, and the root is what makes a throttle at 10 % still show
+    // something rather than nothing.
+    return MAX_LENGTH * style_->length * std::sqrt(intensity_);
+}
+
+Transform3 EnginePlume::stretch(double length) {
     // ⚠️ A node's scale is applied BEFORE its rotation: basis = R * S. The mesh
     // grows along +y, so what LENGTHENS it is the y scale. Scaling x widened it
     // across instead -- the full plume was a disc 26 m wide by 2.6 m long.
-    return Transform3{Basis::from_euler_degrees(Vec3{0.0, 0.0, 90.0}).scaled_local(Vec3{width, length, width}),
+    return Transform3{Basis::from_euler_degrees(Vec3{0.0, 0.0, 90.0}).scaled_local(Vec3{1.0, length, 1.0}),
                       Vec3{-length * 0.5, 0.0, 0.0}};
 }
 
-Transform3 EnginePlume::cone_transform() const {
-    const double jitter = 1.0 + 0.04 * std::sin(flicker_) + 0.02 * std::sin(flicker_ * 2.7);
-    return stretch(MAX_LENGTH * std::sqrt(intensity_) * jitter, 1.0 + 0.7 * intensity_);
-}
+Transform3 EnginePlume::cone_transform() const { return stretch(length()); }
 
 std::vector<Part> EnginePlume::parts() const {
     if (!visible()) {
         return {};
     }
-    // Square root and not linear: half the thrust does not give half the length
-    // in any engine, and the root is what makes a throttle at 10 % still show
-    // something rather than nothing.
-    const double length = MAX_LENGTH * std::sqrt(intensity_);
-    const double width = 1.0 + 0.7 * intensity_;
+    const Style& st = *style_;
+    const double len = length();
+    const auto plume = [&](const std::string& mesh, const Transform3& transform) {
+        Part part{};
+        part.mesh = mesh;
+        part.transform = transform;
+        part.material.blend = Blend::Plume;
+        part.material.unshaded = true;
+        part.material.cull = Cull::None;
+        part.material.casts_shadow = false;
+        part.material.plume.time = time_;
+        part.material.plume.turbulence = st.turbulence;
+        part.material.plume.flow_speed = st.flow_speed;
+        return part;
+    };
 
-    Part cone{};
-    cone.mesh = cone_mesh_;
-    cone.transform = cone_transform();
-    cone.material = ShipMaterials::additive(glow(palette::ENGINE, 0.10 + 0.30 * intensity_));
+    // The sheath: the bulk of the gas, fading as it expands.
+    Part sheath = plume(meshes().sheath, stretch(len));
+    sheath.material.plume.near = st.sheath;
+    sheath.material.plume.far = st.tail;
+    sheath.material.plume.energy = st.energy * (0.35 + 0.65 * intensity_);
+    sheath.material.plume.edge_power = 1.6;
+    sheath.material.plume.decay = 2.2;
+    sheath.material.plume.tail_fade = 0.45;
+    sheath.material.plume.streaks = 5.0;
 
-    Part core{};
-    core.mesh = core_mesh_;
-    core.transform = stretch(length * CORE_FRACTION, width * 0.55);
-    core.material = ShipMaterials::additive(glow(Colour{1.0F, 0.97F, 0.92F}, 0.20 + 0.40 * intensity_));
+    // The core: hotter, narrower, and gone well before the sheath is.
+    Part core = plume(meshes().core, stretch(len * CORE_FRACTION));
+    core.material.plume.near = st.core;
+    core.material.plume.far = st.sheath;
+    core.material.plume.energy = st.energy * (1.2 + 1.8 * intensity_);
+    core.material.plume.edge_power = 2.2;
+    core.material.plume.decay = 2.6;
+    core.material.plume.tail_fade = 0.35;
+    core.material.plume.streaks = 9.0;
+    core.material.plume.turbulence = st.turbulence * 0.6;
 
-    Part shock{};
-    shock.mesh = shock_mesh_;
-    shock.transform = Transform3{Basis::diagonal(Vec3{0.5, width * 0.5, width * 0.5}), Vec3{-length * 0.13, 0.0, 0.0}};
-    shock.material = ShipMaterials::additive(glow(Colour{0.85F, 0.92F, 1.0F}, 0.10 + 0.24 * intensity_));
+    // The exit plane: where the gas is densest and hottest, a soft ball of light
+    // in the mouth of the bell.
+    const double r = st.nozzle_radius * (1.1 + 0.4 * intensity_);
+    Part glow = plume(glow_mesh_, Transform3{Basis::diagonal(Vec3{r * 1.6, r, r}), Vec3{-r * 0.6, 0.0, 0.0}});
+    glow.material.plume.near = st.core;
+    glow.material.plume.far = st.core;
+    glow.material.plume.energy = st.energy * (1.0 + 2.5 * intensity_);
+    glow.material.plume.edge_power = 3.0;
+    glow.material.plume.decay = 0.0;
+    glow.material.plume.tail_fade = 2.0;
+    glow.material.plume.turbulence = 0.0;
 
-    return {cone, core, shock};
+    return {sheath, core, glow};
 }
 
 PointLight EnginePlume::light() const {
     // The light lives in the MIDDLE of the plume and not at the nozzle: that is
     // how it lights the hull from behind, which is what makes the plume read as
-    // being behind the ship.
-    const double length = MAX_LENGTH * std::sqrt(intensity_);
-    return PointLight{Vec3{-length * 0.35, 0.0, 0.0}, palette::ENGINE, visible() ? 3.5 * intensity_ : 0.0, 34.0};
+    // being behind the ship. Its colour is the running mode's.
+    const double len = std::min(length(), MAX_LENGTH);
+    return PointLight{Vec3{-len * 0.35, 0.0, 0.0}, style_->sheath, visible() ? 3.5 * intensity_ : 0.0, 34.0};
 }
 
 // --- RcsVisual --------------------------------------------------------------------
