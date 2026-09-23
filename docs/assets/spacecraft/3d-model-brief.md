@@ -45,22 +45,22 @@ nada de logotipos grandes.
 `.glb` (glTF binário), triangulado, com normais e UVs. Máximo indicativo de
 40 000 triângulos — é uma nave que ocupa um terço da tela no melhor caso.
 
-Materiais PBR, com os nomes de `scripts/world/materials.gd` para que um material
-do projeto possa substituir um material do arquivo: `HullPaint`, `BareMetal`,
-`DarkComposite`, `Glass`, `Radiator`, `ThermalBlanket`, `EngineBell`,
-`SolarCell`.
+Materiais PBR, com os nomes de `app/presentation/scene/ship_materials.hpp` para
+que um material do projeto possa substituir um material do arquivo: `hull_paint`,
+`bare_metal`, `dark_composite`, `glass`, `radiator`, `thermal_blanket`,
+`engine_bell`, `solar_cell`.
 
 ## Como substituir
 
-Em `scripts/flight.gd`, `_build_near_field()`:
+⚠️ **Hoje não há carregador de modelo.** No Godot bastava instanciar o `.glb` no
+lugar de `SpacecraftVisual`; o executável do [ADR-0009](../../adr/0009-render-stack.md)
+não lê glTF, e a nave é a lista de `Part` que `SpacecraftVisual`
+(`app/presentation/scene/spacecraft_visual.cpp`) monta a partir das malhas de
+`scene/mesh.cpp`. Substituí-la exige primeiro um leitor de `.glb` que produza
+`MeshData` e `Part` — trabalho que não existe.
 
-```gdscript
-spacecraft = SpacecraftVisual.new(materials)     # trocar por
-spacecraft = load("res://assets/models/torch.glb").instantiate()
-```
-
-e garantir que o nó `EngineMount` existe, porque é nele que `EnginePlume` se
-pendura, e que `RcsVisual.build()` continua a receber
-`simulation.get_rcs_thrusters()` — ele coloca os jatos pelas posições do core e
-não pelo modelo, o que é o que faz a regra 15 continuar verdadeira seja qual for
-a geometria.
+O contrato que esse leitor teria de manter é o mesmo de antes: a pluma pendura-se
+em `SpacecraftVisual::engine_mount()`, a saída do sino no referencial do corpo, e
+`RcsVisual::build()` continua a receber `FlightSession::rcs_thrusters()` — ele
+coloca os jatos pelas posições do core e não pelo modelo, o que é o que faz a
+regra 15 continuar verdadeira seja qual for a geometria.

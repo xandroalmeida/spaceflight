@@ -27,7 +27,7 @@ import sys
 import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TEXTURES = ROOT / "godot/project/assets/textures"
+TEXTURES = ROOT / "assets/textures"
 
 SKIP = 77
 

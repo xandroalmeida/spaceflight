@@ -2,9 +2,9 @@
 
 O que está na tela, de onde cada número vem, e o que fazer com ele.
 
-A regra que vale para a página inteira: **nada aqui é calculado pelo Godot.**
-Cada valor saiu de uma chamada a `SpaceflightSimulation`, que é a única porta do
-`core/` para a apresentação (ADR-0002, regra 77 do M7). O cockpit escolhe a
+A regra que vale para a página inteira: **nada aqui é calculado pela apresentação.**
+Cada valor saiu de uma chamada a `FlightSession` (`app/session/flight_session.hpp`),
+que é a única porta do `core/` para a apresentação (ADR-0009, regra 77 do M7). O cockpit escolhe a
 unidade e desenha; ele não integra uma órbita, não resolve um Lambert e não
 inventa empuxo.
 
@@ -16,9 +16,12 @@ A textura é aparência; a posição, a escala e a **rotação** vêm de `core/`
 kernels (regra 47). A rotação em particular é conferível, e é conferida contra um
 facto de fora do programa: às 00:00 UTC o ponto subsolar está perto de 180° E,
 porque o meio-dia solar em Greenwich é às 12:00, e perto de 23° SUL, porque é
-janeiro. `godot/project/tests/probe_orientation.gd` responde
-`longitude 180,92 E, latitude −23,01` — e depois fecha a cadeia até a textura:
-o ponto subsolar cai em `uv (0,003; 0,628)`, que é oceano, e o antissolar em
+janeiro. A sonda do M7 respondia `longitude 180,92 E, latitude −23,01`, e hoje
+o teste `the_body_orientation_puts_the_sub_solar_point_where_the_calendar_does`
+(`tests/presentation/test_presentation_flight.cpp`) exige |longitude| a 3° de 180
+e latitude −23 ± 1 — e depois fecha a cadeia até a textura, conferindo que o
+subsolar cai no Pacífico e o antissolar na África. Na medição do M7 o ponto
+subsolar caía em `uv (0,003; 0,628)`, que é oceano, e o antissolar em
 `uv (0,503; 0,372)`, que é o Saara.
 
 Isso não é um detalhe de acabamento. A rotação estava **transposta** até as
@@ -38,7 +41,7 @@ Por isso há duas câmeras, com a mesma orientação e o mesmo campo de visão:
 | `near` | metros | 0,05 m | casco, cockpit, pluma, jatos |
 
 A conversão entre elas é uma multiplicação, em um lugar só
-(`scripts/camera/camera_rig.gd`, `_commit`). As duas não são "uma a seguir a
+(`app/presentation/camera_rig.cpp`, `CameraRig::commit`). As duas não são "uma a seguir a
 outra": são a **mesma câmera expressa em duas unidades**, e é por isso que a
 paralaxe entre a nave e o planeta atrás dela sai certa.
 
@@ -70,7 +73,7 @@ cabeça a repousar 10 graus abaixo da linha do nariz, a banda visível vai de
 +27,5 a −47,5 graus. As lâmpadas estão a −23, os três mostradores a −28, a faixa
 de sistemas a −43 e os botões a −49 — ou seja, os botões pedem um olhar para
 baixo, como num cockpit de verdade. Os números estão em
-`scripts/cockpit/cockpit_interior.gd`.
+`app/presentation/scene/cockpit.cpp`.
 
 ---
 

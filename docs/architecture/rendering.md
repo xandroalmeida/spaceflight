@@ -1,14 +1,14 @@
 # Renderização: do estado à tela
 
 Status: implementado (Milestone 2); ótica relativística no Milestone 5
-Decisão de engine: ADR-0002
+Decisão de pilha de renderização: ADR-0009 (substitui o ADR-0002)
 Ótica: `docs/architecture/relativistic-shaders.md`, `docs/physics/relativistic-rendering.md`
-Última revisão: 2026-09-13
+Última revisão: 2026-09-23
 
 ## 1. O problema, em números
 
 A simulação guarda posições em metros, em `double`, relativas ao baricentro do
-Sistema Solar. O Godot renderiza em `float` de 32 bits, cujo épsilon é
+Sistema Solar. A GPU renderiza em `float` de 32 bits, cujo épsilon é
 1,19·10⁻⁷ — **relativo**. Isso significa:
 
 | Distância | Resolução do `float` |
@@ -19,11 +19,11 @@ Sistema Solar. O Godot renderiza em `float` de 32 bits, cujo épsilon é
 | 1,5·10¹¹ m (1 UA) | **1,8·10⁴ m** |
 | 4,5·10¹² m (Netuno) | **5,4·10⁵ m** |
 
-Se a posição da nave fosse enviada ao Godot como está, a nave em órbita terrestre
+Se a posição da nave fosse enviada à GPU como está, a nave em órbita terrestre
 teria sua posição quantizada em **18 km**. Ela tremeria, atravessaria o planeta,
 e o cockpit mostraria números que pulam. Este é o problema clássico de
-*precisão em mundo grande*, e ele não se resolve "usando `double` no Godot": o
-`Transform3D` do Godot é `float`, e os shaders são `float`.
+*precisão em mundo grande*, e ele não se resolve "usando `double` na GPU": os
+vértices, as matrizes e os shaders (`app/shaders/`) são `float`.
 
 ## 2. A solução, e a regra que a governa
 
@@ -36,7 +36,7 @@ posição absoluta (double, SSB/J2000)
 posição relativa à câmera (double, pequena)
         │  converte
         ▼
-float3 para o Godot
+float3 para o renderizador (app/gfx)
 ```
 
 A subtração acontece em `double`, então a precisão do resultado é a do `double`
@@ -56,8 +56,8 @@ projeção e compara bit a bit.
 
 ## 3. Escala
 
-Distâncias astronômicas não cabem no alcance útil do `float` nem na câmera do
-Godot (que tem `near`/`far` finitos). Além da origem flutuante, há um **fator de
+Distâncias astronômicas não cabem no alcance útil do `float` nem numa câmera
+com `near`/`far` finitos. Além da origem flutuante, há um **fator de
 escala** aplicado depois da subtração:
 
 ```
@@ -96,7 +96,7 @@ explícito (`body_scale_exaggeration`), não um número escondido no renderizado
 
 ## 4. O contrato: `SimulationSnapshot`
 
-§22 do enunciado: o Godot recebe *snapshots*, e a UI nunca consulta o integrador.
+§22 do enunciado: a apresentação (`app/`) recebe *snapshots*, e a UI nunca consulta o integrador.
 
 ```cpp
 struct SimulationSnapshot {
@@ -121,7 +121,7 @@ Propriedades deliberadas:
   entrar, o contrato não muda.
 
 Quem constrói o snapshot é `build_snapshot(...)`, no core, a partir do
-`EphemerisProvider` e do estado propagado. O Godot nunca chama `spkez_c`.
+`EphemerisProvider` e do estado propagado. A apresentação nunca chama `spkez_c`.
 
 ## 5. Tempo de renderização × tempo de simulação
 
@@ -132,7 +132,7 @@ usa o **dense output** (ADR-0006) para pedir o estado no instante exato do frame
 frame a 60 Hz  →  t_frame = t_anterior + 1/60 · warp
                 →  Trajectory::state_at(t_frame)      ← interpolação, sem integrar
                 →  build_snapshot(...)
-                →  RenderTransform → Godot
+                →  RenderTransform → renderizador (SDL_GPU)
 ```
 
 O integrador continua escolhendo os próprios passos. A 144 Hz o interpolante é
@@ -169,19 +169,21 @@ parte que importa.
   inclusive ao passar perto do Sol.
 * **Estrelas são corpos negros.** Não têm linhas espectrais, e o deslocamento de
   uma linha não é deslocamento de temperatura.
-* **Sem extinção interestelar, sem atmosfera, sem eclipses.** Nada disso afeta a
+* **Sem extinção interestelar, sem atmosfera física, sem eclipses.** O limbo da
+  Terra e de Marte é desenho (`app/shaders/body.frag`, regra 31), e o mapa de
+  sombras cobre só a nave — um planeta não faz sombra noutro. Nada disso afeta a
   dinâmica; tudo isso afeta a imagem.
 
 ## 7. Limites da camada
 
 ```
-core  ─────────────────────────────►  RenderTransform  ─────►  Godot
+core  ─────────────────────────────►  RenderTransform  ─────►  app/gfx
  estado autoritativo                  projeção pura            desenha
  double, SSB/J2000, metros            double → float           float
  nunca sabe que há câmera             nunca escreve no estado  nunca integra
 ```
 
 Se algum dia esta seta apontar para trás — o renderizador escrevendo no estado,
-ou o Godot decidindo um passo de integração — a separação que este projeto
+ou a apresentação decidindo um passo de integração — a separação que este projeto
 inteiro sustenta terá sido perdida, e o sintoma será uma física que muda com a
 taxa de quadros.

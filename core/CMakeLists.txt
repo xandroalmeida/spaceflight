@@ -1,6 +1,6 @@
 # spaceflight_core -- the scientific core.
 #
-# Hard rule: this target must never gain a dependency on Godot, on a windowing
+# Hard rule: this target must never gain a dependency on the renderer, on a windowing
 # system, or on anything that cannot run in a headless CI job.  CSPICE is the
 # only external dependency, and only core/ephemeris/*.cpp may include it.
 
@@ -59,7 +59,7 @@ target_include_directories(spaceflight_core PUBLIC "${CMAKE_SOURCE_DIR}")
 
 # The warning set is PRIVATE: it governs how the core compiles ITSELF.  Making it
 # PUBLIC would push -Wold-style-cast and friends onto every consumer, including
-# the GDExtension, where godot-cpp's generated headers cannot survive it -- and a
+# the app, whose third-party headers (SDL, ImGui) cannot survive it -- and a
 # third-party header drowning the log is how real warnings get ignored.
 target_link_libraries(spaceflight_core
     PRIVATE spaceflight::warnings

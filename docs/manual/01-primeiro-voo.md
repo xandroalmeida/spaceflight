@@ -2,25 +2,24 @@
 
 ## Antes de abrir
 
-O simulador precisa de três conjuntos de dados que não estão no repositório
-porque não são nossos: as efemérides da NASA, o catálogo de estrelas e o motor
-gráfico. Cada um tem um script que o busca.
+O simulador precisa de dados que não estão no repositório porque não são
+nossos: o toolkit e as efemérides da NASA e o catálogo de estrelas. Cada um tem
+um script que o busca. O resto — SDL3, Dear ImGui, os compiladores de shader —
+o CMake baixa sozinho no primeiro build.
 
 ```bash
 ./scripts/fetch_cspice.sh          # o toolkit SPICE da NASA
 ./scripts/fetch_kernels.sh         # efemérides DE440, ~120 MB
 ./scripts/fetch_star_catalog.sh    # Yale BSC5, 9110 estrelas
-./scripts/fetch_godot.sh           # o motor, 152 MB
-./scripts/fetch_godot_cpp.sh       # as bindings
 
-cmake -S . -B build-godot -DSPACEFLIGHT_BUILD_GODOT=ON
-cmake --build build-godot --target spaceflight_gdextension -j
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j
 ```
 
 Depois disso, para voar:
 
 ```bash
-./external/godot/Godot.app/Contents/MacOS/Godot --path godot/project
+./build/bin/spaceflight
 ```
 
 Se faltar alguma coisa, o simulador **não** falha em silêncio: sem os kernels ele

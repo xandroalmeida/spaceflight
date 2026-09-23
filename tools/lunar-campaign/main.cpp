@@ -17,8 +17,8 @@
 // campaign must not do.
 //
 // It now goes through navigation::plan_mission -- the same public entry
-// point, with the same request type, that godot/gdextension/src/mission_planner
-// calls when a pilot presses J.  The 365/365 is a statement about the shipped
+// point, with the same request type, that app/session/transfer_bridge calls when
+// a pilot presses J.  The 365/365 is a statement about the shipped
 // planner or it is a statement about nothing.
 //
 // `--map` is the deliberate exception: a departure x time-of-flight grid is a

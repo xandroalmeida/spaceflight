@@ -1,6 +1,6 @@
 # Earth night lights — prompt para o Codex
 
-**Destino:** `godot/project/assets/textures/earth/earth_night.png`
+**Destino:** `assets/textures/earth/earth_night.png`
 
 O shader soma esta imagem como EMISSÃO no lado escuro, desvanecendo através do
 terminador. Ela não substitui o albedo: os dois coexistem.
@@ -75,7 +75,7 @@ OUTPUT FILE
 earth_night.png  (PNG, 8 bits per channel, RGB, sRGB colour space)
 
 DESTINATION PATH
-godot/project/assets/textures/earth/earth_night.png
+assets/textures/earth/earth_night.png
 ```
 
 ---

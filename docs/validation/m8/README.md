@@ -1,7 +1,8 @@
 # M8 — Terra → Marte, fotografado
 
-Produzido por `scripts/m8_screenshots.sh`. Precisa de tela, pela mesma razão que
-o M7: `--headless` tem um rasterizador que não desenha nada.
+Produzido por `scripts/m8_screenshots.sh` (`spaceflight --shots m8`). Como o M7,
+renderiza fora da tela: precisa de um driver de GPU e não de display, e o
+`--headless`, que não rasteriza nada, não serve.
 
 **Demora.** A busca leva um a três minutos e o voo são duzentos e quatro dias sob
 warp. `SPACEFLIGHT_SHOT_STOP=N` para a sequência no passo N, o que faz uma volta
@@ -9,7 +10,7 @@ de ajuste visual custar segundos.
 
 A sequência é **reproduzível**: cada passo é uma condição sobre o estado da
 simulação e não um número de quadros escolhido à mão. O roteiro está em
-`godot/project/scripts/shot_director.gd`, em `_m8_script()`.
+`app/presentation/shot_director.cpp`, em `m8_script()`.
 
 ⚠️ **As imagens são evidência, não oráculo** (regra 60). Elas provam que a cena
 põe alguma coisa na tela nos momentos certos. Se aquilo está bonito é julgamento
@@ -48,5 +49,6 @@ travagem num degrau só disparou a três milhões de quilômetros e ainda assim
 fotografou a captura com a missão já `COMPLETE`, em órbita, a 495 km.
 
 **O modo do mapa é POSTO e não alternado.** Um roteiro que descreve estados não
-pode chamar uma função que descreve transições: `_cycle_map_mode()` devolvia o
-mapa a `LOCAL` num passo cujo assunto era o mapa do sistema.
+pode chamar uma função que descreve transições: a primeira versão alternava o
+modo e devolvia o mapa a `LOCAL` num passo cujo assunto era o mapa do sistema.
+Agora o passo chama `set_map_mode(OrbitMap::Mode::System)`.

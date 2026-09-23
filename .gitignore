@@ -6,10 +6,9 @@ compile_commands.json
 
 # Third-party toolkit: 42 MB download, fetched by scripts/fetch_cspice.sh
 external/cspice/
-# godot-cpp, fetched by scripts/fetch_godot_cpp.sh; version pinned there
-external/godot-cpp/
-# The Godot editor itself, fetched by scripts/fetch_godot.sh (152 MB)
-external/godot/
+# Third-party tarballs for the application (SDL3, ImGui, stb, glslang,
+# SPIRV-Cross), pinned by hash in cmake/third_party.cmake
+external/downloads/
 external/*.tar.Z
 external/*.tar
 external/*.tar.gz
@@ -32,10 +31,6 @@ external/nasa-earth/
 # Star catalogue: data, fetched by scripts/fetch_star_catalog.sh
 catalogs/bsc5.*
 catalogs/SHA256SUMS
-
-# Built GDExtension: produced by the build, not versioned
-godot/project/bin/
-godot/project/.godot/
 
 # Outputs
 *.csv

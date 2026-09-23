@@ -22,7 +22,7 @@ struct OrbitalElements {
     // The four angles carry their unit in the TYPE.
     //
     // The units audit of Milestone 6 found the B-plane angle crossing the core /
-    // CLI / Godot boundary as radians on one side and degrees on the other, and
+    // CLI / presentation boundary as radians on one side and degrees on the other, and
     // recorded these four as the same risk still open
     // (docs/physics/units-audit.md).  A `[rad]` comment is checked by nobody;
     // units::Angle is checked by the compiler and costs nothing at run time.

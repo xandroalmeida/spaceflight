@@ -7,8 +7,8 @@
 // core/navigation/transfer_planner.hpp and got 365 captures.  The game, when a
 // pilot pressed J, ran a completely different program: its own departure scan,
 // its own Lambert screen, its own two-stage corrector, its own cost rule, all of
-// it inside the GDExtension.  The campaign therefore certified software nobody
-// played.
+// it inside the Godot GDExtension of the time.  The campaign therefore certified
+// software nobody played.
 //
 // Milestone 6.2 deleted the second planner.  This test exists so that it stays
 // deleted, and it checks three different things because the failure can arrive
@@ -26,10 +26,11 @@
 //   3. THE SHAPE.  The bridge's source, read, and required to contain no
 //      astrodynamics at all.
 //
-// The bridge compiles into a test binary because its header has no Godot in it,
-// which was a deliberate choice and is exactly what makes any of this checkable:
-// this is the code the engine calls, not a re-implementation of it that happens
-// to agree.
+// The bridge compiles into a test binary because its header has nothing but core
+// types in it, which was a deliberate choice and is exactly what makes any of
+// this checkable: this is the code the cockpit calls
+// (app/session/flight_session.cpp), not a re-implementation of it that happens to
+// agree.
 //
 // ---------------------------------------------------------------------------
 // Why the tolerances are ZERO
@@ -48,7 +49,7 @@
 #include "core/navigation/mission_planner.hpp"
 #include "core/propulsion/engine.hpp"
 #include "core/spacecraft/spacecraft.hpp"
-#include "godot/gdextension/src/mission_planner.hpp"
+#include "app/session/transfer_bridge.hpp"
 #include "tests/support/kernel_fixture.hpp"
 #include "tests/support/source_fixture.hpp"
 #include "tests/support/test_harness.hpp"
@@ -110,14 +111,14 @@ navigation::MissionRequest campaign_request(const spacecraft::Spacecraft& craft,
 // The same mission, expressed the way the SCENE expresses it.  Note what it does
 // not say: no time of flight, no Lambert branch, no aim point, no tolerance, no
 // cost weight.  The cockpit has no vocabulary for any of those.
-spaceflight_godot::SceneTransferRequest scene_request(
+app::SceneTransferRequest scene_request(
     const ephemeris::SpiceEphemerisProvider& provider, const celestial::BodyCatalog& catalog,
     const spacecraft::Spacecraft& craft, time::CoordinateTime epoch,
     navigation::ExecutionModel execution) {
     const auto frame = coordinates::ReferenceFrame::ssb_j2000();
     const auto earth = provider.state(celestial::bodies::earth, epoch, frame);
 
-    spaceflight_godot::SceneTransferRequest scene{};
+    app::SceneTransferRequest scene{};
     scene.provider = &provider;
     scene.orientation = &provider;
     scene.catalog = &catalog;
@@ -168,7 +169,7 @@ TEST(the_bridge_asks_the_campaigns_question) {
 
         const auto expected = campaign_request(craft, execution);
         const auto scene = scene_request(provider, catalog, craft, epoch, execution);
-        const auto actual = spaceflight_godot::request_for(scene);
+        const auto actual = app::request_for(scene);
 
         CHECK_EQ(actual.origin.name(), expected.origin.name());
         CHECK_EQ(actual.destination.name(), expected.destination.name());
@@ -232,7 +233,7 @@ TEST(the_bridge_asks_the_campaigns_question) {
     // nobody reviews twice.
     const auto scene = scene_request(provider, catalog, craft, epoch,
                                      navigation::ExecutionModel::FiniteBurn);
-    const auto state = spaceflight_godot::state_for(scene);
+    const auto state = app::state_for(scene);
 
     // NOT exact, and the reason is worth stating because it is the one place in
     // this file where a tolerance is unavoidable.
@@ -322,7 +323,7 @@ TEST(the_game_and_the_campaign_plan_the_same_transfer) {
     state.integrator = make_integrator();
 
     const auto campaign = navigation::plan_mission(state, request);
-    const auto game = spaceflight_godot::plan_transfer(scene);
+    const auto game = app::plan_transfer(scene);
 
     REQUIRE(campaign.ok());
     REQUIRE(game.ok());
@@ -415,7 +416,7 @@ TEST(the_bridge_plans_for_the_tank_as_it_is) {
     const double lighter = craft.initial_mass() - 0.2;
     scene.initial.mass = lighter;
 
-    const auto plan = spaceflight_godot::plan_transfer(scene);
+    const auto plan = app::plan_transfer(scene);
     REQUIRE(plan.ok());
     // FINITE_BURN spends nothing before the injection, so the mass at ignition is
     // exactly the mass the search was handed.
@@ -424,7 +425,7 @@ TEST(the_bridge_plans_for_the_tank_as_it_is) {
 }
 
 TEST(the_bridge_translates_and_does_not_compute) {
-    const auto source = sft::read_repository_file("godot/gdextension/src/mission_planner.cpp");
+    const auto source = sft::read_repository_file("app/session/transfer_bridge.cpp");
     // A failure, not a skip: a missing file means the thing being checked has
     // moved, and a check that quietly stops checking is worse than no check.
     REQUIRE(!source.empty());

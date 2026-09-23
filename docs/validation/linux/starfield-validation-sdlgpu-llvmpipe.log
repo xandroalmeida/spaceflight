@@ -1,0 +1,99 @@
+starfield validation harness
+SDL_GPU vulkan, offscreen
+viewport (1024, 640)
+
+---- 1. six stars on six axes  (prompt 19)
+  star_right(+x)       1 blobs, centred to 0.71 px, peak 1.000   ok
+  star_left(-x)        1 blobs, centred to 0.71 px, peak 1.000   ok
+  star_forward(+y)     1 blobs, centred to 0.71 px, peak 1.000   ok
+  star_backward(-y)    1 blobs, centred to 0.71 px, peak 1.000   ok
+  star_up(+z)          1 blobs, centred to 0.71 px, peak 1.000   ok
+  star_down(-z)        1 blobs, centred to 0.71 px, peak 1.000   ok
+
+---- 2. sky radius is arithmetically irrelevant  (prompt 20)
+  radius          1 : near 2.6315789e-07 far 1.1, 2 stars rendered
+  radius       1000 : near 0.00026315789 far 1100, 2 stars rendered
+  radius     190000 : near 0.05 far 209000, 2 stars rendered
+  radius       1000 : 2 stars, worst move vs radius 1 is 0.000 px   ok
+  radius     190000 : 2 stars, worst move vs radius 1 is 0.000 px   ok
+
+---- 3. clip space  (prompt 20)
+  stars                 : 8786
+  w <= 0 (behind camera): 4439   -- expected, half the sky is behind
+  closer than near=0.05 : 0
+  farther than far=200000 : 0
+  w in front of camera  : [25.965625, 189931.78]
+  ndc z (reverse)       : [1.325242e-08, 1.925373e-03]
+  every visible star inside [near, far]: yes
+
+---- 3b. depth headroom against the near plane  (prompt 20)
+  near 0.0001  : depth 5.2632e-10,   83 in frame,  83 rendered   complete
+  near 0.001   : depth 5.2632e-09,   83 in frame,  83 rendered   complete
+  near 0.01    : depth 5.2632e-08,   83 in frame,  83 rendered   complete
+  near 0.02    : depth 1.0526e-07,   83 in frame,  83 rendered   complete
+  near 0.05    : depth 2.6316e-07,   83 in frame,  83 rendered   complete
+  near 0.5     : depth 2.6316e-06,   83 in frame,  83 rendered   complete
+  the world depth is D32_FLOAT, reverse-Z: the sky sphere sits at near/190000
+
+---- 4. star count ladder  (prompt 19)
+  6 synthetic            loaded     6,    2 in frame,    2 found,    2 blobs,     18 lit px   ok
+  12 synthetic           loaded    12,    2 in frame,    2 found,    2 blobs,     18 lit px   ok
+  100 synthetic          loaded   100,   20 in frame,   20 found,   20 blobs,    180 lit px   ok
+  BSC5 (8786 stars)      loaded  8786, 1853 in frame, 1851 found, 1575 blobs,  15937 lit px   ok
+
+---- 5. magnitude is monotone  (prompt 21)
+  V = -1.0  expected 0.94065  measured 0.93869  relative 0.0021   49 px  0.54 px off
+  V = +0.0  expected 0.86319  measured 0.86316  relative 0.0000   49 px  0.54 px off
+  V = +1.0  expected 0.71525  measured 0.71569  relative 0.0006   49 px  0.55 px off
+  V = +3.0  expected 0.28475  measured 0.28315  relative 0.0056   49 px  0.55 px off
+  V = +5.0  expected 0.05935  measured 0.05951  relative 0.0027   49 px  0.54 px off
+  V = +6.0  expected 0.02450  measured 0.02416  relative 0.0141   49 px  0.54 px off
+  6 of 6 rendered, strictly decreasing: yes, worst response error 0.0141 (budget 0.030)
+
+---- 6. one effect at a time at beta = 0.9  (prompt 22)
+  baseline    aberration false doppler false beaming false : 1708 blobs, energy       84.6
+  aberration  aberration true  doppler false beaming false : 4579 blobs, energy      245.9
+  doppler     aberration false doppler true  beaming false :  744 blobs, energy       25.2
+  beaming     aberration false doppler false beaming true  : 1900 blobs, energy     5589.9
+  all         aberration true  doppler true  beaming true  : 3978 blobs, energy     4738.0
+
+---- 7. aberration: rendered angle vs core/relativity/optics.hpp  (prompt 23)
+  beta 0     : 5/5 stars, worst GPU-vs-CPU angle 0.19873 deg (budget 0.35938)  star 2  ok
+  beta 0.1   : 5/5 stars, worst GPU-vs-CPU angle 0.19597 deg (budget 0.36092)  star 2  ok
+           rest angle -> apparent: 30->27.25, 55->50.43, 80->74.40, 105->99.38, 130->125.46   (90 deg lands at 84.261)
+  beta 0.5   : 5/5 stars, worst GPU-vs-CPU angle 0.14829 deg (budget 0.33651)  star 2  ok
+           rest angle -> apparent: 30->17.59, 55->33.46, 80->51.70, 105->73.92, 130->102.15   (90 deg lands at 60.000)
+  beta 0.9   : 5/5 stars, worst GPU-vs-CPU angle 0.07235 deg (budget 0.19324)  star 3  ok
+           rest angle -> apparent: 30->7.04, 55->13.62, 80->21.79, 105->33.29, 130->52.39   (90 deg lands at 25.842)
+  beta 0.99  : 5/5 stars, worst GPU-vs-CPU angle 0.01875 deg (budget 0.06527)  star 1  ok
+           rest angle -> apparent: 30->2.18, 55->4.23, 80->6.81, 105->10.56, 130->17.29   (90 deg lands at 8.110)
+
+---- 8. Doppler: rendered chromaticity vs the shifted Planck colour  (prompt 24)
+  3000K ahead    D 1.5970  T'    4791 K  expected r/b 0.426/0.246  measured 0.425/0.246  err 0.0012
+  3000K astern   D 0.8660  T'    2598 K  expected r/b 0.674/0.056  measured 0.674/0.056  err 0.0003
+  5800K ahead    D 1.5970  T'    9262 K  expected r/b 0.275/0.420  measured 0.276/0.419  err 0.0012
+  5800K astern   D 0.8660  T'    5023 K  expected r/b 0.411/0.261  measured 0.411/0.261  err 0.0002
+  10000K ahead   D 1.5970  T'   15970 K  expected r/b 0.222/0.496  measured 0.222/0.496  err 0.0002
+  10000K astern  D 0.8660  T'    8660 K  expected r/b 0.285/0.406  measured 0.285/0.407  err 0.0004
+  6 compared, 0 below the sensor floor, worst chromaticity error 0.0012 (budget 0.0400)   ok
+
+---- 9. beaming: rendered intensity ratios vs the band-limited D^4  (prompt 25)
+      0 deg  D 1.7321  expected response 0.53032  measured 0.53328  0.60 px off
+     45 deg  D 1.5629  expected response 0.45521  measured 0.45641  0.56 px off
+     75 deg  D 1.3041  expected response 0.31510  measured 0.31399  0.70 px off
+     90 deg  D 1.1547  expected response 0.22560  measured 0.22697  0.53 px off
+    105 deg  D 1.0053  expected response 0.13963  measured 0.13843  0.56 px off
+        0 deg / 90 deg : expected   2.3508  measured   2.3496  relative error 0.0005
+       45 deg / 90 deg : expected   2.0178  measured   2.0109  relative error 0.0034
+       75 deg / 90 deg : expected   1.3967  measured   1.3834  relative error 0.0095
+      105 deg / 90 deg : expected   0.6189  measured   0.6099  relative error 0.0146
+  4 ratios, worst ratio error 0.0146 (budget 0.1200), worst absolute response error 0.0086 (budget 0.0300)   ok
+
+---- 10. reference snapshots  (prompt 26)
+  beta 0     :   1175 lit pixels   vs reference: 0.00000 (budget 0.020)  ok
+  beta 0.5   :   3429 lit pixels   vs reference: 0.00001 (budget 0.020)  ok
+  beta 0.9   :  13589 lit pixels   vs reference: 0.00003 (budget 0.020)  ok
+  beta 0.99  :  23179 lit pixels   vs reference: 0.00003 (budget 0.020)  ok
+
+================================================================
+STARFIELD: PASS  -- every stage measured, nothing outside budget

@@ -5,6 +5,12 @@
 Este documento descreve a arquitetura depois da integração, o que foi apagado, e
 a regra que impede a divergência de voltar.
 
+> Nota (2026-09-23, ADR-0009): a apresentação deixou de ser Godot. A ponte que
+> este documento chama de `godot/gdextension/src/mission_planner.cpp` é hoje
+> `app/session/transfer_bridge.cpp` (`sf::app::plan_transfer`), chamada por
+> `FlightSession` em `app/session/flight_session.cpp`. O §1 descreve o estado de
+> antes do Milestone 6.2 e fica como estava; o resto usa os nomes atuais.
+
 ---
 
 ## 1. O problema
@@ -57,13 +63,13 @@ científico tinha corrigido.
 ## 2. A arquitetura depois
 
 ```text
-     UI / Godot (main.gd)
+     UI (app/presentation, Shift+J)
             │  destino, órbita alvo, janela de busca
             ▼
-     SpaceflightSimulation::plan_transfer          simulation_node.cpp
-            │  objetos da cena  →  struct do core
+     FlightSession::plan_transfer                  app/session/flight_session.cpp
+            │  estado da sessão  →  struct do core   (numa thread)
             ▼
-     spaceflight_godot::plan_transfer              mission_planner.cpp (a ponte)
+     sf::app::plan_transfer                        app/session/transfer_bridge.cpp (a ponte)
             │  state_for() + request_for()
             │  SimulationState + LunarTransferRequest
             ▼
@@ -89,7 +95,8 @@ mesmo tipo de resposta.
 
 ### O que foi apagado
 
-`godot/gdextension/src/mission_planner.cpp` passou de **532 linhas** para **81**.
+`godot/gdextension/src/mission_planner.cpp` passou de **532 linhas** para **81**
+(hoje `app/session/transfer_bridge.cpp`, 102 linhas contando comentários).
 O que sobrou é a tradução: converter o estado absoluto da simulação em uma órbita
 de estacionamento relativa ao corpo central, preencher a requisição, chamar o
 core, devolver o resultado. Nenhuma aritmética decide nada sobre trajetória.
@@ -136,7 +143,7 @@ struct MissionPlanResult {
 };
 ```
 
-### O que o Godot não recebe
+### O que a apresentação não recebe
 
 Sem solução de Lambert, sem jacobiano, sem resíduo do corretor, sem lista de
 candidatos, sem vetor de velocidade de partida. Isso é *como* a resposta foi
@@ -145,7 +152,7 @@ planejador teria de reproduzir as entranhas do anterior para não quebrar a cena
 
 `diagnostics` é a única exceção deliberada, e o nome diz para quem ela é: a
 campanha grava quarenta grandezas por época (§3 do 6.1) e o CSV delas é a
-evidência em que o milestone se apoia. O GDExtension não a toca — e
+evidência em que o milestone se apoia. A ponte não a toca — e
 `tests/scientific/test_planner_equivalence.cpp` verifica isso lendo o fonte.
 
 ### `maneuvers` é o que voou, não uma reconstrução
@@ -162,8 +169,10 @@ não existe motor naquele modelo, então não existe manobra para armar um navio
 
 ## 4. A regra arquitetural
 
-> Astrodinâmica pertence ao core. Godot mostra, controla e solicita.
-> Godot não resolve órbitas.
+> Astrodinâmica pertence ao core. A apresentação mostra, controla e solicita.
+> A apresentação não resolve órbitas.
+
+(No brief do Milestone 6.2 a regra dizia "Godot"; vale igual para o executável próprio do ADR-0009.)
 
 O que a cena **pode** fazer:
 
@@ -178,7 +187,7 @@ ponto de mira no plano B, duração de queima, orientação durante a queima.
 
 ### O tempo de voo não é um botão
 
-O `plan_transfer` antigo recebia `time_of_flight_days` da GDScript. O novo não
+O `plan_transfer` antigo recebia `time_of_flight_days` da GDScript (a UI de então). O novo não
 recebe, e a ausência é o ponto.
 
 Com o ponto de partida fixo em onde a órbita estivesse e o tempo de voo fixo em
@@ -211,12 +220,13 @@ mesma pergunta, que é a invariante que de fato tem de valer.
 **A resposta.** O mesmo estado, época, nave e destino, por dois caminhos:
 
 * o caminho da campanha — `navigation::plan_lunar_transfer`;
-* o caminho da cena — `spaceflight_godot::plan_transfer`, **o fonte real da
-  ponte, compilado dentro do binário de teste**.
+* o caminho da cena — `sf::app::plan_transfer`, **o fonte real da ponte
+  (`app/session/transfer_bridge.cpp`), compilado dentro do binário de teste**.
 
-Isso é possível porque o cabeçalho da ponte não tem Godot dentro — uma escolha
-deliberada, e é ela que torna a afirmação verificável: o teste exercita o código
-que a engine chama, não uma cópia dele que por acaso concorda.
+Isso é possível porque a ponte não tem SDL nem GPU dentro — uma escolha
+deliberada (já era assim quando a ponte vivia na GDExtension sem Godot no
+cabeçalho), e é ela que torna a afirmação verificável: o teste exercita o código
+que o jogo chama, não uma cópia dele que por acaso concorda.
 
 As oito grandezas da §6 são comparadas com **tolerância zero**:
 
@@ -236,7 +246,7 @@ direção inercial. Concordar nos números e discordar nas queimas seria a pior 
 duas falhas — o mostrador certo e o navio voando outra coisa.
 
 **A forma.** A segunda verificação lê
-`godot/gdextension/src/mission_planner.cpp` e exige que estes símbolos **não
+`app/session/transfer_bridge.cpp` e exige que estes símbolos **não
 apareçam**:
 
 ```text
@@ -264,8 +274,8 @@ IDLE → PLANNED → WAITING_FOR_DEPARTURE → ORIENTING → INJECTION_BURN
 
 A classificação está no core e não no cockpit porque "a nave está em
 aproximação" é uma afirmação sobre a trajetória: depende de onde está a esfera de
-Hill do destino, de onde estão as queimas, de se a atitude assentou. Física em
-GDScript seria um terceiro lugar onde trajetórias são raciocinadas — depois do
+Hill do destino, de onde estão as queimas, de se a atitude assentou. Física na
+apresentação seria um terceiro lugar onde trajetórias são raciocinadas — depois do
 core e depois do planejador que este milestone apagou.
 
 `MissionExecution` é um **observador**. `update` recebe um estado e devolve uma
@@ -345,7 +355,7 @@ O que seria um defeito é o planejador saber o número e não dizê-lo. Portanto
 
 | § | assunto | onde |
 |---|---|---|
-| 1–3 | uma implementação autoritativa | `core/navigation/mission_planner.hpp`; ponte de 81 linhas |
+| 1–3 | uma implementação autoritativa | `core/navigation/mission_planner.hpp`; ponte de 81 linhas (hoje `app/session/transfer_bridge.cpp`) |
 | 4 | API do planejador | `LunarTransferRequest` / `MissionPlanResult` |
 | 5 | remover duplicação | 469 linhas apagadas do GDExtension |
 | 6 | teste de equivalência | `tests/scientific/test_planner_equivalence.cpp` |
@@ -354,7 +364,7 @@ O que seria um defeito é o planejador saber o número e não dizê-lo. Portanto
 | 12 | `OrbitTarget` | `core/navigation/mission_planner.hpp` |
 | 13 | inclinação reportada | `MissionMetrics`, `MissionAlternative` |
 | 14 | custo extensível | `TransferCostTerms`, pesos novos em zero |
-| 15 | planejamento visível | `MissionMetrics` → `get_plan()` → HUD |
+| 15 | planejamento visível | `MissionMetrics` → `FlightSession::plan()` → painel de missão |
 | 16 | estados da missão | `core/navigation/mission_execution.hpp` |
 | 17 | predito × realizado | `MissionOutcome` |
 | 18 | regressão de missão completa | `tests/scientific/test_full_mission.cpp` |

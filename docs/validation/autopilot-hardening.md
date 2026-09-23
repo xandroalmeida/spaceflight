@@ -371,7 +371,7 @@ consertado, porque consertá-lo multiplica a inércia por ~20, divide a acelera�
 angular disponível por ~20, e portanto **muda todos os números desta página**.
 Seria uma campanha nova apresentada como um ajuste. Ambos os lados —
 `core/navigation/lunar_transfer.cpp` e
-`godot/gdextension/src/simulation_node.cpp` — usam consistentemente
+`godot/gdextension/src/simulation_node.cpp` (hoje `app/session/flight_session.cpp`) — usam consistentemente
 `solid_box(1000, {8,3,3})`, então o simulador é internamente coerente; o que não
 é coerente é com a massa da nave.
 

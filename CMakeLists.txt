@@ -12,7 +12,7 @@ project(spaceflight
 
 option(SPACEFLIGHT_BUILD_TESTS   "Build the test suite"                      ON)
 option(SPACEFLIGHT_BUILD_TOOLS   "Build command line tools (orbit-cli)"      ON)
-option(SPACEFLIGHT_BUILD_GODOT   "Build the Godot GDExtension (Milestone 2)" OFF)
+option(SPACEFLIGHT_BUILD_APP     "Build the application (SDL3 + GPU, ADR-0009)" ON)
 option(SPACEFLIGHT_AUTO_FETCH    "Download CSPICE at configure time if absent" ON)
 option(SPACEFLIGHT_WERROR        "Treat warnings as errors in our own code"  OFF)
 
@@ -60,8 +60,8 @@ if(SPACEFLIGHT_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(SPACEFLIGHT_BUILD_GODOT)
-    add_subdirectory(godot/gdextension)
+if(SPACEFLIGHT_BUILD_APP)
+    add_subdirectory(app)
 endif()
 
 message(STATUS "")
@@ -70,7 +70,7 @@ message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ standard : ${CMAKE_CXX_STANDARD}")
 message(STATUS "  tests        : ${SPACEFLIGHT_BUILD_TESTS}")
 message(STATUS "  tools        : ${SPACEFLIGHT_BUILD_TOOLS}")
-message(STATUS "  godot        : ${SPACEFLIGHT_BUILD_GODOT}")
+message(STATUS "  app          : ${SPACEFLIGHT_BUILD_APP}")
 message(STATUS "  kernels      : ${SPACEFLIGHT_DEFAULT_KERNEL_DIR}")
 message(STATUS "  catalogs     : ${SPACEFLIGHT_DEFAULT_CATALOG_DIR}")
 message(STATUS "")

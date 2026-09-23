@@ -33,7 +33,7 @@ struct RenderVec3 {
 class RenderTransform {
 public:
     // `scale` maps metres to scene units.  1e-7 puts 1 au at 1.5e4 units, which
-    // fits comfortably inside a Godot camera's near/far range.
+    // fits comfortably inside a camera's near/far range.
     explicit RenderTransform(double scale = 1.0e-7);
 
     // Floating origin: where the camera is, in absolute metres.  Move it as the

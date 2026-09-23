@@ -7,12 +7,27 @@ carregadas, nenhuma no framebuffer.
 corrigidos. Os dez estágios do arnês passam sem nenhum resultado fora do
 orçamento.
 
+> **Sobre a pilha.** Os dois defeitos (seções 4 e 6) foram achados e medidos no
+> Godot 4.5, que era a apresentação até o Milestone 8; essas seções ficam como
+> registro histórico, com as medições da época. Desde o
+> [ADR-0009](../adr/0009-render-stack.md) o arnês é C++
+> (`tests/gpu/starfield_validation.cpp`, alvo `spaceflight_starfield_validation`)
+> e mede o renderizador SDL_GPU do jogo (`gfx::Renderer::render_sky()`, a passada
+> do mundo mais o composite): os mesmos dez estágios e o 3b, com as mesmas
+> tolerâncias. Rodou com PASS em todos os estágios num Apple M5 Pro, Metal; os
+> números das seções 5, 7, 8 e 9 reaparecem iguais ou dentro da quantização, e os
+> quatro snapshots do estágio 10 batem com as referências a no máximo 0,00003.
+> O que mudou de critério está na seção 6: o estágio 3b agora exige **todas** as
+> estrelas em **todos** os degraus do plano próximo.
+
 Reprodução:
 
 ```bash
-cmake --build build-godot --target spaceflight_gdextension -j
-./scripts/starfield_validation.sh          # status 0 = tudo passou
+cmake --build build -j
+./scripts/starfield_validation.sh          # status 0 = tudo passou, 77 = sem GPU
 ```
+
+ou, pela suíte, `ctest --test-dir build -R gpu.starfield`.
 
 ---
 
@@ -24,11 +39,12 @@ reprovado e cor preta são cinco defeitos diferentes com uma única aparência: 
 tela preta.
 
 Enquanto o único instrumento fosse olhar para o céu, nenhuma hipótese podia ser
-eliminada. O arnês (`godot/project/starfield_debug.gd`) existe para separá-las:
+eliminada. O arnês (`tests/gpu/starfield_validation.cpp`; no Milestone 6 era
+`starfield_debug.gd`, no projeto Godot) existe para separá-las:
 cada estágio responde a uma pergunta cuja resposta é um **número**, e o oráculo
 nunca é uma impressão humana nem uma captura anterior — é o próprio `core/`,
-alcançado por `SpaceflightSky.get_apparent_direction()`,
-`get_expected_response()` e `get_expected_colour()`.
+alcançado por `app::StarSky::apparent_direction()`,
+`expected_response()` e `expected_colour()` (`app/session/star_sky.hpp`).
 
 ---
 
@@ -37,11 +53,11 @@ alcançado por `SpaceflightSky.get_apparent_direction()`,
 ```text
 catálogo carregado        -> StarCatalog::from_bsc5_file      estágio 4
 dados de estrela na CPU   -> RelativisticSky::update          estágios 7, 8, 9
-buffer da GPU             -> ARRAY_VERTEX + ARRAY_CUSTOM0     estágio 4
-vertex shader             -> POINT_SIZE, star_colour          estágios 1, 5
+buffer da GPU             -> instâncias (uma por estrela)     estágio 4
+vertex shader             -> tamanho do quad, cor da estrela  estágios 1, 5
 clip space                -> w, z, near, far                  estágios 3, 3b
-rasterização              -> point sprite                     estágios 1, 2
-fragment shader           -> ALBEDO, ALPHA                    estágio 1
+rasterização              -> quad instanciado, alinhado à tela estágios 1, 2
+fragment shader           -> cor, alfa                        estágio 1
 framebuffer               -> pixels medidos                   todos
 ```
 
@@ -50,7 +66,7 @@ framebuffer               -> pixels medidos                   todos
 | 1 | `axes` | seis estrelas nos seis eixos caem onde a câmera diz? | ≤ 1,5 px do eixo óptico |
 | 2 | `scale` | o raio do céu muda a resposta? | ≤ 1,5 px entre raios 1, 10³ e 1,9·10⁵ |
 | 3 | `clip` | toda estrela visível está dentro de `[near, far]`? | zero fora |
-| 3b | `depth` | quantas estrelas o teste de profundidade descarta? | zero, no plano próximo de produção |
+| 3b | `depth` | quantas estrelas o teste de profundidade descarta? | zero, em todos os degraus de `near` (10⁻⁴ a 0,5) |
 | 4 | `ladder` | 6 → 12 → 100 → 8 786 chegam ao framebuffer? | sintéticas 100 %, BSC5 ≥ 99,5 % |
 | 5 | `magnitude` | o brilho é monótono em V e igual ao do `core/`? | monótono, erro ≤ 3 % |
 | 6 | `effects` | cada toggle muda alguma coisa? | baseline não vazio, cada toggle difere |
@@ -65,7 +81,9 @@ framebuffer               -> pixels medidos                   todos
 
 A seção 18 do prompt pede um modo que ignore magnitude, temperatura, Doppler,
 beaming e tone mapping, e desenhe tudo com tamanho fixo e branco fixo. Ele
-existe como `uniform bool starfield_debug`.
+existe como `Renderer::starfield.debug` (`app/gfx/renderer.hpp`), que chega aos
+shaders como `debug.x` em `app/shaders/star.vert` (no Godot era
+`uniform bool starfield_debug`).
 
 Mas ele sozinho não bastava, e a razão é que o sprite de uma estrela é moldado
 **duas vezes** por motivos de apresentação: o tamanho acompanha o brilho, e o
@@ -74,12 +92,13 @@ fotometria — a física está em `response` — mas ambos chegam ao pixel que o
 mede, e juntos custavam cerca de 10 % da medição e a faziam depender de onde
 dentro do texel o sprite caiu.
 
-Por isso há um segundo interruptor, `starfield_flat_sprite`, que desliga a
+Por isso há um segundo interruptor, `starfield.flat_sprite` (`debug.y` nos
+shaders; `starfield_flat_sprite` no Godot), que desliga a
 **moldagem** e deixa a fotometria intacta. Ele muda o que uma estrela parece;
 não muda o que uma estrela é. As duas perguntas são diferentes e têm dois
 interruptores.
 
-| | `starfield_debug` | `starfield_flat_sprite` |
+| | `starfield.debug` | `starfield.flat_sprite` |
 |---|---|---|
 | desliga | magnitude, temperatura, Doppler, beaming, curva de resposta | tamanho variável, queda radial do alfa |
 | usado por | estágios 1, 2, 3b, 4, 7 (geometria) | estágios 5, 8, 9 (fotometria) |
@@ -89,7 +108,13 @@ interruptores.
 
 ## 4. Defeito 1 — `unshaded` descarta EMISSION
 
-**O achado.** `star_field.gdshader` declarava `render_mode unshaded` e escrevia
+*Histórico: defeito do Forward+ do Godot 4. O renderizador atual não tem modos de
+material — `app/shaders/star.frag` escreve a cor da estrela direto no alvo da
+passada do mundo —, e o que impede a volta de um defeito desta classe é o arnês,
+que mede pixels acesos em todo estágio.*
+
+**O achado.** `star_field.gdshader` (o shader de estrelas do Godot; hoje
+`app/shaders/star.vert`/`star.frag`) declarava `render_mode unshaded` e escrevia
 
 ```glsl
 ALBEDO = vec3(0.0);
@@ -122,7 +147,7 @@ esculpindo o quadrado do sprite num disco — presentação, não fotometria
 **A correção.** `unshaded` é o modo certo — uma estrela não deve ser sombreada
 pelas luzes da cena — então a cor pertence a `ALBEDO`. Uma linha.
 
-`relativistic_body.gdshader` não é `unshaded` e não tinha o defeito, o que é
+`relativistic_body.gdshader` (hoje `app/shaders/body.vert`/`body.frag`) não é `unshaded` e não tinha o defeito, o que é
 consistente com o relatório do Milestone 6: corpos visíveis, estrelas não.
 
 ---
@@ -171,6 +196,9 @@ sobrepor, por 100 %.
 ---
 
 ## 6. Defeito 2 — a esfera do céu abaixo de um passo de profundidade
+
+*Histórico até a correção: o buffer de 24 bits era o do Godot. O fim da seção diz
+o que o estágio 3b mede no renderizador atual.*
 
 O primeiro defeito escondia o segundo. Com as estrelas finalmente brancas, o
 estágio 4 mostrou **um terço delas ainda ausente** — e dessa vez o sintoma tinha
@@ -225,23 +253,47 @@ nenhum teste com uma esfera pequena jamais teria encontrado isto.
 
 **A correção.** `CAMERA_NEAR` foi de `0,01` para `0,05` em `main.gd` — quatro
 vezes o penhasco medido e ainda apenas 50 km. O raio do céu não muda: ele tem de
-continuar além do Sol, a 1,47e5, para que o Sol ainda o oculte.
+continuar além do Sol, a 1,47e5, para que o Sol ainda o oculte. O valor
+continua o mesmo no renderizador atual: `WORLD_NEAR = 0,05` em
+`app/presentation/camera_rig.hpp`, com `SKY_RADIUS = 1,9e5` em
+`app/presentation/scene/celestial_view.hpp`.
 
 O plano próximo maior é alcançável por uma câmera com zoom, então o limite passou
-a ser escrito onde a distância é decidida, em `_place_camera`:
+a ser escrito onde a distância é decidida — na época em `_place_camera`, hoje em
+`CameraRig` (`app/presentation/camera_rig.cpp`):
 
-```gdscript
-var distance := maxf(natural * orbit_zoom, CAMERA_NEAR * NEAR_PLANE_CLEARANCE)
+```cpp
+const double distance = std::max(focus_natural_ * orbit_zoom, WORLD_NEAR * 3.0);
 ```
 
 na distância e não num fator de zoom, porque o fator teria de ser reajustado toda
 vez que qualquer um dos dois números se mexesse.
 
-**O estágio 3b fica na suíte depois da correção**, com a linha `near = 0,01`
-mantida como controle e marcada como falha esperada. A regra é explícita: se a
-linha de controle parar de perder estrelas, a medição parou de medir. A falha é
+**O estágio 3b fica na suíte depois da correção.** No Godot, a linha
+`near = 0,01` era mantida como controle e marcada como falha esperada: se ela
+parasse de perder estrelas, a medição tinha parado de medir. A falha é
 invisível — não avisa, não dá erro, e o que deixa na tela é um campo de estrelas
 perfeitamente plausível com dois terços das estrelas nele.
+
+**No renderizador atual o penhasco não existe mais.** A profundidade do mundo é
+`D32_FLOAT` com Z reverso ([ADR-0009](../adr/0009-render-stack.md)): os passos de
+um float são relativos, e `near/1,9e5 = 5e-8` é um float normal com 23 bits de
+mantissa abaixo dele. Então a linha de controle deixou de ser uma falha esperada
+e virou um degrau que tem de passar como os outros, e a escada desce duas décadas
+além para mostrar que a folga é real. O critério agora é **nenhuma** estrela
+perdida em **nenhum** degrau. Medido (SDL_GPU, Metal, as mesmas 400 estrelas):
+
+| `near` | profundidade | no quadro | renderizadas |
+|---:|---:|---:|---:|
+| 1e-4 | 5,263e-10 | 83 | 83 |
+| 1e-3 | 5,263e-9 | 83 | 83 |
+| 0,01 | 5,263e-8 | 83 | 83 |
+| 0,02 | 1,053e-7 | 83 | 83 |
+| 0,05 | 2,632e-7 | 83 | 83 |
+| 0,5 | 2,632e-6 | 83 | 83 |
+
+Se um dia o buffer de profundidade voltar a ser de ponto fixo, ou o Z reverso se
+perder, é o degrau de baixo que cai primeiro.
 
 ---
 
@@ -255,13 +307,16 @@ w <= 0 (atrás da câmera)    4439      metade do céu, como esperado
 mais perto que near         0
 mais longe que far          0
 w à frente da câmera        [25,96 , 189931,78]
-z em NDC                    [0,996148 , 1,000000]
+z em NDC                    [0,996148 , 1,000000]    (Godot)
+z em NDC, Z reverso         [1,325e-8 , 1,925e-3]    (SDL_GPU)
 ```
 
-Nenhuma estrela fora de `[near, far]`. A faixa estreita de `z` em NDC é a mesma
-observação da seção 6 vista de outro lado: toda a esfera vive nos últimos 0,4 %
-da faixa de profundidade, e é por isso que a margem tinha de ser contada em
-passos de quantização e não em unidades de cena.
+Nenhuma estrela fora de `[near, far]`, nas duas pilhas. A faixa estreita de `z`
+em NDC é a mesma observação da seção 6 vista de outro lado: toda a esfera vive
+numa fatia minúscula da faixa de profundidade — no Godot, nos últimos 0,4 %, e é
+por isso que a margem tinha de ser contada em passos de quantização e não em
+unidades de cena. Com Z reverso a fatia fica junto do zero, onde um float tem
+mais resolução, e não junto do um.
 
 O estágio 2 fecha a pergunta da seção 20 do prompt — o starfield é direcional e
 o raio não deve importar. Com `near` e `far` mantidos em proporção ao raio:
@@ -311,7 +366,7 @@ imagem: está **ausente** dela, e nenhuma medição a recupera. Isso não é uma
 tolerância, é o sensor — e uma estrela desviada para o vermelho que se apaga em
 β = 0,5 é a física funcionando.
 
-O arnês separa os dois casos em `_why_missing()`: `atrás da câmera`, `fora do
+O arnês separa os dois casos em `why_missing()` (os rótulos do log são em inglês): `atrás da câmera`, `fora do
 quadro`, `abaixo do piso do sensor` (esperado) e `NÃO ENCONTRADA — acima do piso
 e ausente` (defeito). Sem essa separação, o estágio 8 reprovava três estrelas por
 um motivo que era o resultado correto.
@@ -320,13 +375,19 @@ um motivo que era o resultado correto.
 
 ## 11. O que este documento não afirma
 
-- O arnês precisa de **tela**. O modo `--headless` do Godot tem um rasterizador
-  falso que não desenha nada, e uma suíte que passasse nele não provaria coisa
-  nenhuma — que é como o starfield atravessou um milestone inteiro quebrado.
-- As medições são de **uma** GPU: Apple M5 Pro, Metal 3.2, Godot 4.5.stable. Os
-  números de passo de profundidade dependem de o buffer ter 24 bits; num
-  dispositivo com profundidade float de 32 bits o penhasco da seção 6 fica em
-  outro lugar. O estágio 3b mede onde ele está em vez de assumir.
+- O arnês precisa de uma **GPU de verdade**, não de uma tela. No Godot ele
+  precisava de janela, porque o `--headless` do Godot tem um rasterizador falso
+  que não desenha nada — uma suíte que passasse nele não provaria coisa
+  nenhuma, e é como o starfield atravessou um milestone inteiro quebrado. Hoje
+  ele desenha fora da tela, numa textura, e lê os pixels de volta; sem
+  dispositivo GPU sai com 77 e o CTest conta como *skipped*, nunca como passou.
+- As medições são de **uma** GPU: Apple M5 Pro, Metal — com Godot 4.5.stable
+  (Metal 3.2) no Milestone 6.1 e com SDL_GPU depois do ADR-0009. O Vulkan no
+  Linux ainda não rodou este arnês na pilha nova
+  ([compatibilidade gráfica](graphics-compatibility.md)). Os números de passo de
+  profundidade da seção 6 dependiam de o buffer do Godot ter 24 bits; com
+  `D32_FLOAT` o penhasco sai da faixa medida, e o estágio 3b mede isso em vez de
+  assumir.
 - Os quatro snapshots do estágio 10 são o único oráculo deste arnês que é uma
   imagem anterior em vez do `core/`. Eles são semeados deliberadamente
   (`./scripts/starfield_validation.sh --seed-references`), nunca como efeito
@@ -337,8 +398,9 @@ um motivo que era o resultado correto.
 
 ## Evidências
 
-- Arnês: `godot/project/starfield_debug.gd`, cena `starfield_debug.tscn`
-- Script: `scripts/starfield_validation.sh`
+- Arnês: `tests/gpu/starfield_validation.cpp` (no Milestone 6.1:
+  `starfield_debug.gd` e `starfield_debug.tscn`, no projeto Godot, removido)
+- Script: `scripts/starfield_validation.sh` (→ `scripts/gpu_validation.sh starfield`)
 - Log e capturas: `docs/validation/starfield/`
 - Referências de regressão: `docs/validation/starfield-reference/`
 - Cena de produção: `docs/validation/scene/` e

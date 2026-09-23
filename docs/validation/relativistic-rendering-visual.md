@@ -11,6 +11,16 @@ dois defeitos que o impediam estão em
 [starfield-debug.md](starfield-debug.md). Nada nesta página foi medido antes de
 os dez estágios daquele arnês passarem.
 
+> **Sobre a pilha.** As medições abaixo foram feitas no Milestone 6.1, com o
+> Godot 4.5. Desde o [ADR-0009](../adr/0009-render-stack.md) o arnês roda em C++
+> sobre o renderizador SDL_GPU do jogo (`tests/gpu/starfield_validation.cpp`), e
+> a execução em Metal (Apple M5 Pro) reproduz **os mesmos números** das seções 3,
+> 4, 5 e 6, casa por casa (`docs/validation/starfield/starfield-validation.log`).
+> As contagens de blobs e de pixels acesos das seções 1 e 8 mudam na quarta
+> casa — 1 709 contra 1 714 blobs no baseline, 1 175 contra 1 176 pixels em
+> β = 0 —, que é rasterização, não física; os snapshots da seção 8 batem com as
+> referências a no máximo 0,00003.
+
 ---
 
 ## 1. Ordem
@@ -43,15 +53,16 @@ Uma captura comparada com uma impressão humana não é um teste. O que este
 documento compara, em todos os casos, é:
 
 ```text
-o que o core/ diz    <-  SpaceflightSky.get_apparent_direction()
-                         SpaceflightSky.get_expected_response()
-                         SpaceflightSky.get_expected_colour()
+o que o core/ diz    <-  app::StarSky::apparent_direction()
+                         app::StarSky::expected_response()
+                         app::StarSky::expected_colour()
 
 o que a GPU fez      <-  centroide ponderado do blob, desprojetado pela
-                         MESMA matriz de câmera que o motor usou
+                         MESMA matriz de câmera que o renderizador usou
 ```
 
-Os acessores do lado esquerdo são novos e existem só para isto: eles chamam
+Os acessores do lado esquerdo (`app/session/star_sky.hpp`; no Godot eram
+`SpaceflightSky.get_*`) existem só para isto: eles chamam
 `RelativisticSky::response_of()` e `PlanckTable::sample_rgb()`, em precisão
 dupla, de modo que uma discordância com a GPU é uma discordância sobre o
 **pipeline** e não sobre `float`.
@@ -186,14 +197,16 @@ Monotonicidade sozinha não bastaria: uma escada pode ser monótona e estar erra
 ## 7. A cena de produção
 
 O arnês prova que o **shader** está certo e não pode provar que a **cena** está:
-o plano próximo, a colocação da câmera e as malhas dos corpos são de `main.gd`, e
+o plano próximo, a colocação da câmera e as malhas dos corpos são da
+apresentação (`app/presentation/camera_rig.cpp`, `app/presentation/scene/`), e
 a única evidência honesta sobre elas é uma fotografia delas.
 
 ```bash
-SPACEFLIGHT_CAPTURE="$PWD/docs/validation/scene" \
-  external/godot/Godot.app/Contents/MacOS/Godot --path godot/project
+./build/bin/spaceflight --capture docs/validation/scene --resolution 1024x640
+# ou: ctest --test-dir build -R gpu.relativistic_visual
 ```
 
+A captura é fora da tela, com passo fixo de 1/60 s (`FlightApp::capture_step`).
 A cena percorre o ladder de β com os **mesmos** setters que o teclado usa, e
 fotografa duas direções por degrau. As duas direções são duas afirmações
 diferentes: para a frente mostra o cone e o desvio para o azul; para trás mostra
@@ -209,6 +222,9 @@ distinguiria um céu de ré escuro de um quebrado.
 | `scene_forward_beta_0p99.png` | 0,99 | frente | cone de 8,1°, D = 14,107 |
 | `scene_aft_beta_0p9.png` | 0,90 | ré | céu apagado: 5,3e-7 do fluxo de repouso |
 | `scene_aft_beta_0p99.png` | 0,99 | ré | céu apagado: 2,2e-23 do fluxo de repouso |
+
+As imagens versionadas foram regeneradas com o renderizador SDL_GPU; os valores
+de cone e de `D` da tabela são da ótica do `core/` e não dependem dele.
 
 A imagem `scene_forward_beta_0p9.png` é a que o Milestone 6 não conseguiu
 produzir: em β = 0,9, olhando para dentro do cone, o céu empilhou-se num disco
@@ -239,7 +255,8 @@ A métrica não é igualdade pixel a pixel — uma GPU diferente, um driver dife
 e uma regra de rasterização diferente movem um sprite de ponto por uma fração de
 pixel. É a diferença absoluta média de uma redução para 64 × 64, insensível
 exatamente a isso e sensível a uma estrela que se moveu, sumiu ou mudou de cor.
-Orçamento 0,02; a execução de verificação mediu 0,00000 nos quatro.
+Orçamento 0,02; a execução de verificação mediu 0,00000 nos quatro (Godot), e o
+renderizador SDL_GPU, contra as mesmas referências, mede de 0,00000 a 0,00003.
 
 Semear as referências é um ato deliberado
 (`./scripts/starfield_validation.sh --seed-references`), nunca um efeito
@@ -253,7 +270,9 @@ colateral: uma suíte que adota o que acabou de renderizar não pode falhar.
   silhueta continua pendente, como no Milestone 6.
 - **Objetos extensos** (`docs/physics/extended-object-aberration.md`): falta a
   comparação CPU/shader e a medição de custo perto da silhueta.
-- Tudo foi medido numa GPU só: Apple M5 Pro, Metal 3.2, Godot 4.5.stable.
+- Tudo foi medido numa GPU só: Apple M5 Pro, Metal — com Godot 4.5.stable e,
+  depois, com o SDL_GPU. Vulkan e Direct3D 12 não rodaram a pilha atual
+  ([compatibilidade gráfica](graphics-compatibility.md)).
 
 Nenhum desses bloqueia a validação óptica relativística, que era o bloqueador
 P0 e está fechado.
@@ -262,7 +281,9 @@ P0 e está fechado.
 
 ## Evidências
 
-- Arnês: `godot/project/starfield_debug.gd` — estágios 6 a 10
+- Arnês: `tests/gpu/starfield_validation.cpp` — estágios 6 a 10
+- Captura da cena: `spaceflight --capture` (`FlightApp::capture_step`,
+  `app/presentation/flight_app.cpp`)
 - Log: `docs/validation/starfield/starfield-validation.log`
 - Capturas do arnês: `docs/validation/starfield/`
 - Capturas da cena: `docs/validation/scene/`

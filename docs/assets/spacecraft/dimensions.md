@@ -1,6 +1,6 @@
 # Dimensões da nave (regra 6)
 
-A nave desenhada por `godot/project/scripts/world/spacecraft_visual.gd`, em
+A nave desenhada por `app/presentation/scene/spacecraft_visual.cpp`, em
 metros, no referencial do corpo (`+x` é o nariz, `+z` é "cima").
 
 | | valor |

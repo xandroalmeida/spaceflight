@@ -29,7 +29,7 @@ Cada fronteira converte explicitamente, em um único lugar:
 
 | Fronteira | Convenção de lá | Conversão |
 |---|---|---|
-| Godot `Quaternion` | escalar **último** `(x,y,z,w)`, Hamilton, corpo→mundo | reordenar componentes |
+| renderizador (`app/`, ADR-0009) | base de eixos do corpo, corpo→inercial | `FlightSession::spacecraft_axes()` gira os três eixos com `q.rotate()`; nenhum quaternion atravessa para a GPU (até o Milestone 8: `Quaternion` do Godot, escalar **último**, reordenar componentes) |
 | SPICE `q` (`m2q_c`) | escalar primeiro, mas **inercial→corpo** | conjugar |
 | Euler (pitch/yaw/roll) | só para mostrador | derivado, nunca armazenado |
 
@@ -40,8 +40,8 @@ Cada fronteira converte explicitamente, em um único lugar:
 | Ângulos de Euler como estado | *gimbal lock*: a 90° de pitch dois eixos colapsam e a derivada explode. Proibido por §19, e com razão |
 | Matriz de rotação (DCM) como estado | 9 números para 3 graus de liberdade; a ortogonalidade deriva e reortogonalizar é mais caro e menos estável que renormalizar um quaternion |
 | Rodrigues modificado (MRP) | compacto (3 números) e sem gimbal lock, mas tem singularidade em 360° e exige troca de "sombra" no meio da integração |
-| Convenção JPL (`ij = −k`) | usada em parte da literatura aeroespacial; escolher Hamilton por ser a do Godot e a da maioria das bibliotecas de matemática 3D reduz o número de conversões a fazer |
-| Escalar último `(x,y,z,w)` | é a do Godot, mas a literatura de dinâmica escreve `(w,x,y,z)`; como a física vem antes do renderizador, a física ganha e a conversão fica na ponte |
+| Convenção JPL (`ij = −k`) | usada em parte da literatura aeroespacial; escolher Hamilton por ser a do Godot (o renderizador quando esta decisão foi tomada) e a da maioria das bibliotecas de matemática 3D reduz o número de conversões a fazer |
+| Escalar último `(x,y,z,w)` | era a do Godot, mas a literatura de dinâmica escreve `(w,x,y,z)`; como a física vem antes do renderizador, a física ganha e a conversão fica na ponte |
 
 ## Consequências
 

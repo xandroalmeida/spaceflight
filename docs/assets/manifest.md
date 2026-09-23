@@ -4,7 +4,7 @@ O que a imagem precisa, o que já existe, e o que tem de ser gerado fora daqui.
 
 Esta tabela é a fonte da verdade sobre o estado visual. Um asset só sai de
 `PLACEHOLDER` quando o arquivo definitivo está no caminho de destino **e** o
-Godot o importa; até lá o simulador roda com o substituto e não bloqueia
+executável o carrega; até lá o simulador roda com o substituto e não bloqueia
 (regra 81).
 
 ## Como um asset entra
@@ -31,7 +31,7 @@ passar em tudo, ele foi regerado e o manifesto é que está desatualizado.
 
 | estado | significado |
 |---|---|
-| `PROCEDURAL` | gerado em código (shader, `FastNoiseLite`, mesh). **Não** pedir externamente — regra 46. |
+| `PROCEDURAL` | gerado em código (shader, ruído do `stb_perlin`, mesh). **Não** pedir externamente — regra 46. |
 | `PLACEHOLDER` | há um substituto funcional no jogo; o definitivo ainda não existe |
 | `GENERATE` | precisa ser gerado fora do Claude Code; o prompt está pronto no arquivo indicado |
 | `READY` | o arquivo definitivo existe no repositório, ainda não integrado |
@@ -49,16 +49,16 @@ passar em tudo, ele foi regerado e o manifesto é que está desatualizado.
 | `earth_albedo` | `MEASURED` | **NASA Blue Marble NG**, dezembro/2004, 21600×10800 → 8192×4096. Polos colapsados; o subsolar cai no Pacífico e o antissolar no Saara | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_albedo.jpg` |
 | `earth_clouds` | `MEASURED` | **composto MODIS da NASA**, 8192×4096 → 4096×2048, cinza de 1 canal; histograma p25 14 / p50 60 / p75 128, remapeado 41..153 no shader | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_clouds.jpg` |
 | `earth_night_lights` | `MEASURED` | **VIIRS Black Marble 2016**, 3600×1800 → 4096×2048; registra com o albedo em longitude (0,0°, terra 0,997 contra 0,911 a −8,4°) | [como](#as-texturas-da-terra-sao-medidas) | `assets/textures/earth/earth_night.jpg` |
-| `earth_normal` | `OPTIONAL` | sem relevo | — | `godot/project/assets/textures/earth/earth_normal.png` |
+| `earth_normal` | `OPTIONAL` | sem relevo | — | `assets/textures/earth/earth_normal.png` |
 | `moon_albedo` | `INTEGRATED` | mares no centro (face visível), terras altas nas bordas, raios de Tycho | [prompt](planets/moon-albedo-codex-prompt.md) | `assets/textures/moon/moon_albedo.png` |
 | `moon_normal` | `INTEGRATED` | **derivado**, não pintado: LOLA LDEM_16 → `scripts/make_moon_normal.py`. Mares em (127–131, 126–128, 254–255), \|n\| = 1,000 | [como](#o-normal-map-nao-e-uma-imagem) | `assets/textures/moon/moon_normal.png` |
 | `mars_albedo` | `PROCEDURAL` | substituto: ocre, regiões escuras no sul, calotas de borda irregular. Acerta a cor e o contraste; **não é um mapa de Marte** | [prompt](planets/mars-albedo-codex-prompt.md) | `assets/textures/mars/mars_albedo.png` |
 | `mars_normal` | `REFUSED` | topografia do MOLA existe e é medida: se o relevo for desejado ele é **calculado**, como o da Lua. Não pedir a um gerador de imagens (regra 25) | [porquê](planets/mars-albedo-codex-prompt.md#o-que-nao-pedir-a-um-gerador-de-imagens) | — |
-| Mercúrio, Vênus, Júpiter, Saturno, Urano, Netuno, Plutão | `PROCEDURAL` | cor média do disco, em `CelestialView._colour_for`. Reconhecíveis a distância e nada mais (regra 69) | — | — |
+| Mercúrio, Vênus, Júpiter, Saturno, Urano, Netuno, Plutão | `PROCEDURAL` | cor média do disco, em `CelestialView::colour_for` (`app/presentation/scene/celestial_view.cpp`). Reconhecíveis a distância e nada mais (regra 69) | — | — |
 | anéis de Saturno | `BACKLOG` | desejáveis para reconhecimento (regra 70); nada no M8 depende deles | — | — |
-| limbo atmosférico da Terra | `PROCEDURAL` | shader de rim scattering | — | `shaders/planet_surface.gdshader` |
-| limbo atmosférico de Marte | `PROCEDURAL` | mesmo shader, 0,12 de intensidade e ocre: a atmosfera marciana tem 0,6 % da pressão terrestre e o limbo dela é um fio. É DESENHO -- não há aerocaptura (regra 56) | — | `shaders/relativistic_body.gdshader` |
-| disco e brilho do Sol | `PROCEDURAL` | shader auto-luminoso + `DirectionalLight3D` | — | `shaders/relativistic_body.gdshader` |
+| limbo atmosférico da Terra | `PROCEDURAL` | termo de rim scattering no shader | — | `app/shaders/body.frag` |
+| limbo atmosférico de Marte | `PROCEDURAL` | mesmo shader, 0,12 de intensidade e ocre: a atmosfera marciana tem 0,6 % da pressão terrestre e o limbo dela é um fio. É DESENHO -- não há aerocaptura (regra 56) | — | `app/shaders/body.frag` |
+| disco e brilho do Sol | `PROCEDURAL` | corpo auto-luminoso (corpo negro, sem iluminação) + a luz direcional do Sol nos shaders de superfície | — | `app/shaders/body.frag`, `app/shaders/lit.frag` |
 
 ### O normal map não é uma imagem
 
@@ -106,40 +106,41 @@ Duas coisas que a conta tem de acertar e que quase sempre se erram:
   limitar o `cos`: é alargar o estêncil em longitude na mesma proporção, de modo
   que ele cubra sempre a mesma quantidade de chão.
 
-O `.import` leva `compress/normal_map=1` (RGTC), que guarda R e G e reconstrói o
-azul — só correto porque |n| = 1 exatamente, que é o que o validador mede.
+O shader lê os três canais como dado, sem decodificação sRGB, e normaliza; o
+|n| = 1 que o validador mede é o que garante que a direção chega certa
+([import-settings.md](import-settings.md#normal-maps)).
 
 
 ## Nave
 
 | asset | estado | placeholder | prompt | destino |
 |---|---|---|---|---|
-| geometria da nave | `PROCEDURAL` | `SpacecraftVisual`, primitivas + `SurfaceTool` | — | `scripts/world/spacecraft_visual.gd` |
-| `hull_panels` | `INTEGRATED` | 1024×1024, ladrilhável nos dois sentidos; em `HullPaint`, `uv1_scale` (5, 4) | [prompt](spacecraft/hull-panels-codex-prompt.md) | `assets/textures/spacecraft/hull_panels.png` |
-| `radiator_surface` | `OPTIONAL` | material `Radiator` (emissivo fraco, anisotrópico) | — | `godot/project/assets/textures/spacecraft/radiator.png` |
-| `thermal_blanket` | `OPTIONAL` | material `ThermalBlanket` (dourado, rugoso) | — | `godot/project/assets/textures/spacecraft/blanket.png` |
-| pluma do motor | `PROCEDURAL` | mesh cônico + shader aditivo, intensidade = empuxo real | — | `scripts/world/engine_plume.gd` |
-| jatos de RCS | `PROCEDURAL` | quads aditivos por thruster, acesos pelo atuador | — | `scripts/world/rcs_visual.gd` |
+| geometria da nave | `PROCEDURAL` | `SpacecraftVisual`, primitivas geradas em `scene/mesh.cpp` | — | `app/presentation/scene/spacecraft_visual.cpp` |
+| `hull_panels` | `INTEGRATED` | 1024×1024, ladrilhável nos dois sentidos; no material `hull_paint`, `uv_scale` (5, 4) | [prompt](spacecraft/hull-panels-codex-prompt.md) | `assets/textures/spacecraft/hull_panels.png` |
+| `radiator_surface` | `OPTIONAL` | material `radiator` (emissivo fraco) | — | `assets/textures/spacecraft/radiator.png` |
+| `thermal_blanket` | `OPTIONAL` | material `thermal_blanket` (dourado, rugoso) | — | `assets/textures/spacecraft/blanket.png` |
+| pluma do motor | `PROCEDURAL` | mesh cônico + material aditivo, intensidade = empuxo real | — | `EnginePlume`, `app/presentation/scene/spacecraft_visual.cpp` |
+| jatos de RCS | `PROCEDURAL` | quads aditivos por thruster, acesos pelo atuador | — | `RcsVisual`, `app/presentation/scene/spacecraft_visual.cpp` |
 | modelo 3D artístico | `OPTIONAL` | procedural basta para o M7 | [spacecraft/3d-model-brief.md](spacecraft/3d-model-brief.md) | — |
 
 ## Cockpit
 
 | asset | estado | placeholder | prompt | destino |
 |---|---|---|---|---|
-| geometria do cockpit | `PROCEDURAL` | `CockpitInterior`, primitivas | — | `scripts/cockpit/cockpit_interior.gd` |
-| `panel_surface` | `INTEGRATED` | **sem um único caractere** (regra 44); em `CockpitPanel`, `uv1_scale` (2, 2) | [prompt](cockpit/panel-surface-codex-prompt.md) | `assets/textures/cockpit/panel_surface.png` |
+| geometria do cockpit | `PROCEDURAL` | `CockpitInterior`, primitivas | — | `app/presentation/scene/cockpit.cpp` |
+| `panel_surface` | `INTEGRATED` | **sem um único caractere** (regra 44); no material `cockpit_panel`, `uv_scale` (2, 2) | [prompt](cockpit/panel-surface-codex-prompt.md) | `assets/textures/cockpit/panel_surface.png` |
 | `warning_patterns` | `PROCEDURAL` | listras desenhadas no shader | — | — |
-| vidro das janelas | `PROCEDURAL` | material `Glass` | — | — |
-| vidro dos displays | `PROCEDURAL` | material `DisplayGlass` + `SubViewport` | — | — |
+| vidro das janelas | `PROCEDURAL` | material `glass` | — | — |
+| vidro dos displays | `PROCEDURAL` | material `display_glass` + a imagem do instrumento desenhada numa textura pelo ImGui | — | — |
 
 ## UI
 
 | asset | estado | placeholder | prompt | destino |
 |---|---|---|---|---|
-| retículas, marcadores de vetor | `PROCEDURAL` | `_draw()` no PFD | — | — |
-| moldura dos displays | `PROCEDURAL` | `StyleBoxFlat` + cantos desenhados | — | — |
-| linhas de órbita | `PROCEDURAL` | pontos vindos do core, `_draw()` | — | — |
-| fonte | `INTEGRATED` | `SystemFont` monoespaçada (Menlo/SF Mono/Consolas/DejaVu) | — | — |
+| retículas, marcadores de vetor | `PROCEDURAL` | `Instrument::draw_marker` no PFD | — | — |
+| moldura dos displays | `PROCEDURAL` | `Instrument::draw_frame` | — | — |
+| linhas de órbita | `PROCEDURAL` | pontos vindos do core, ligados por linhas | — | — |
+| fonte | `INTEGRATED` | DejaVu Sans Mono, licença livre (`DejaVu-LICENSE.txt` ao lado) | — | `assets/fonts/DejaVuSansMono.ttf` |
 
 ## Áudio
 
@@ -149,13 +150,13 @@ envelopes, não gravações. Substituíveis um a um sem tocar em código.
 
 | asset | estado | destino |
 |---|---|---|
-| `engine_loop` | `PLACEHOLDER` | `godot/project/assets/audio/engine_loop.wav` |
-| `rcs_thump` | `PLACEHOLDER` | `godot/project/assets/audio/rcs_thump.wav` |
-| `switch_click` | `PLACEHOLDER` | `godot/project/assets/audio/switch_click.wav` |
-| `button_press` | `PLACEHOLDER` | `godot/project/assets/audio/button_press.wav` |
-| `warning_tone` | `PLACEHOLDER` | `godot/project/assets/audio/warning_tone.wav` |
-| `computer_notify` | `PLACEHOLDER` | `godot/project/assets/audio/computer_notify.wav` |
-| `ventilation` | `PLACEHOLDER` | `godot/project/assets/audio/ventilation.wav` |
+| `engine_loop` | `PLACEHOLDER` | `assets/audio/engine_loop.wav` |
+| `rcs_thump` | `PLACEHOLDER` | `assets/audio/rcs_thump.wav` |
+| `switch_click` | `PLACEHOLDER` | `assets/audio/switch_click.wav` |
+| `button_press` | `PLACEHOLDER` | `assets/audio/button_press.wav` |
+| `warning_tone` | `PLACEHOLDER` | `assets/audio/warning_tone.wav` |
+| `computer_notify` | `PLACEHOLDER` | `assets/audio/computer_notify.wav` |
+| `ventilation` | `PLACEHOLDER` | `assets/audio/ventilation.wav` |
 
 ## Detalhe por categoria
 
@@ -165,16 +166,16 @@ envelopes, não gravações. Substituíveis um a um sem tocar em código.
 * [UI](ui/README.md) — **nada** gerado externamente, e porquê
 * [áudio](audio/README.md) — sete placeholders sintetizados, e como substituí-los
 
-## Import settings do Godot
+## Como as texturas são carregadas
 
-Os `.import` **são versionados**, e não é detalhe de conveniência: é neles que
-vive `compress/normal_map=1` do `moon_normal`. Sem ele o Godot importa o normal
-map como uma textura de cor, com decodificação sRGB, e o relevo sai errado numa
-direção que ninguém procura — a imagem continua a parecer um normal map. Um
-clone que gerasse os `.import` do zero herdaria os defaults, não estes valores.
+Não há mais `.import`: o executável lê o arquivo que está em `assets/`, e o que
+antes eram ajustes de importação — sRGB ou dado, mipmaps — é decidido no código
+que pede a textura. O que importa é que o normal map e a máscara de nuvens são
+**dados** e sobem sem decodificação sRGB; se subissem como cor, o relevo e a
+cobertura sairiam errados numa direção que ninguém procura, e a imagem
+continuaria a parecer certa.
 
-O que cada um tem de dizer, e porquê, está em
-[import-settings.md](import-settings.md).
+O detalhe, e porquê, está em [import-settings.md](import-settings.md).
 
 ## Regra que este arquivo existe para respeitar
 
@@ -207,7 +208,8 @@ começa em 1 de janeiro -- em vez de um mês que não é nenhum.
 gerador entregou pixels exatos e um PNG guarda exatamente esses. Estas foram
 MEDIDAS e a NASA já as distribui em JPEG -- recodificá-las em PNG são cinco vezes
 os bytes (31 MB contra 6,7 MB só no albedo) para preservar informação que nunca
-existiu, e o que chega à GPU é BPTC ou S3TC, que perde muito mais.
+existiu. (No Godot o que chegava à GPU era BPTC ou S3TC, que perdia muito mais;
+hoje sobe descomprimido, e o JPEG é a única perda.)
 
 `scripts/validate_textures.py` decodifica PNG e só PNG, porque não tem
 dependências e essa é a regra dele. Então a conferência das três corre dentro de

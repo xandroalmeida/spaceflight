@@ -1,9 +1,9 @@
 # Earth albedo — prompt para o Codex
 
 Copie o bloco abaixo inteiro. O que ele produz substitui a textura procedural de
-`godot/project/scripts/world/planet_textures.gd`.
+`app/presentation/scene/planet_textures.cpp`.
 
-**Destino:** `godot/project/assets/textures/earth/earth_albedo.png`
+**Destino:** `assets/textures/earth/earth_albedo.png`
 
 ⚠️ A imagem é APARÊNCIA e nunca física (regra 47). Posição, rotação, escala e
 órbita da Terra continuam a vir de `core/` e de `kernels/spice`. A textura só
@@ -91,7 +91,7 @@ OUTPUT FILE
 earth_albedo.png  (PNG, 8 bits per channel, RGB, sRGB colour space)
 
 DESTINATION PATH
-godot/project/assets/textures/earth/earth_albedo.png
+assets/textures/earth/earth_albedo.png
 ```
 
 ---

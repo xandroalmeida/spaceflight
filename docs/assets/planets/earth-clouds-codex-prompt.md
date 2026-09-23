@@ -1,6 +1,6 @@
 # Earth clouds — prompt para o Codex
 
-**Destino:** `godot/project/assets/textures/earth/earth_clouds.png`
+**Destino:** `assets/textures/earth/earth_clouds.png`
 
 O shader lê o canal **vermelho** como cobertura, de 0 (céu limpo) a 1 (nuvem
 opaca), e compõe a nuvem por cima do albedo. Uma imagem em tons de cinza serve.
@@ -75,7 +75,7 @@ OUTPUT FILE
 earth_clouds.png  (PNG, 8 bits per channel, greyscale or RGB)
 
 DESTINATION PATH
-godot/project/assets/textures/earth/earth_clouds.png
+assets/textures/earth/earth_clouds.png
 ```
 
 ---

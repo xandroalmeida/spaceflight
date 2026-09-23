@@ -5,6 +5,15 @@ Build: worktree do Milestone 6 sobre `2468a33`; linhas marcadas **6.1** foram
 remedidas sobre `7181a30`  
 Ambiente: macOS, Godot 4.5, Metal 3.2, Forward+, execução em janela
 
+> **Pilha atual.** A lista foi preenchida com a apresentação em Godot. Desde o
+> [ADR-0009](../adr/0009-render-stack.md) o jogo é o executável `spaceflight`
+> (SDL3 + SDL_GPU). As quatro linhas numéricas marcadas **6.1** (starfield,
+> aberração, Doppler, beaming) são remedidas a cada `gpu.starfield`, e o arnês
+> C++ passou nelas em Metal com os mesmos números
+> ([starfield-debug.md](starfield-debug.md)). As linhas que dependem de um
+> operador (`PARCIAL`, `PENDENTE`) **não** foram refeitas na pilha nova e valem
+> como registro do Godot até alguém percorrê-las de novo.
+
 As cinco linhas que o Milestone 6 deixou em `FAIL` ou `BLOCKED` foram fechadas no
 Milestone 6.1 e trazem a evidência nova; as `PENDENTE`/`PARCIAL` continuam onde
 estavam, porque dependem de um operador humano e não foram exercitadas nesta
@@ -37,13 +46,14 @@ esconder um defeito visual.
 Comando base:
 
 ```bash
-cmake -S . -B build-godot -DSPACEFLIGHT_BUILD_GODOT=ON
-cmake --build build-godot --target spaceflight_gdextension -j
-external/godot/Godot.app/Contents/MacOS/Godot --path godot/project --editor
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j
+./build/bin/spaceflight --gpu-debug          # janela; --gpu-debug liga a validação do driver
 ```
 
 O ensaio termina somente após revisar também o log por `NaN`, `Inf`, falha de
-shader, recurso ausente e exceção da GDExtension.
+shader ou de pipeline, recurso ausente (`cannot read ...`) e mensagens da
+validação do driver. (No Godot, o último item era "exceção da GDExtension".)
 
 ## Execução de 2026-09-13
 

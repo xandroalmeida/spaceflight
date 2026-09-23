@@ -1,7 +1,7 @@
 // orbit-cli -- command line access to the scientific core.
 //
 // This is the verification surface of Milestone 0: everything the simulation
-// knows can be interrogated here, without Godot, without a window, and in a form
+// knows can be interrogated here, without the app, without a window, and in a form
 // that can be diffed against JPL Horizons or an analytic result.
 
 #include "core/celestial/body_catalog.hpp"

@@ -165,7 +165,7 @@ do integrador — não trocar de referencial.
 
 ## 8. Regras de uso (invariantes verificáveis)
 
-1. Nenhum estado físico é armazenado em coordenadas de cena do Godot.
+1. Nenhum estado físico é armazenado em coordenadas de cena do renderizador.
 2. Nenhuma função do core aceita "posição" sem que o frame seja conhecido pelo
    contexto ou explicitado no tipo.
 3. Nenhuma transformação de frame é feita por multiplicação de matriz escrita à

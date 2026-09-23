@@ -3,25 +3,29 @@
 Status: implementado (Milestone 5, metade visual)
 Física: `docs/physics/relativistic-rendering.md`
 Precisão e origem flutuante: `docs/architecture/rendering.md`
-Última revisão: 2026-09-13
+Última revisão: 2026-09-23 (apresentação própria, ADR-0009)
 
 ## 1. A pergunta desta camada
 
 `relativistic-rendering.md` diz **o que** calcular. Este documento diz **onde**, e a
 resposta tem uma restrição que não é de desempenho:
 
-> ADR-0002: `core/` não conhece Godot. §39: a física vem antes do efeito visual.
+> ADR-0009 (antes ADR-0002): `core/` não conhece a apresentação. §39: a física vem antes do efeito visual.
 
-Um shader que calcula aberração é o renderizador fazendo física. Um `.gd` que
-calcula qualquer coisa é pior ainda: é física numa linguagem sem teste, sem tipo e
-sem revisão científica. A regra desta camada é portanto:
+Um shader que calcula aberração é o renderizador fazendo física. Uma conta de
+física espalhada pela apresentação é pior ainda: é física fora do lugar onde ela
+tem teste e revisão científica. A regra desta camada é portanto:
 
 ```
-core/          calcula a física
-gdextension/   converte e entrega
-.gdshader      converte número em pixel
-.gd            liga um ao outro e não calcula nada
+core/                calcula a física
+app/session/         converte e entrega (StarSky, FlightSession)
+app/shaders/         convertem número em pixel (star.*, body.*)
+app/presentation/    liga um ao outro e não calcula nada
+app/gfx/             sobe os buffers e emite os draws
 ```
+
+Até o Milestone 8 esses papéis eram de `gdextension/`, `.gdshader` e
+`.gd`; o que mudou foi o endereço, não a divisão.
 
 ## 2. A divisão, corpo a corpo
 
@@ -33,7 +37,7 @@ gdextension/   converte e entrega
 | cor a partir de `T' = D·T` | **GPU**, tabela gerada pela CPU | uma consulta a textura por vértice |
 | brilho a partir de `D⁴` e de `η(DT)/η(T)` | **GPU** | idem, e é aqui que a curva de resposta age |
 | tempo retardado **por vértice** | **GPU**, vertex shader | é por vértice por definição; não cabe em outro lugar |
-| tudo o mais | GDScript | posicionar nós, montar arrays, ler teclas |
+| tudo o mais | `app/presentation`, `app/gfx` | posicionar corpos, subir buffers, ler teclas |
 
 O critério não é "o que é rápido no GPU". É: **uma conta só migra para o shader
 quando ela é por-fragmento ou por-vértice por natureza.** Aberração de estrela não
@@ -45,31 +49,40 @@ quando ela é por-fragmento ou por-vértice por natureza.** Aberração de estre
 ### 3.1 Por quadro, por estrela
 
 ```
-ARRAY_VERTEX   vec3   direção aberrada × raio do céu   ← optics.hpp, na CPU
-ARRAY_CUSTOM0  vec4   (T_repouso, F_V_repouso, D, 0)   ← optics.hpp, na CPU
+position  vec3   direção aberrada × raio do céu                 ← optics.hpp, na CPU
+custom    vec4   (T_repouso, F_V_repouso, D_cor, D_brilho)       ← optics.hpp, na CPU
 ```
 
-`CUSTOM0` usa `ARRAY_CUSTOM_RGBA_FLOAT`; sem esse formato o canal viraria 8 bits
-por componente e uma temperatura de 25 944 K não caberia em `[0,1]`.
+É o `StarVertex` de `app/session/star_sky.hpp`: sete `float` por estrela, subidos
+como **dados de instância** de um quad alinhado à tela (`app/shaders/star.vert`;
+`Renderer::upload_stars` em `app/gfx/renderer.cpp`). Os quatro canais de `custom`
+são `float` de 32 bits; num formato normalizado de 8 bits uma temperatura de
+25 944 K não caberia em `[0,1]`. `D_cor` e `D_brilho` são o mesmo `D`, separados
+para que `Alt+D` e `Alt+B` desliguem Doppler e *beaming* de forma independente
+(`core/render/relativistic_sky.hpp`).
 
 O shader recebe `D` **pronto**. Ele não sabe o que é `β`, nem `γ`, nem qual é a
 fórmula da aberração. Ele sabe uma coisa só, que é o significado de `D`:
 
 ```glsl
-float T_shifted = T_rest * D;                 // seção 4: T' = D T
-vec4  rest      = planck_lut(T_rest);
-vec4  shifted   = planck_lut(T_shifted);
-float band      = exp(shifted.a - rest.a);    // seção 10.1: eta(DT)/eta(T)
-float L         = F_rest * pow(D, 4.0) * band;
-float R         = L / (L + half_saturation);  // seção 10.4: estrutural, não clamp
+float T_shifted = T_rest * D;                          // seção 4: T' = D T
+vec4  rest      = planck_sample(planck_table, T_rest, ref);
+vec4  shifted   = planck_sample(planck_table, T_shifted, ref);
+float band      = exp(shifted.a - rest.a);             // seção 10.1: eta(DT)/eta(T)
+float L         = F_rest * pow(D_beam, 4.0) * band;
+float R         = L / (L + half_saturation);           // seção 10.4: estrutural, não clamp
 ```
+
+(resumo de `app/shaders/star.vert`; `planck_sample` está em `app/shaders/common.glsl`
+e interpola a tabela com `texelFetch`, sem depender do filtro do sampler.)
 
 Cinco linhas, e nenhuma delas é uma reimplementação: `T' = D·T` e `I' = D⁴I` são o
 que `D` **significa**, não como ele foi obtido.
 
 ### 3.2 Uma vez, na carga: a LUT de Planck
 
-`core/render/blackbody.hpp` gera uma textura `1024 × 1` `RGBAF`:
+`core/render/blackbody.hpp` gera uma tabela `1024 × 1` que o renderizador sobe como
+textura `R32G32B32A32_FLOAT` (`Renderer::create_shared`):
 
 ```
 índice   u = T/(T + 6000 K)        bijeção [0,∞) → [0,1), seção 9.2
@@ -89,13 +102,14 @@ se move.
 ### 3.3 Por quadro, por corpo
 
 ```
-uniform float u_doppler          D do centro do corpo        ← optics.hpp
-uniform vec3  u_relative_velocity   v do corpo relativa ao observador, em unidades
-                                    de cena por segundo
-uniform float u_light_speed         c nas MESMAS unidades
+BodyVertex.optics.x      D do centro do corpo (e .y, o D do brilho)   ← optics.hpp
+BodyVertex.velocity_c.xyz   v do corpo relativa ao observador, em unidades
+                            de cena por segundo
+BodyVertex.velocity_c.w     c nas MESMAS unidades
 ```
 
-E a posição do nó já é a **aparente**: retardada por `light_time.hpp` e aberrada
+(bloco uniforme de `app/shaders/body.vert`.) E a posição do corpo — a translação
+da matriz `model` — já é a **aparente**: retardada por `light_time.hpp` e aberrada
 por `optics.hpp`, na CPU.
 
 ## 4. Unidades dentro do shader
@@ -119,7 +133,8 @@ sumiria — o modo de falha silencioso deste sistema.
 
 ## 5. A única fórmula que existe duas vezes
 
-`core/render/terrell.hpp` e o vertex shader contêm ambos a quadrática de §11.1.
+`core/render/terrell.hpp` e o vertex shader (`app/shaders/body.vert`,
+`retarded_light_time`) contêm ambos a quadrática de §11.1.
 Não há como evitar: ela é por-vértice, e o core não emite GLSL.
 
 O que se faz a respeito, em vez de fingir que não é duplicação:
@@ -131,21 +146,22 @@ O que se faz a respeito, em vez de fingir que não é duplicação:
 * a forma fechada tem seis linhas e nenhum ramo, que é o tamanho em que uma
   transcrição é verificável a olho.
 
-## 6. O que o GDScript faz
+## 6. O que a apresentação faz
 
-Tudo o que `main.gd` toca nesta camada:
+Tudo o que `app/presentation` e `app/gfx` tocam nesta camada:
 
-```gdscript
-var sky := simulation.get_sky_arrays()       # o core já calculou
-mesh.add_surface_from_arrays(Mesh.PRIMITIVE_POINTS, sky["arrays"], [], {},
-                             sky["format"])
-material.set_shader_parameter("half_saturation", exposure)
+```cpp
+const auto stars = sky.vertices();               // StarSky: o core já calculou
+// copia para um buffer de vértices e desenha 6 vértices × N instâncias
+body.half_saturation = exposure;                 // celestial_view.cpp
 ```
 
 Nenhuma multiplicação por `γ`, nenhum `sqrt(1 - b*b)`, nenhum `pow(D, 4)`. Se
-alguma dessas aparecer num `.gd`, a separação foi perdida — e o sintoma será uma
-imagem que não bate com `optics.hpp` sem que nenhum teste reclame, porque não há
-teste de GDScript e não vai haver.
+alguma dessas aparecer em `app/presentation` ou `app/gfx`, a separação foi
+perdida — e o sintoma será uma imagem que não bate com `optics.hpp`. A diferença
+em relação ao GDScript é que agora essa camada é C++ tipado e tem testes
+(`presentation.*`), mas eles verificam instrumentos e roteiros, não a ótica: a
+ótica continua verificada no core.
 
 ## 7. Custo, medido
 
@@ -154,8 +170,8 @@ Por quadro, com o catálogo inteiro:
 | Etapa | Custo |
 |---|---|
 | aberração + Doppler de 8 786 estrelas | ~0,5 Mflop |
-| empacotar em `PackedVector3Array` + `PackedFloat32Array` | 8 786 × 28 B = 246 kB |
-| reconstruir a superfície do `ArrayMesh` | 1 chamada |
+| empacotar em `StarVertex` e subir por um transfer buffer | 8 786 × 28 B = 246 kB |
+| desenhar o céu | 1 draw instanciado |
 
 A alternativa — mandar `β` como uniforme e aberrar no vertex shader — economiza os
 246 kB e custa a física migrar para o GLSL. A troca foi decidida a favor da
@@ -165,7 +181,7 @@ na mão e não por impressão.
 ## 8. A seta, de novo
 
 ```
-core ──────────────────► gdextension ──────► .gdshader ──────► pixels
+core ──────────────────► app/session ──────► app/shaders ─────► pixels
  optics.hpp              converte e          T'=DT, D⁴,        desenha
  light_time.hpp          empacota            resposta
  blackbody.hpp           double → float      nunca sabe o que é β
@@ -173,6 +189,6 @@ core ──────────────────► gdextension ─�
 ```
 
 Igual à de `rendering.md` §7, com um segmento a mais na ponta. E a mesma condição
-de falha: se a seta apontar para trás — um shader decidindo uma direção, um `.gd`
-calculando um fator de Lorentz — o que se perde não é desempenho, é a propriedade
+de falha: se a seta apontar para trás — um shader decidindo uma direção, a
+apresentação calculando um fator de Lorentz — o que se perde não é desempenho, é a propriedade
 de que a imagem é uma consequência verificável do estado.

@@ -14,13 +14,13 @@ de imprimir uma coisa errada.
 
 | no Markdown | resolve para | falha se |
 |---|---|---|
-| `{{key:camera_cycle}}` | a tecla, vinda do Input Map | a ação não existe mais |
+| `{{key:camera_cycle}}` | a tecla, vinda da tabela de teclas | a ação não existe mais |
 | `{{include:../gameplay/controls.md}}` | o arquivo, inline | o arquivo não existe |
 | `![](../validation/m7/x.png)` | a figura | a figura não existe |
 | `{{anchor:external-spacecraft:engine}}` | onde a peça caiu NA imagem | a captura não tem essa âncora |
 
 As teclas vêm de `docs/gameplay/controls.json`, que sai de
-`godot/project/scripts/input_actions.gd` por `scripts/dump_controls.sh`. **Nenhuma
+`app/presentation/input_actions.cpp` por `scripts/dump_controls.sh`. **Nenhuma
 tecla é escrita à mão neste diretório.** Renomeie uma ação e o manual reprova;
 mude uma tecla e o manual acompanha sozinho.
 
@@ -69,9 +69,9 @@ enquadramento para o número "motor principal" passar a apontar para um radiador
 sem que nada falhe. Quando a chamada marca uma peça da NAVE, dê a posição dela em
 metros no referencial do corpo e deixe a câmera projetar:
 
-```gdscript
-# godot/project/scripts/shot_director.gd
-"anchors": _ship_anchors,        # nome -> Vector3, em metros
+```cpp
+// app/presentation/shot_director.cpp
+[this] { return ship_anchors(); }   // nome -> Vec3, em metros
 ```
 
 A captura grava um `<figura>.anchors.json` ao lado do PNG e o capítulo escreve:

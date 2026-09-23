@@ -1,6 +1,6 @@
 # Moon albedo — prompt para o Codex
 
-**Destino:** `godot/project/assets/textures/moon/moon_albedo.png`
+**Destino:** `assets/textures/moon/moon_albedo.png`
 
 ---
 
@@ -83,7 +83,7 @@ OUTPUT FILE
 moon_albedo.png  (PNG, 8 bits per channel, RGB, sRGB colour space)
 
 DESTINATION PATH
-godot/project/assets/textures/moon/moon_albedo.png
+assets/textures/moon/moon_albedo.png
 ```
 
 ---

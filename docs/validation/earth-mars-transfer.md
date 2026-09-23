@@ -159,7 +159,7 @@ desse teste fica desligado.
 E na cena, sem tela:
 
 ```bash
-SPACEFLIGHT_HEADLESS_MISSION=1 ./scripts/run_godot_headless.sh 2500
+SPACEFLIGHT_HEADLESS_MISSION=1 ./build/bin/spaceflight --headless --frames 2500
 ```
 
 ```text
@@ -176,11 +176,12 @@ O corpo de referência trocou sozinho de `Earth` para `Moon` na chegada.
 ## 6. Como reproduzir a corrida completa, sem tela
 
 ```bash
-SPACEFLIGHT_HEADLESS_DESTINATION=Mars ./scripts/run_godot_headless.sh 15000
+./build/bin/spaceflight --headless --destination Mars --frames 15000
 ```
 
-Quatro minutos e quinze de relógio de parede: cerca de um minuto de busca e o
-resto de voo a 1e7×. A corrida planeja, arma, voa, captura e imprime a tabela
+Quatro minutos e quinze de relógio de parede (medidos quando a cena era o Godot;
+não recronometrado no executável novo): cerca de um minuto de busca e o resto de
+voo a 1e7×. A corrida planeja, arma, voa, captura e imprime a tabela
 previsto-contra-voado da seção 4.
 
 O orçamento de quadros importa. A busca leva tempo de **parede**, o voo leva

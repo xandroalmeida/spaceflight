@@ -22,7 +22,7 @@ O centro é retardado pela efeméride. Para cada vértice, no shader:
 4. o offset aparente resultante deforma a mesh.
 
 O resultado está em `core/render/terrell.hpp` e
-`godot/project/shaders/relativistic_body.gdshader`. Os testes com esfera medem
+`app/shaders/body.vert` (o antigo `relativistic_body.gdshader`). Os testes com esfera medem
 silhueta e rotação de Terrell; a literatura moderna confirma que a aparência é
 determinada pelos eventos de emissão de cada ponto, não por uma contração rígida
 [visualização experimental do efeito Terrell–Penrose](https://arxiv.org/abs/2409.04296).

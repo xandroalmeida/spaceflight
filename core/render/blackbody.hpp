@@ -17,7 +17,7 @@
 //      LOGARITHM everywhere -- and the Planck integral itself is evaluated in
 //      log space, or a 12 K black body underflows to 0/0.
 //
-// No Godot, no engine, no file formats: this produces numbers, and something
+// No renderer, no engine, no file formats: this produces numbers, and something
 // else turns them into a texture (docs/architecture/relativistic-shaders.md).
 
 #include <cstddef>

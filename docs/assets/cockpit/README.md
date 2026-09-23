@@ -1,6 +1,6 @@
 # Cockpit
 
-A geometria é **procedural** (regra 49): `scripts/cockpit/cockpit_interior.gd`
+A geometria é **procedural** (regra 49): `app/presentation/scene/cockpit.cpp`
 constrói a casca, as janelas, o painel, os consoles, o assento e a luz a partir
 de primitivas. Não há modelo artístico e o M7 não espera por um.
 
@@ -25,26 +25,28 @@ se o instrumento existe para quem está sentado.
 
 ## Três armadilhas de geometria que custaram uma captura cada
 
-**1. Tampas de cilindro.** `CylinderMesh` nasce COM tampas, e a tampa traseira da
-carenagem do cockpit é um disco de 1,05 m de raio a 85 cm do olho: 51 graus de
-meio-ângulo contra os 34 da câmera. A primeira captura deste milestone foi um
-retângulo castanho uniforme — o piloto estava a olhar para o interior de uma
-tampa. As seções em que a câmera pode estar dentro são construídas sem tampas.
+**1. Tampas de cilindro.** O `CylinderMesh` do Godot nascia COM tampas, e a
+tampa traseira da carenagem do cockpit é um disco de 1,05 m de raio a 85 cm do
+olho: 51 graus de meio-ângulo contra os 34 da câmera. A primeira captura deste
+milestone foi um retângulo castanho uniforme — o piloto estava a olhar para o
+interior de uma tampa. As seções em que a câmera pode estar dentro são
+construídas sem tampas; hoje o `cylinder` de `scene/mesh.cpp` pede cada tampa
+explicitamente (`cap_top`, `cap_bottom`).
 
 **2. O bisel por cima da tela.** O aro é uma CAIXA de 12 mm centrada em z = 0, ou
 seja de −6 a +6 mm; a tela estava a +4 mm, dentro dela. O painel aparecia como
 uma tábua escura com quatro lâmpadas e nenhum mostrador.
 
-**3. O teto curto.** O viewport próximo é transparente onde não há geometria — é
+**3. O teto curto.** A passada próxima é transparente onde não há geometria — é
 isso que faz a janela funcionar, e faz um buraco no teto funcionar igualmente
 bem. O teto acabava meio metro antes da janela e havia um triângulo de espaço no
 canto superior da tela.
 
 ## Materiais
 
-Todos em `scripts/world/materials.gd`, compartilhados (regra 50):
-`CockpitPanel` (grafite fosco, rugosidade 0,92), `DarkComposite`, `BareMetal`,
-`Glass`, `DisplayGlass`.
+Todos em `app/presentation/scene/ship_materials.cpp`, compartilhados (regra 50):
+`cockpit_panel` (grafite fosco, rugosidade 0,92), `dark_composite`, `bare_metal`,
+`glass`, `display_glass`.
 
 A rugosidade do painel é 0,92 e não 0,72 por medição: a 0,72 a luz do painel
 deixava um halo especular redondo e brilhante no meio da superfície, que lê como
