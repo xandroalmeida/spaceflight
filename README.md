@@ -256,6 +256,11 @@ cmake --build build-godot --target spaceflight_gdextension -j
 ./scripts/run_godot_headless.sh     # roda a cena sem tela e imprime o HUD
 ```
 
+O binário do editor é resolvido por `scripts/godot_bin.sh`: `$GODOT_BIN`, depois
+`external/godot/Godot.app` (macOS) ou `external/godot/Godot_v*_linux.*` (Linux),
+depois `godot` no `PATH`. No Linux, abrir o jogo é
+`./external/godot/Godot_v4.5-stable_linux.x86_64 --path godot/project`.
+
 A extensão é **desligada por padrão**, e isso é o teste: o core e as 32 suítes
 compilam e passam sem nenhum engine instalado.
 

@@ -41,7 +41,8 @@ PROJECT="${ROOT}/godot/project"
 
 SKIP=77
 
-GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
+source "${ROOT}/scripts/godot_bin.sh"
+GODOT="$(godot_bin "${ROOT}")"
 if [[ ! -x "${GODOT}" ]]; then
     GODOT="$(command -v godot || true)"
 fi

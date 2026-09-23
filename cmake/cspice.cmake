@@ -51,7 +51,8 @@ if(NOT MSVC)
         -Wno-error=implicit-int
         -Wno-error=int-conversion
         -Wno-error=incompatible-pointer-types
-        -Wno-error=deprecated-non-prototype)
+        # Clang-only: GCC rejects an unknown -Wno-error=<option> as a hard error.
+        $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-error=deprecated-non-prototype>)
 endif()
 
 message(STATUS "CSPICE: ${_cspice_count} sources from ${CSPICE_ROOT}")

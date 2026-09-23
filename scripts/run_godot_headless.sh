@@ -23,7 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${ROOT}/godot/project"
 FRAMES="${1:-1200}"
 
-GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
+source "${ROOT}/scripts/godot_bin.sh"
+GODOT="$(godot_bin "${ROOT}")"
 if [[ ! -x "${GODOT}" ]]; then
     GODOT="$(command -v godot || true)"
 fi

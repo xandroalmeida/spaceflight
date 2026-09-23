@@ -13,7 +13,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${ROOT}/godot/project"
 SKIP=77
 
-GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
+source "${ROOT}/scripts/godot_bin.sh"
+GODOT="$(godot_bin "${ROOT}")"
 [[ -x "${GODOT}" ]] || GODOT="$(command -v godot || true)"
 if [[ -z "${GODOT}" || ! -x "${GODOT}" ]]; then
     echo "SKIP: Godot not found (run scripts/fetch_godot.sh, or set GODOT_BIN)" >&2

@@ -16,16 +16,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${ROOT}/external"
 VERSION="${GODOT_VERSION:-4.5-stable}"
 
-if [[ -x "${DEST}/godot/Godot.app/Contents/MacOS/Godot" ]] || [[ -x "${DEST}/godot/godot" ]]; then
-    echo "Godot already present in ${DEST}/godot"
+# Only external/: a `godot` on PATH may be any version, and this pins one.
+source "${ROOT}/scripts/godot_bin.sh"
+EXISTING="$(GODOT_BIN= PATH= godot_bin "${ROOT}")"
+if [[ -n "${EXISTING}" ]]; then
+    echo "Godot already present: ${EXISTING}"
     exit 0
 fi
 
 uname_s="$(uname -s)"
-case "${uname_s}" in
-    Darwin) ASSET="Godot_v${VERSION}_macos.universal.zip" ;;
-    Linux)  ASSET="Godot_v${VERSION}_linux.x86_64.zip" ;;
-    *) echo "Unsupported platform ${uname_s}; download from https://godotengine.org/download" >&2; exit 1 ;;
+uname_m="$(uname -m)"
+case "${uname_s}/${uname_m}" in
+    Darwin/*)       ASSET="Godot_v${VERSION}_macos.universal.zip" ;;
+    Linux/x86_64)   ASSET="Godot_v${VERSION}_linux.x86_64.zip" ;;
+    Linux/aarch64)  ASSET="Godot_v${VERSION}_linux.arm64.zip" ;;
+    *) echo "Unsupported platform ${uname_s}/${uname_m}; download from https://godotengine.org/download" >&2; exit 1 ;;
 esac
 
 URL="https://github.com/godotengine/godot/releases/download/${VERSION}/${ASSET}"

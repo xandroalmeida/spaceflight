@@ -44,9 +44,25 @@ constexpr double kSunPosition[3] = {-458863967.4035421, -767304103.76017404, -31
 // resolution of the orbit itself, i.e. the same trajectory reached differently.
 // Previous values: {6777999.9974174500, -7.3168182373046875, -5.5634918212890625},
 // speed 7668.6356085481330, 325 steps.
+//
+// The LEO pin is per platform; the body positions above are not.  SPICE reads
+// the same kernel bits everywhere, but the propagator's arithmetic does not:
+// Apple clang on arm64 contracts a*b+c into FMA by default and links Apple's
+// libm, while GCC on x86_64 (baseline ISA, no FMA) rounds every product.  The
+// last-bit differences move the error estimate across an accept/reject boundary
+// twice -- 317 -> 319 steps -- and land 0.97 mm and 6e-11 (relative) in speed
+// from the arm64 values: the same trajectory reached differently, which is
+// exactly what this file must not blur into its tolerance.
+#if defined(__x86_64__) && defined(__linux__) && defined(__GNUC__) && !defined(__clang__)
+// Pinned 2026-09-22, GCC 13.3, RelWithDebInfo, x86_64 Linux (glibc).
+constexpr double kLeoFinalRelative[3] = {6777999.9984054565, -7.3178253173828125, -5.5649642944335938};
+constexpr double kLeoFinalSpeed = 7668.635608084026;
+constexpr std::size_t kLeoAcceptedSteps = 319;
+#else
 constexpr double kLeoFinalRelative[3] = {6777999.9987983704, -7.3172760009765625, -5.5642623901367188};
 constexpr double kLeoFinalSpeed = 7668.6356076058055;
 constexpr std::size_t kLeoAcceptedSteps = 317;
+#endif
 
 std::string full_precision(const Vec3& v) {
     std::ostringstream os;

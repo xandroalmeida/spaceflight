@@ -26,7 +26,8 @@ OUT="${1:-${ROOT}/docs/validation/m8}"
 RESOLUTION="${2:-1920x1080}"
 SKIP=77
 
-GODOT="${GODOT_BIN:-${ROOT}/external/godot/Godot.app/Contents/MacOS/Godot}"
+source "${ROOT}/scripts/godot_bin.sh"
+GODOT="$(godot_bin "${ROOT}")"
 if [[ ! -x "${GODOT}" ]]; then
     GODOT="$(command -v godot || true)"
 fi

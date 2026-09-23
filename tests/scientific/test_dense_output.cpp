@@ -15,6 +15,7 @@
 #include "tests/support/test_harness.hpp"
 
 #include <cmath>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
