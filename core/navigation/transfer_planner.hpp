@@ -836,6 +836,13 @@ struct TransferInputs {
     coordinates::StateVector parking{};
     time::CoordinateTime epoch{};
 
+    // The ship's mass at `epoch`, or 0 for a full tank (the craft's initial
+    // mass).  Not a detail: the burns are flown for a planned DURATION, so a
+    // ship lighter than the plan assumes over-performs every one of them, and a
+    // lunar transfer carries no midcourse to absorb it.  0.015 kg short of full
+    // -- one second of the main engine -- moves a 100 km capture to 79 km.
+    double mass{0.0};
+
     propagation::IntegratorConfig integrator{};
 };
 

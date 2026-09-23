@@ -354,6 +354,8 @@ struct SimulationState {
 
     coordinates::StateVector vehicle{};   // relative to the request's origin
     time::CoordinateTime epoch{};
+    // What the ship weighs NOW; 0 means a full tank.  See TransferInputs::mass.
+    double mass{0.0};
     propagation::IntegratorConfig integrator{};
 };
 

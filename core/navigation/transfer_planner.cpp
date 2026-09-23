@@ -384,7 +384,7 @@ private:
         propagation::PropagationState state{};
         state.state.position = center.state.position + inputs_.parking.position;
         state.state.velocity = center.state.velocity + inputs_.parking.velocity;
-        state.mass = inputs_.craft->initial_mass();
+        state.mass = inputs_.mass > 0.0 ? inputs_.mass : inputs_.craft->initial_mass();
         return state;
     }
 

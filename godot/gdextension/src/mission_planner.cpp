@@ -38,6 +38,10 @@ sf::navigation::SimulationState state_for(const SceneTransferRequest& request) {
     state.vehicle.position = request.initial.state.position - center.state.position;
     state.vehicle.velocity = request.initial.state.velocity - center.state.velocity;
     state.epoch = request.epoch;
+    // The tank as it is, not as it left the factory: anything the pilot burnt
+    // before asking -- a test of the engine, an RCS slew -- is propellant the
+    // plan must not count on (core/navigation/transfer_planner.hpp).
+    state.mass = request.initial.mass;
     state.integrator = request.integrator;
     return state;
 }

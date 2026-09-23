@@ -188,7 +188,13 @@ func _script() -> Array[Dictionary]:
 			"setup": func() -> void:
 				flight.controls.point("")
 				flight.plan_mission("Moon"),
-			"frames": 20,
+			# Espera o PLANO, não um número de quadros. Desde que a busca foi para
+			# uma thread (M8), vinte quadros só bastavam numa máquina rápida; num
+			# i5 de 2012 a busca lunar leva meio minuto, o passo seguinte armava
+			# um plano que ainda não existia e a nave passava dois anos de warp na
+			# órbita terrestre -- com a sequência a fotografar "órbita lunar".
+			"until": _plan_ready,
+			"limit": 40000,
 			"shot": "mission-plan",
 		},
 		{

@@ -394,6 +394,35 @@ TEST(the_game_and_the_campaign_plan_the_same_transfer) {
 // This catches a divergence in the SHAPE: a bridge that grows a Lambert call, a
 // corrector or a candidate loop is on its way back to being a second planner,
 // and it might well agree with the core for a while before it stops.
+// The tank as it is, not as it left the factory.
+//
+// The planner used to start every search from the craft's INITIAL mass, whatever
+// the ship actually weighed.  The burns are flown for a planned duration, so a
+// lighter ship over-performs each of them, and a lunar transfer has no midcourse
+// to absorb it: 0.015 kg short of full -- one second of the main engine --
+// turned a 100 km capture into 79 km, 0.05 kg into 37 km, 0.2 kg into an impact.
+// The M7 demonstration found it by testing the engine before planning, on a
+// machine slow enough for "until the engine is running" to last a few seconds.
+TEST(the_bridge_plans_for_the_tank_as_it_is) {
+    const auto spice = sft::load_spice_or_skip();
+    auto& provider = *spice.provider;
+    const auto catalog = celestial::BodyCatalog::default_solar_system(provider);
+    const auto craft = make_tug();
+    const auto epoch = spice.time->parse(kEpoch);
+
+    auto scene = scene_request(provider, catalog, craft, epoch,
+                               navigation::ExecutionModel::FiniteBurn);
+    const double lighter = craft.initial_mass() - 0.2;
+    scene.initial.mass = lighter;
+
+    const auto plan = spaceflight_godot::plan_transfer(scene);
+    REQUIRE(plan.ok());
+    // FINITE_BURN spends nothing before the injection, so the mass at ignition is
+    // exactly the mass the search was handed.
+    CHECK_NEAR_ABS(plan.metrics.mass_at_departure, lighter, 1.0e-9,
+                   "coasting to the ignition burns no propellant under ideal guidance");
+}
+
 TEST(the_bridge_translates_and_does_not_compute) {
     const auto source = sft::read_repository_file("godot/gdextension/src/mission_planner.cpp");
     // A failure, not a skip: a missing file means the thing being checked has

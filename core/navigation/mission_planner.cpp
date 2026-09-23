@@ -336,6 +336,7 @@ TransferInputs inputs_for(const SimulationState& state, const MissionRequest& re
     inputs.target = request.destination;
     inputs.parking = state.vehicle;
     inputs.epoch = state.epoch;
+    inputs.mass = state.mass;
     inputs.integrator = state.integrator;
     return inputs;
 }
