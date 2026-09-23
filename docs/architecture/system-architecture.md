@@ -1,7 +1,7 @@
 # Arquitetura do Sistema
 
 Status: vigente a partir do Milestone 0
-Última revisão: 2026-09-13
+Última revisão: 2026-09-23
 
 ## 1. Objetivo
 
@@ -180,6 +180,16 @@ Quatro categorias, refletidas em `tests/`:
 Testes que exigem kernels e não os encontram retornam código 77 e aparecem como
 `Skipped` no CTest, nunca como falha silenciosa ou verde falso.
 
+Além dessas, fora do CTest padrão de física:
+
+| Rótulo | Alvo | O que verifica | Precisa de |
+|---|---|---|---|
+| `godot` | `godot-tests` | a camada de apresentação (cockpit, mapa, missão) | Godot + GDExtension |
+| `assets` | `asset-validation` | texturas: proporção, costuras, convenção de normal map | `python3` |
+| `gpu` | `gpu-validation` | pixels do céu e da renderização relativística | tela real |
+
+`ctest-headless` roda só as quatro categorias da tabela anterior.
+
 Nenhuma tolerância pode ser um número mágico: o harness de testes
 (`tests/support/test_harness.hpp`) **exige** uma string de justificativa em cada
 comparação aproximada. Ver `docs/validation/tolerances.md`.
@@ -190,3 +200,60 @@ Registrado para evitar ambiguidade: sem Godot, sem atitude/quaternions, sem
 propulsão, sem relatividade, sem SOI, sem gráficos, sem gameplay.
 O que existe: tempo, referenciais, efemérides, gravidade de N corpos pontuais,
 propagação com controle de erro, CLI e testes.
+
+## 11. Mapa do repositório
+
+```text
+spaceflight/
+├── CMakeLists.txt          raiz; alvos, opções, política de warnings
+├── cmake/                  cspice.cmake (CSPICE como alvo próprio), warnings.cmake
+├── config/engines/         motores da nave em JSON com comentários (ADR-0007)
+├── catalogs/               Yale BSC5 (fora do Git; MANIFEST.md)
+├── kernels/spice/          LSK, PCK, SPK (fora do Git; MANIFEST.md + SHA256SUMS)
+├── external/               CSPICE, godot-cpp, editor Godot, dados brutos (fora do Git)
+├── scripts/                fetch_*, campanhas, validação de GPU/texturas, manual
+│
+├── core/                   libspaceflight_core.a -- sem Godot, sem main()
+│   ├── math/               Vec3, Mat3
+│   ├── units/              constantes SI com proveniência, conversões
+│   ├── time/               CoordinateTime (duas partes), Duration, escalas
+│   ├── coordinates/        ReferenceFrame (origem + eixos), StateVector
+│   ├── celestial/          BodyId (NAIF), BodyCatalog, tabela do Sistema Solar
+│   ├── ephemeris/          EphemerisProvider, SpiceEphemerisProvider
+│   ├── gravity/            pontual, J2, composto, WeakFieldMetric
+│   ├── propagation/        Dormand-Prince 5(4), dense output, estatísticas
+│   ├── trajectory/         elementos osculadores (diagnóstico), Lambert
+│   ├── propulsion/         motor: F = eta*q*w, contabilidade de energia
+│   ├── navigation/         manobras, executor, planejador, targeting
+│   ├── attitude/           inércia, RCS, controle de apontamento
+│   ├── autopilot/          guiagem de queimas
+│   ├── relativity/         cinemática em u = γv, óptica, tempo de luz
+│   ├── spacecraft/         SpacecraftState
+│   ├── simulation/         SimulationClock, SimulationSnapshot
+│   ├── render/             RenderTransform: absoluto → câmera → float
+│   └── config/             leitor de JSON com comentários
+│
+├── tools/
+│   ├── orbit-cli/          propagar, interceptar, consultar corpos, CSV
+│   ├── lunar-campaign/     campanha Terra-Lua por época
+│   ├── gr-reference/       emissor de trajetórias para validação cruzada
+│   └── validation/         comparação contra REBOUNDx, gráficos
+│
+├── tests/
+│   ├── support/            harness que exige justificativa de tolerância
+│   ├── unit/ integration/ scientific/ regression/
+│   └── scenarios/          cenários JSON para orbit-cli
+│
+├── godot/
+│   ├── gdextension/        ponte C++ (godot-cpp); desligada por padrão
+│   └── project/            projeto Godot 4.5: cenas, scripts, shaders, testes
+│
+└── docs/
+    ├── adr/                decisões de arquitetura
+    ├── architecture/       este documento e os demais de arquitetura
+    ├── physics/            derivação e domínio de validade de cada modelo
+    ├── validation/         relatórios de milestone, campanhas, tolerances.md
+    ├── gameplay/           controles (gerado do Input Map), cockpit, mapa
+    ├── assets/             manifesto e especificação de cada asset
+    └── manual/             manual do piloto; manual.pdf gerado por scripts/build_manual.sh
+```

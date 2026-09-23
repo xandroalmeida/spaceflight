@@ -50,6 +50,10 @@ cmake --build build-godot --target spaceflight_gdextension -j
 A biblioteca sai em `godot/project/bin/spaceflight.dylib` (ou `.so`/`.dll`), que é
 onde `spaceflight.gdextension` a procura. Com tela, abra `godot/project/` no editor.
 
+Os scripts acham o editor por `scripts/godot_bin.sh`, nesta ordem: `$GODOT_BIN`,
+depois `external/godot/Godot.app` (macOS) ou `external/godot/Godot_v*_linux.*`
+(Linux), depois `godot`/`godot4` no `PATH`.
+
 ### Versão: um descompasso que existe hoje
 
 O engine está em **4.7.2**, mas o **godot-cpp não publica tag acima de
