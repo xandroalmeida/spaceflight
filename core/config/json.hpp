@@ -26,19 +26,21 @@ using Array = std::vector<Value>;
 
 class Value {
 public:
-    enum class Type { Null, Bool, Number, String, Array, Object };
+    // List and Map, not Array and Object: those name the aliases above, and GCC -Wshadow
+    // flags an enumerator that reuses them.
+    enum class Type { Null, Bool, Number, String, List, Map };
 
     Value() = default;
     explicit Value(bool b) : type_(Type::Bool), bool_(b) {}
     explicit Value(double n) : type_(Type::Number), number_(n) {}
     explicit Value(std::string s) : type_(Type::String), string_(std::move(s)) {}
-    explicit Value(Array a) : type_(Type::Array), array_(std::move(a)) {}
-    explicit Value(Object o) : type_(Type::Object), object_(std::move(o)) {}
+    explicit Value(Array a) : type_(Type::List), array_(std::move(a)) {}
+    explicit Value(Object o) : type_(Type::Map), object_(std::move(o)) {}
 
     [[nodiscard]] Type type() const noexcept { return type_; }
     [[nodiscard]] bool is_null() const noexcept { return type_ == Type::Null; }
-    [[nodiscard]] bool is_object() const noexcept { return type_ == Type::Object; }
-    [[nodiscard]] bool is_array() const noexcept { return type_ == Type::Array; }
+    [[nodiscard]] bool is_object() const noexcept { return type_ == Type::Map; }
+    [[nodiscard]] bool is_array() const noexcept { return type_ == Type::List; }
 
     // Typed accessors; each throws ParseError naming `context` on mismatch.
     [[nodiscard]] double as_number(const std::string& context) const;

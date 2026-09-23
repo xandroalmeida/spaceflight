@@ -223,21 +223,21 @@ bool Value::as_bool(const std::string& context) const {
 }
 
 const Array& Value::as_array(const std::string& context) const {
-    if (type_ != Type::Array) {
+    if (type_ != Type::List) {
         throw ParseError(context + ": expected an array");
     }
     return array_;
 }
 
 const Object& Value::as_object(const std::string& context) const {
-    if (type_ != Type::Object) {
+    if (type_ != Type::Map) {
         throw ParseError(context + ": expected an object");
     }
     return object_;
 }
 
 const Value* Value::get(const std::string& key) const {
-    if (type_ != Type::Object) {
+    if (type_ != Type::Map) {
         return nullptr;
     }
     const auto it = object_.find(key);

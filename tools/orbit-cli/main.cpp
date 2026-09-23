@@ -1122,7 +1122,6 @@ int command_mission(const Args& args) {
          {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
     const spacecraft::Spacecraft craft{"Torch", 1000.0, 19000.0, engine};
 
-    const auto frame = coordinates::ReferenceFrame::centered_on(origin);
     const double gm_origin = ctx.provider->gravitational_parameter(origin);
     const double parking_radius = ctx.provider->mean_radius(origin) + parking_altitude_m;
 

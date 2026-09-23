@@ -939,15 +939,14 @@ private:
     // below the central body's surface is not a transfer, and no corrector can
     // make it one.
     //
-    // `r1` and `r2` are relative to `primary_`, and `primary` is its state: for a
-    // LOCAL transfer the primary IS the origin, so `primary` and `center` are the
-    // same BodyState and every line below reduces term by term to what the
+    // `r1` and `r2` are relative to `primary_`: for a LOCAL transfer the primary
+    // IS the origin, so r1 is measured from `center` and every line below
+    // reduces term by term to what the
     // 365/365 campaign ran.  That equivalence is not a hope -- it is what
     // tests/scientific/test_planner_equivalence.cpp measures.
     [[nodiscard]] std::optional<Candidate> screen(time::CoordinateTime t_depart,
                                                   const propagation::PropagationState& state,
                                                   const ephemeris::BodyState& center,
-                                                  const ephemeris::BodyState& primary,
                                                   const Vec3& r1, const Vec3& r2,
                                                   time::Duration tof,
                                                   trajectory::TransferDirection direction,
@@ -1171,7 +1170,7 @@ private:
                 inputs_.provider->state(inputs_.target, t_depart + tof, primary_frame_)
                     .state.position;
             ++rejections.considered;
-            auto candidate = screen(t_depart, state, center, primary, r1, r2, tof,
+            auto candidate = screen(t_depart, state, center, r1, r2, tof,
                                     config_.pinned.direction, rejections);
             if (candidate.has_value()) {
                 candidates.push_back(std::move(*candidate));
@@ -1200,7 +1199,7 @@ private:
                                     .state.position;
                 for (const auto direction : directions) {
                     ++rejections.considered;
-                    auto candidate = screen(t_depart, state, center, primary, r1, r2, tof,
+                    auto candidate = screen(t_depart, state, center, r1, r2, tof,
                                             direction, rejections);
                     if (candidate.has_value()) {
                         candidates.push_back(std::move(*candidate));
@@ -2475,7 +2474,7 @@ std::vector<GridCell> TransferSession::map_grid() {
                 cell.time_of_flight_days = tof_days;
                 cell.direction = direction;
                 Rejections ignored{};
-                (void)screen(t_depart, state, center, primary, r1, r2, tof, direction, ignored,
+                (void)screen(t_depart, state, center, r1, r2, tof, direction, ignored,
                              &cell);
                 grid.push_back(cell);
             }
