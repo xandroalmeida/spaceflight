@@ -15,6 +15,7 @@ namespace sf::gfx {
 // sixth smaller than the manual's captures.
 inline constexpr float FONT_EM = 1.1641F;
 [[nodiscard]] inline float font_px(double px) { return static_cast<float>(px) * FONT_EM; }
+[[nodiscard]] inline float font_px(float px) { return px * FONT_EM; }
 
 class ImGuiCanvas final : public app::Canvas {
 public:
