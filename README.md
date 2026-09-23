@@ -37,7 +37,8 @@ O histórico de cada milestone, com o que foi medido e o que ficou por fazer,
 está em [`docs/validation/`](docs/validation/) — o mais recente é
 [`milestone-8-report.md`](docs/validation/milestone-8-report.md), que também traz o
 backlog. Para aprender a pilotar, leia o
-[manual do piloto](docs/manual/manual.pdf).
+[manual do piloto](docs/manual/manual.pdf) e deixe a
+[folha de atalhos](docs/manual/atalhos.pdf) ao lado do teclado.
 
 ## Requisitos
 
@@ -84,8 +85,10 @@ cmake --install build --prefix ~/spaceflight
 Sem tela: `spaceflight --headless` imprime a leitura técnica,
 `spaceflight --headless --destination Moon` voa a missão inteira, e
 `spaceflight --shots m8 DIR` fotografa a viagem a Marte fora da tela. Controles:
-[`docs/gameplay/controls.md`](docs/gameplay/controls.md); todas as opções e o
-desenho da apresentação: [`app/README.md`](app/README.md).
+[manual do piloto](docs/manual/manual.pdf),
+[folha de atalhos](docs/manual/atalhos.pdf) (uma página, para imprimir) e a
+tabela completa em [`docs/gameplay/controls.md`](docs/gameplay/controls.md);
+todas as opções e o desenho da apresentação: [`app/README.md`](app/README.md).
 
 ### A CLI
 
@@ -154,7 +157,7 @@ horas numa máquina modesta.
 * build sem warnings novos — `-DSPACEFLIGHT_WERROR=ON` ajuda a garantir;
 * o documento de física/arquitetura afetado está atualizado;
 * se uma tecla mudou, `docs/gameplay/controls.md` foi regerado
-  (`scripts/dump_controls.sh`) e o manual recompilado (`scripts/build_manual.sh`).
+  (`scripts/dump_controls.sh`) e o manual e a folha de atalhos recompilados (`scripts/build_manual.sh`).
 
 ### Onde está cada coisa
 
@@ -167,5 +170,5 @@ horas numa máquina modesta.
 | [`docs/validation/`](docs/validation/) | relatórios de milestone, campanhas, tolerâncias |
 | [`docs/gameplay/`](docs/gameplay/) | controles, cockpit, mapa, missões |
 | [`docs/assets/`](docs/assets/) | estado e especificação de texturas, modelos e áudio |
-| [`docs/manual/`](docs/manual/) | fonte do manual do piloto |
+| [`docs/manual/`](docs/manual/) | fonte do manual do piloto e da folha de atalhos |
 | [`docs/PROMPT-0.md`](docs/PROMPT-0.md) | o enunciado original do projeto |

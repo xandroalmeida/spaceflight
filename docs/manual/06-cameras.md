@@ -16,14 +16,16 @@
 |---|---|
 | arrastar com o botão direito | no cockpit, virar a cabeça; fora dele, orbitar a nave |
 | `{{key:camera_free_look}}` + arrastar | girar a câmera no lugar, deixando o alvo para trás |
-| roda | aproximar e afastar, fora do cockpit |
+| roda, ou `{{key:camera_zoom_in}}` / `{{key:camera_zoom_out}}` | aproximar e afastar, fora do cockpit |
+| setas | virar a câmera pelo teclado |
 | clique esquerdo | premir o botão do painel sob o ponteiro |
 
 `{{key:camera_recentre}}` devolve tudo ao preset, zoom incluído. É a tecla para
 quando você se perdeu apontando para o vazio.
 
-`{{key:camera_focus_next}}` percorre os corpos celestes: a câmera passa a orbitar a
-Terra, a Lua, o Sol. É assim que se olha um planeta inteiro.
+`{{key:camera_focus_next}}` percorre os corpos celestes, um a um — o Sol, os
+planetas, as luas — e depois volta à nave: a câmera passa a orbitar o corpo
+escolhido. É assim que se olha um planeta inteiro.
 
 ![A Terra, de três raios de distância](../validation/m7/earth-whole-disc.png)
 
@@ -54,7 +56,7 @@ desprezível — o Doppler é `1 ± 10⁻⁴` — que é exatamente o que tem de
 velocidade.
 
 Para ver os efeitos é preciso ir depressa, e a única maneira honesta é queimar
-por oito anos: `{{key:cruise_burn}}` faz isso numa tecla — modo `CRUZEIRO`,
+por oito anos: `{{key:cruise_burn}}` faz isso numa tecla — modo `CRUISE`,
 prógrado, acelerador cheio, warp máximo. Alguns minutos de espera e o céu à
 frente empilha-se num cone.
 
@@ -63,3 +65,11 @@ diferença seja **vista** em vez de discutida: `{{key:optics_aberration}}`,
 `{{key:optics_doppler}}`, `{{key:optics_beaming}}`, `{{key:optics_light_time}}`. O
 estado da nave é bit a bit o mesmo dos dois lados; o que muda é qual pergunta o
 renderizador faz.
+
+Para comparar velocidades sem esperar anos, `{{key:visual_beta}}` percorre uma
+escada de β **visual** — o voo real, depois 0, 0,1, 0,5, 0,9 e 0,99 —, que muda só
+o que o renderizador desenha. `{{key:body_scale}}` exagera o tamanho desenhado dos
+corpos, para achá-los de longe; é só desenho, e a 1000× a câmera pode acabar
+dentro da Terra (ver *Quando algo parece errado*).
+
+`{{key:exposure_up}}` e `{{key:exposure_down}}` ajustam a exposição do céu.

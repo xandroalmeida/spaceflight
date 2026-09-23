@@ -47,7 +47,7 @@ câmera não muda um número do estado.
 | `Ctrl` | fecha o acelerador |
 | `Z` | acelerador cheio |
 | `X` | corte do motor |
-| `G` | modo IMPULSO / CRUZEIRO |
+| `G` | modo IMPULSE / CRUISE |
 | `V` | RCS ligado / desligado |
 | `B` | RCS rotação / translação |
 
@@ -61,8 +61,8 @@ câmera não muda um número do estado.
 | `Shift+N` | anti-normal |
 | `R` | radial para fora |
 | `Shift+R` | radial para dentro |
-| `T` | para o alvo |
-| `Shift+T` | contra o alvo |
+| `T` | para o alvo (ainda indisponível) |
+| `Shift+T` | contra o alvo (ainda indisponível) |
 | `0` | manter atitude |
 
 ## CÂMERA
@@ -72,16 +72,16 @@ câmera não muda um número do estado.
 | `C` | alterna o modo de câmera |
 | `Home` | recentra o olhar |
 | `Alt` | olhar em volta (mantido) |
-| `BracketRight` | aproxima |
-| `BracketLeft` | afasta |
+| `]` | aproxima |
+| `[` | afasta |
 | `F` | foca o próximo corpo |
 
 ## MISSÃO
 
 | tecla | ação |
 |---|---|
-| `Apostrophe` | próximo alvo |
-| `Semicolon` | alvo anterior |
+| `'` | próximo alvo |
+| `;` | alvo anterior |
 | `Shift+J` | planeja a transferência |
 | `Enter` | executa o plano |
 | `Shift+K` | ABORTA a missão |
@@ -93,8 +93,8 @@ câmera não muda um número do estado.
 
 | tecla | ação |
 |---|---|
-| `Period` | sobe o time warp |
-| `Comma` | desce o time warp |
+| `.` | sobe o time warp |
+| `,` | desce o time warp |
 | `Space` | pausa |
 | `Escape` | menu |
 
@@ -102,7 +102,7 @@ câmera não muda um número do estado.
 
 | tecla | ação |
 |---|---|
-| `QuoteLeft` | HUD completo / mínimo / nenhum |
+| `Crase` | HUD completo / mínimo / nenhum |
 | `F3` | HUD técnico (todos os números) |
 | `F1` | ajuda dos controles |
 | `PageUp` | exposição do céu + |

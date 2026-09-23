@@ -2,6 +2,7 @@
 """Compila o manual do usuário: docs/manual/*.md -> HTML -> PDF.
 
     ./scripts/build_manual.sh          # regenera as teclas e compila tudo
+    ./scripts/build_manual.sh --sheet  # só a folha de atalhos (atalhos.pdf)
 
 Sem dependências. Não há pandoc, LaTeX, wkhtmltopdf nem um módulo de Markdown
 nesta máquina, e instalar um deles para compilar um documento de quinze páginas
@@ -49,6 +50,9 @@ SHOTS = ROOT / "docs/validation/m7"
 CONTROLS = ROOT / "docs/gameplay/controls.json"
 BUILD = ROOT / "build/manual"
 OUTPUT_PDF = MANUAL / "manual.pdf"
+CONTROLS_MD = ROOT / "docs/gameplay/controls.md"
+SHEET_SOURCE = MANUAL / "_atalhos.md"
+SHEET_PDF = MANUAL / "atalhos.pdf"
 
 CHROME_CANDIDATES = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -320,6 +324,72 @@ def find_chrome() -> str:
                      "(HTML em build/manual/manual.html continua a ser gerado)")
 
 
+# --- folha de atalhos ----------------------------------------------------
+
+def key_groups() -> list:
+    """Os grupos de teclas NA ORDEM do jogo, lidos de controls.md.
+
+    O JSON é um dicionário ordenado por nome de ação; a ordem em que o jogo lista
+    as teclas -- arfagem antes de guinada, prógrado antes de retrógrado -- só
+    sobrevive na tabela em Markdown, que sai da mesma fonte.
+    """
+    if not CONTROLS_MD.exists():
+        raise BuildError(f"falta {CONTROLS_MD.relative_to(ROOT)} -- rode scripts/dump_controls.sh")
+    groups = []
+    for line in CONTROLS_MD.read_text().split("\n"):
+        if line.startswith("## "):
+            groups.append((line[3:].strip(), []))
+        elif groups and (row := re.match(r"^\| `([^`]+)` \| (.*) \|$", line)):
+            groups[-1][1].append((row.group(1), row.group(2).strip()))
+    groups = [g for g in groups if g[1]]
+    if not groups:
+        raise BuildError(f"{CONTROLS_MD.relative_to(ROOT)} não tem nenhuma tabela de teclas")
+    return groups
+
+
+def keycaps(combo: str) -> str:
+    # `Shift+P` vira duas teclas desenhadas; o "+" fica entre elas.
+    return "<span class=\"plus\">+</span>".join(
+        f"<kbd>{html.escape(part)}</kbd>" for part in combo.split("+"))
+
+
+def build_cheatsheet(keys: dict, chrome: str) -> None:
+    images: list = []
+    cards = []
+    for name, rows in key_groups():
+        body = "".join(f"<tr><td>{keycaps(k)}</td><td>{html.escape(d)}</td></tr>" for k, d in rows)
+        cards.append(f'<section class="card"><h2>{html.escape(name.capitalize())}</h2>'
+                     f"<table>{body}</table></section>")
+    extra = ""
+    if SHEET_SOURCE.exists():
+        text = expand(SHEET_SOURCE.read_text(), SHEET_SOURCE, keys, {SHEET_SOURCE})
+        # Cada `## ` do arquivo é um cartão, como os grupos de teclas.
+        for block in re.split(r"(?m)^(?=## )", text):
+            if block.strip().startswith("## "):
+                extra += f'<section class="card">{render(block, SHEET_SOURCE, images)}</section>'
+    css = (MANUAL / "atalhos.css").read_text()
+    document = f"""<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<title>Spaceflight — Folha de atalhos</title>
+<style>{css}</style></head><body>
+<header><h1>Spaceflight</h1><p>folha de atalhos · <code>WASD</code> move a nave, as setas e o mouse movem a câmera</p></header>
+<main>{"".join(cards)}{extra}</main>
+<footer>Gerada de <code>app/presentation/input_actions.cpp</code> por <code>scripts/build_manual.py</code>
+— revisão {html.escape(revision())}. Não editar à mão.</footer>
+</body></html>"""
+    html_path = BUILD / "atalhos.html"
+    html_path.write_text(document)
+    subprocess.run(
+        [chrome, "--headless", "--disable-gpu", "--no-pdf-header-footer",
+         "--no-sandbox", f"--print-to-pdf={SHEET_PDF}", html_path.as_uri()],
+        capture_output=True, text=True, timeout=120)
+    if not SHEET_PDF.exists():
+        raise BuildError("o Chrome não escreveu a folha de atalhos")
+    blob = SHEET_PDF.read_bytes()
+    pages = blob.count(b"/Type /Page\n") or blob.count(b"/Type/Page")
+    print(f"{SHEET_PDF.relative_to(ROOT)}  ~{pages} página(s)")
+
+
 def main(argv) -> int:
     chapters = sorted(p for p in MANUAL.glob("*.md") if not p.name.startswith("_")
                       and p.name != "README.md")
@@ -335,6 +405,11 @@ def main(argv) -> int:
         return 77
 
     keys = load_keys()
+    # `--sheet` compila só a folha de atalhos.
+    if "--sheet" in argv:
+        BUILD.mkdir(parents=True, exist_ok=True)
+        build_cheatsheet(keys, find_chrome())
+        return 0
     images: list = []
     sections = []
     toc = []
@@ -370,6 +445,8 @@ As teclas vêm da tabela do jogo (app/presentation/input_actions.cpp); as figura
 
     output_pdf = (BUILD / "preview.pdf") if "--only" in argv else OUTPUT_PDF
     chrome = find_chrome()
+    if "--only" not in argv:
+        build_cheatsheet(keys, chrome)
     result = subprocess.run(
         [chrome, "--headless", "--disable-gpu", "--no-pdf-header-footer",
          "--no-sandbox", f"--print-to-pdf={output_pdf}", html_path.as_uri()],

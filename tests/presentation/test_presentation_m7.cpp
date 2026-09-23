@@ -627,3 +627,30 @@ TEST(instruments_draw_without_a_display_rule_62) {
     CHECK(strip.contains_text(app::fmt::mass(full.s.propellant_kg)));
     CHECK(strip.contains_text("RCS ON"));
 }
+
+// Last in the file: it spends 200 s of the shared session's time.
+TEST(pointing_is_relative_to_the_body_the_readouts_are_relative_to) {
+    // The command used to be hard-wired to the Earth. With another reference the
+    // FLIGHT display draws that body's prograde, and the autopilot has to take
+    // the nose THERE. From low Earth orbit the Moon-relative velocity differs
+    // from the Earth-relative one by the Moon's ~1 km/s: several degrees, far
+    // outside the tolerance below.
+    auto& sim = session();
+    const bool was_auto = sim.auto_reference();
+    REQUIRE(sim.set_reference_body("Moon"));
+    REQUIRE(sim.set_pointing_mode("prograde"));
+    for (int i = 0; i < 400; ++i) {
+        sim.advance(0.5);
+    }
+    const auto directions = sim.flight_directions();
+    REQUIRE(directions.nose.has_value());
+    const auto prograde = directions.by_name("prograde");
+    REQUIRE(prograde.has_value());
+    const double off = math::angle_between(*directions.nose, *prograde) * 180.0 / kPi;
+    INFO(app::fmt::format("nose %.2f deg from the Moon-relative prograde", off));
+    CHECK(off < 1.0);
+
+    sim.set_pointing_mode("");
+    REQUIRE(sim.set_reference_body("Earth"));
+    sim.set_auto_reference(was_auto);
+}

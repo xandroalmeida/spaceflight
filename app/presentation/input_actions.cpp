@@ -32,7 +32,7 @@ const std::vector<Binding>& bindings() {
         {"throttle_down", Key::Ctrl, false, false, false, "MOTOR", "fecha o acelerador"},
         {"throttle_full", Key::Z, false, false, false, "MOTOR", "acelerador cheio"},
         {"engine_cutoff", Key::X, false, false, false, "MOTOR", "corte do motor"},
-        {"engine_mode", Key::G, false, false, false, "MOTOR", "modo IMPULSO / CRUZEIRO"},
+        {"engine_mode", Key::G, false, false, false, "MOTOR", "modo IMPULSE / CRUISE"},
         {"rcs_toggle", Key::V, false, false, false, "MOTOR", "RCS ligado / desligado"},
         {"rcs_mode", Key::B, false, false, false, "MOTOR", "RCS rotação / translação"},
 
@@ -43,8 +43,8 @@ const std::vector<Binding>& bindings() {
         {"point_anti_normal", Key::N, true, false, false, "APONTAMENTO", "anti-normal"},
         {"point_radial_out", Key::R, false, false, false, "APONTAMENTO", "radial para fora"},
         {"point_radial_in", Key::R, true, false, false, "APONTAMENTO", "radial para dentro"},
-        {"point_target", Key::T, false, false, false, "APONTAMENTO", "para o alvo"},
-        {"point_anti_target", Key::T, true, false, false, "APONTAMENTO", "contra o alvo"},
+        {"point_target", Key::T, false, false, false, "APONTAMENTO", "para o alvo (ainda indisponível)"},
+        {"point_anti_target", Key::T, true, false, false, "APONTAMENTO", "contra o alvo (ainda indisponível)"},
         {"point_hold", Key::Num0, false, false, false, "APONTAMENTO", "manter atitude"},
 
         // --- camera ---
@@ -139,13 +139,18 @@ std::string key_name(Key key) {
         case Key::Tab: return "Tab";
         case Key::Space: return "Space";
         case Key::Escape: return "Escape";
-        case Key::BracketLeft: return "BracketLeft";
-        case Key::BracketRight: return "BracketRight";
-        case Key::Apostrophe: return "Apostrophe";
-        case Key::Semicolon: return "Semicolon";
-        case Key::Period: return "Period";
-        case Key::Comma: return "Comma";
-        case Key::QuoteLeft: return "QuoteLeft";
+        // The symbol printed on the key, not SDL's name for it: the manual and
+        // the in-game help said "BracketRight" where the keyboard says "]".
+        // Positions, as on a US layout -- the scancode is the physical key.
+        case Key::BracketLeft: return "[";
+        case Key::BracketRight: return "]";
+        case Key::Apostrophe: return "'";
+        case Key::Semicolon: return ";";
+        case Key::Period: return ".";
+        case Key::Comma: return ",";
+        // Not "`": inside the Markdown code spans of controls.md a backtick ends the
+        // span.
+        case Key::QuoteLeft: return "Crase";
         case Key::PageUp: return "PageUp";
         case Key::PageDown: return "PageDown";
         case Key::F1: return "F1";

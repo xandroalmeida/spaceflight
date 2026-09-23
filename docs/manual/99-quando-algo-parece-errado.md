@@ -41,40 +41,65 @@ por mais tempo que isso abre o acelerador — é o que ele faz.
 ## A nave não aponta exatamente para onde eu mandei
 
 Ela não vai apontar. O controlador de atitude assenta num **atraso de rastreio**
-de cerca de 2,6 graus e não chega a zero: um controlador proporcional-derivativo
-perseguindo um alvo que gira fica atrás dele. Isso é o comportamento de um
-controlador desse tipo, não um defeito do simulador.
+de menos de um grau — entre 0,4 e 0,7 grau em órbita baixa — e não chega a zero:
+um controlador proporcional-derivativo perseguindo um alvo que gira fica atrás
+dele. Isso é o comportamento de um controlador desse tipo, não um defeito do
+simulador.
 
-## `PLAN TRANSFER` não encontra nada
+Se o erro for de vários graus e não fechar, confira o corpo de referência no
+instrumento `NAVIGATION`: os apontamentos são relativos a ele.
 
-A mensagem diz o motivo. As causas comuns:
+## As teclas de função não fazem nada
 
-- a janela de busca de duas horas não contém uma partida boa a partir da órbita
-  atual. Espere uma fração de órbita e tente de novo;
-- o corretor não convergiu. Ele tenta até três candidatos e recusa um plano que
-  não chega ao alvo, com o motivo — em vez de devolver uma trajetória que erra.
+No macOS, `F1`, `F3` e as outras são teclas de mídia por padrão. Use `fn` junto,
+ou ligue "usar F1, F2 etc. como teclas de função padrão" nos ajustes do teclado.
+
+## `{{key:point_target}}` diz que não está disponível
+
+Está certo: apontar para o alvo ainda não existe. Veja *Pilotar*.
+
+## `SEARCH` não encontra nada
+
+A mensagem diz o motivo, e a lista `REFUSED` diz por que cada geometria voada
+foi recusada. As causas comuns:
+
+- a janela de busca não contém uma partida boa a partir da órbita atual. Espere
+  uma fração de órbita e tente de novo;
+- o corretor não convergiu. A busca examina 24 candidatas, voa as 6 melhores com
+  o modelo completo e recusa um plano que não chega ao alvo, com o motivo — em
+  vez de devolver uma trajetória que erra.
 
 Um plano recusado é melhor que um plano falso: você continua no mesmo estado.
 
 ## O periapsis está negativo
 
 Está certo. Os elementos do cockpit são medidos em torno do **corpo de
-referência**, que continua sendo a Terra durante toda a travessia. A caminho da
-Lua a órbita terrestre é uma elipse muito alongada cujo periapsis está dentro do
+referência**, que é a Terra durante a maior parte da travessia. A caminho da Lua
+a órbita terrestre é uma elipse muito alongada cujo periapsis está dentro do
 planeta, e a altitude desse periapsis é negativa.
 
-Quando você chega perto da Lua, o mostrador técnico passa a mostrar também a
-órbita **em torno do alvo**, que é a que interessa ali.
+O corpo de referência troca sozinho quando a nave entra na vizinhança
+gravitacional de outro — perto da Lua, passa a ser a Lua —, e os números passam
+a ser em torno dela.
 
 ## O quadro fica lento em warp alto
 
 Esperado, e a causa é o núcleo e não o desenho. Em warp alto cada quadro pede
 muito mais tempo coordenado, e perto de um corpo o controle de erro do propagador
-encurta o passo — mais trabalho por quadro. `{{key:debug_hud}}` separa os tempos.
+encurta o passo — mais trabalho por quadro. `{{key:debug_hud}}` mostra a taxa de
+quadros e quanto tempo cada um leva.
 
 ## As luzes da cidade aparecem do lado errado
 
 Não aparecem. A orientação da Terra vem dos mesmos kernels que a trajetória, e
-está conferida contra um fato externo: às 00:00 UTC o ponto subsolar está a
-180,9° leste e 23° sul, porque o meio-dia solar em Greenwich é às 12:00 e porque
-é janeiro. Se alguma vez parecer errado, é um defeito e vale reportar.
+está conferida contra um fato externo: em 1º de janeiro de 2026, às 00:00 UTC, o
+ponto subsolar está a 180,9° leste e 23° sul, porque o meio-dia solar em
+Greenwich é às 12:00 e porque é janeiro. Se alguma vez parecer errado, é um
+defeito e vale reportar.
+
+## A Terra parece só oceano
+
+Depende da hora e do lugar: um terço da Terra é o Pacífico. O voo começa sobre a
+África às duas da tarde, hora local, justamente para que o primeiro olhar pela
+janela encontre um continente; noventa minutos de órbita depois, a nave pode
+estar sobre o mar ou do lado noturno.

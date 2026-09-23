@@ -11,6 +11,8 @@ o CMake baixa sozinho no primeiro build.
 ./scripts/fetch_cspice.sh          # o toolkit SPICE da NASA
 ./scripts/fetch_kernels.sh         # efemérides DE440, ~120 MB
 ./scripts/fetch_star_catalog.sh    # Yale BSC5, 9110 estrelas
+./scripts/fetch_earth_textures.sh  # opcional: os mapas da Terra (NASA)
+./scripts/fetch_lunar_dem.sh       # opcional: o relevo da Lua (LOLA)
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
@@ -24,7 +26,12 @@ Depois disso, para voar:
 
 Se faltar alguma coisa, o simulador **não** falha em silêncio: sem os kernels ele
 diz qual script rodar; sem o catálogo de estrelas o céu fica vazio e o mostrador
-técnico explica porquê. Nada disso muda a dinâmica.
+técnico explica porquê; sem os mapas da Terra e da Lua elas são desenhadas com
+texturas geradas, marcadas como tal. Nada disso muda a dinâmica.
+
+> No macOS, as teclas de função (`{{key:help}}`, `{{key:debug_hud}}`…) são teclas de
+> mídia por padrão: use `fn` junto, ou ligue "usar F1, F2 etc. como teclas de
+> função padrão" nos ajustes do teclado.
 
 ## O que aparece
 
@@ -32,6 +39,12 @@ Em poucos segundos você está sentado no cockpit, em órbita da Terra a 400 km,
 com inclinação de 51,6 graus — a órbita da estação espacial. Não há menu, não há
 tela de carregamento, e não há tutorial: a nave está operacional, o tanque está
 cheio, o motor está desligado e a Lua já é o alvo.
+
+O voo começa em 19 de fevereiro de 2026, às 12:00 UTC. A data não é arbitrária:
+ela põe a nave sobre a África Oriental às duas da tarde, hora local, com o Sol às
+costas — o continente aparece na janela iluminado por trás de quem olha. Tudo o
+que se vê no céu, a posição da Lua, a rotação da Terra e o lado iluminado, sai
+dessa data e das efemérides.
 
 <figure class="callouts" style="--w:1920;--h:1080">
 <img src="../validation/m7/cockpit-earth-orbit.png" alt="O cockpit em órbita da Terra">

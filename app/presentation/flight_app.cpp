@@ -143,6 +143,7 @@ void FlightApp::wire_controls() {
     mission_panel_.on_cancel = [this] { abort_mission(); };
     mission_panel_.on_target_changed = [this](const std::string& target) { set_target(target); };
     mission_panel_.on_closed = [this] { show_panel(Panel::Mission, false); };
+    mission_panel_.on_point_requested = [this](const std::string& mode) { controls_->point(mode); };
 
     mission_panel_.set_targets(session_.selectable_targets(), session_.target_body());
 

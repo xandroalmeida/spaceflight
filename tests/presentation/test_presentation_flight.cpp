@@ -214,6 +214,23 @@ TEST(panels_are_exclusive_and_escape_closes_them_in_order) {
     CHECK(!app.panel_visible(Panel::Map));
 }
 
+TEST(the_mission_computer_points_the_ship_in_the_orbital_frame) {
+    auto flight = make_flight();
+    auto& app = flight->app;
+    flight->frames(2);
+    auto& panel = app.mission_panel();
+    flight->press(app::Key::Tab);
+    // Every button reaches the controller, and the mode read back is the one
+    // asked for: the same path as the keys, through FlightControls::point.
+    for (const auto& command : app::MissionPanel::ATTITUDE_COMMANDS) {
+        panel.request_pointing(command.mode);
+        flight->frames(1);
+        const std::string expected = std::string{command.mode}.empty() ? std::string{"HOLD"}
+                                                                         : app::fmt::upper(command.mode);
+        CHECK_EQ(app.session().pointing_mode(), expected);
+    }
+}
+
 TEST(the_mission_computer_searches_arms_and_aborts) {
     auto flight = make_flight();
     auto& app = flight->app;

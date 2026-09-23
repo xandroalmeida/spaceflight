@@ -35,6 +35,24 @@ public:
     // free box invites asking for a 5 m orbit.
     static constexpr std::array<double, 7> ALTITUDES_KM = {50.0, 100.0, 200.0, 300.0, 500.0, 1000.0, 2000.0};
 
+    // The orbital-frame attitudes the computer can hold (rule 18), in the order
+    // the ATTITUDE row shows them. The same guidance laws as the pointing keys,
+    // relative to the body the ship is orbiting. An empty mode is HOLD.
+    struct AttitudeCommand {
+        const char* mode;    // FlightSession::set_pointing_mode's key
+        const char* label;
+        const char* key;     // the keyboard shortcut, shown on the button
+    };
+    static constexpr std::array<AttitudeCommand, 7> ATTITUDE_COMMANDS = {{
+        {"prograde", "PROGRADE", "P"},
+        {"retrograde", "RETROGRADE", "Shift+P"},
+        {"normal", "NORMAL", "N"},
+        {"anti_normal", "ANTI-NORMAL", "Shift+N"},
+        {"radial_out", "RADIAL OUT", "R"},
+        {"radial_in", "RADIAL IN", "Shift+R"},
+        {"", "HOLD", "0"},
+    }};
+
     struct Choice {
         std::string label;
         int source_index{0};
@@ -48,6 +66,7 @@ public:
     std::function<void(int)> on_alternative_chosen;
     std::function<void(const std::string&)> on_target_changed;
     std::function<void()> on_closed;
+    std::function<void(const std::string& mode)> on_point_requested;
 
     void set_targets(const std::vector<std::string>& names, const std::string& current);
     [[nodiscard]] std::string current_target() const;
@@ -60,6 +79,9 @@ public:
 
     // The SEARCH button. While searching it is CANCEL SEARCH.
     void request_plan();
+    // An ATTITUDE button. The session may refuse (an armed plan is steering);
+    // the refusal is reported where the keyboard's would be.
+    void request_pointing(const std::string& mode);
     // Called every frame: a plan asked for last frame is emitted now, so the
     // screen shows "starting the search" before anything else happens.
     void advance();

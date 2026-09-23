@@ -1,6 +1,10 @@
 # O mapa orbital
 
-`{{key:orbit_map}}` abre e fecha. A roda do mouse faz zoom.
+`{{key:orbit_map}}` abre e fecha. A roda do mouse faz zoom. `{{key:map_mode}}`
+alterna entre o mapa **local** — o corpo de referência, a nave e o alvo — e o
+mapa do **Sistema Solar**: o plano da eclíptica, anéis em unidades astronômicas,
+as órbitas dos planetas e, com um plano interplanetário, os pontos de partida e
+de chegada. Com o mapa aberto, o HUD se recolhe.
 
 ![Terra, órbita atual, e o caminho real da Lua](../validation/m7/orbit-map-earth.png)
 

@@ -251,6 +251,50 @@ void Interface::mission_panel(app::FlightApp& app) {
         panel.request_plan();
     }
 
+    // ATTITUDE: the orbital frame, one button per guidance law. The lit button
+    // is the mode the controller is IN, read back from the session, not the
+    // last one clicked -- a refused command must not light up.
+    rule();
+    {
+        const auto snapshot = app.session().snapshot();
+        const std::string reference = app::fmt::upper(app.session().reference_body());
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushStyleColor(ImGuiCol_Text, im(palette::SECONDARY));
+        ImGui::TextUnformatted(("ATTITUDE   orbital frame of " + reference).c_str());
+        ImGui::PopStyleColor();
+        const std::string active = app::fmt::upper(snapshot.pointing_mode);
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        const float width = (ImGui::GetContentRegionAvail().x - gap * 3.0F) / 4.0F;
+        int column = 0;
+        for (const auto& command : app::MissionPanel::ATTITUDE_COMMANDS) {
+            std::string mode = command.mode;
+            const bool lit = mode.empty() ? (active.empty() || active == "HOLD") : active == app::fmt::upper(mode);
+            if (column > 0) {
+                ImGui::SameLine();
+            }
+            if (lit) {
+                ImGui::PushStyleColor(ImGuiCol_Button, im(palette::NAV_DIM));
+            }
+            const std::string caption = std::string{command.label} + " " + command.key + "##att" + command.label;
+            if (ImGui::Button(caption.c_str(), ImVec2{width, 30.0F})) {
+                panel.request_pointing(mode);
+            }
+            if (lit) {
+                ImGui::PopStyleColor();
+            }
+            column = (column + 1) % 4;
+        }
+        if (!active.empty() && active != "HOLD") {
+            const double error = snapshot.pointing_error_deg;
+            ImGui::PushStyleColor(ImGuiCol_Text, im(error > 2.0 ? palette::WARNING : palette::OK));
+            ImGui::TextUnformatted(app::fmt::format("%s   error %.2f°%s", active.c_str(), error,
+                                                    error > 2.0 ? "   slewing" : "   holding")
+                                       .c_str());
+            ImGui::PopStyleColor();
+        }
+    }
+    rule();
+
     // The summary.
     ImGui::BeginChild("##summary", ImVec2{0.0F, 0.0F}, ImGuiChildFlags_AutoResizeY);
     ImGui::Dummy(ImVec2{0.0F, 0.0F});
