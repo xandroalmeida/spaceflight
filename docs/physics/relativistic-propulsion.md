@@ -285,3 +285,53 @@ Portanto: **a propulsão relativística é implementada e testada em espaço pla
 sem gravidade, exatamente como os testes de Tsiolkovsky do Milestone 1 já são. Um
 cenário que ligue o regime relativístico junto com gravidade de N corpos está
 misturando uma aproximação válida com uma inválida, e o código recusa.
+
+## 9. O jogo aceita a mistura de §8, deliberadamente
+
+Até aqui a sessão do jogo integrava com cinemática **newtoniana**: o padrão de
+`IntegratorConfig`. Isso passou despercebido enquanto nada a bordo chegava perto
+de `c`, e deixou de ser aceitável com o modo RELATIVÍSTICO
+([`propulsion-model.md`](propulsion-model.md) §4.7): três dias dele, integrados
+por Newton, levariam a nave a `0,95 c · ln 20 = 2,85 c`.
+
+A sessão agora integra com `Kinematics::SpecialRelativistic` e liga
+`allow_gravity_with_relativistic_kinematics` — a mistura que §8 recusa por
+padrão, aceita **pelo chamador que assume a afirmação**, como a flag exige. A
+afirmação, com números:
+
+* o empuxo, a massa e a velocidade passam a ser exatos em relação a `c`: é a
+  mesma cinemática dos testes de espaço plano;
+* a gravidade continua o campo de N corpos com J2, somado a `du/dt` como
+  aceleração coordenada. O erro disso é da ordem de `β² g` (mais `Φ/c² g`, 10⁻⁸
+  g):
+
+| onde | `β` | `g` | `β² g` |
+|---|---|---|---|
+| órbita baixa, 7,7 km/s | 2,6·10⁻⁵ | 8,7 m/s² | 6·10⁻⁹ m/s² |
+| 1 h depois de acender o RELATIVÍSTICO | 0,012 | 6·10⁻³ m/s² | 8·10⁻⁷ m/s² |
+| cruzeiro a 0,993 c, a 1 UA do Sol | 0,993 | 6·10⁻³ m/s² | 6·10⁻³ m/s² |
+| chegada a Marte, a 1 000 km, freando | 1,7·10⁻⁴ | 2,2 m/s² | 6·10⁻⁸ m/s² |
+
+Neste Sistema Solar a nave é rápida só onde a gravidade é fraca, e forte só onde
+a nave é lenta — o produto nunca passa de milímetros por segundo ao quadrado.
+Antes, com Newton, o erro de ordem `β²` estava na cinemática **inteira**, e não
+só no termo gravitacional.
+
+**O estado público continua `v`.** O propagador carrega `u = γv` só por dentro
+(`state_from_array` converte antes de qualquer modelo de força, e `dense_output`
+devolve `v`), então nada fora dele converte — e quem divide por `γ` "para obter
+`v`" divide duas vezes. O primeiro rascunho desta mudança fez exatamente isso e
+o teste a pegou: `β` final de 0,7047 em vez de 0,9933, que é `0,9933/√(1+0,9933²)`.
+
+**O planejador de Lambert continua newtoniano** (`FlightSession::planning_integrator`):
+as suas campanhas foram qualificadas assim, e às poucas km/s de uma transferência
+o voo relativístico difere dele em 10⁻¹⁰.
+
+Verificado em `tests/presentation/test_presentation_flight.cpp`,
+`the_game_flies_relativistic_kinematics_and_never_reaches_c`: o tanque inteiro
+do RELATIVÍSTICO, queimado na própria sessão do jogo, dá `β = 0,993276` — a
+equação do foguete — com o relógio de bordo em 3,19 dias contra 5,54 de tempo
+coordenado.
+
+A formulação sem essa aproximação (métrica 1PN e geodésica) continua sendo a de
+`relativity-roadmap.md` §5.

@@ -824,6 +824,7 @@ private:
 
     // The one body of start_planning() and start_planning_alternative(): the
     // only difference between them is the pin.
+    [[nodiscard]] propagation::IntegratorConfig planning_integrator() const;
     bool begin_planning(celestial::BodyId target, double periapsis_altitude_km,
                         double apoapsis_altitude_km, double search_hours,
                         const navigation::TransferConfig::PinnedDeparture& pin);

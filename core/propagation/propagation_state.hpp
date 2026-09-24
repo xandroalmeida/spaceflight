@@ -6,8 +6,11 @@
 // simply tracks coordinate time.  Adding it later would mean changing every
 // signature in the integrator; see docs/physics/relativity-roadmap.md section 8.
 //
-// Milestone 4 replaces `state.velocity` (coordinate velocity v) with u = gamma*v.
-// That is a change of this struct plus one derivative function -- not a rewrite.
+// `state.velocity` is ALWAYS the coordinate velocity v, whatever the kinematics.
+// The relativistic modes integrate u = gamma*v, but only inside the propagator:
+// state_from_array converts before any force model sees the state, and the
+// state handed back is v again (dense_output.cpp). So nothing outside the
+// integrator converts -- and dividing by gamma "to get v" divides twice.
 
 #include "core/attitude/attitude_state.hpp"
 #include "core/coordinates/state_vector.hpp"

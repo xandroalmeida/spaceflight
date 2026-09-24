@@ -747,3 +747,37 @@ TEST(the_annihilation_beam_is_seen_in_its_own_doppler_shifted_light) {
     REQUIRE(!parts.empty());
     CHECK(parts[0].material.plume.near.b == app::EnginePlume::style_for(0.5).sheath.b);
 }
+
+TEST(the_game_flies_relativistic_kinematics_and_never_reaches_c) {
+    // The whole RELATIVISTIC tank, burnt in the game's own session: the
+    // integrator carries u = gamma v, so the snapshot has to land on the rocket
+    // equation's 0.99328 c and stay below c. Under the Newtonian kinematics the
+    // session used to run, the same burn would have reached 2.85 c.
+    auto flight = make_flight();
+    auto& app = flight->app;
+    flight->frames(2);
+    REQUIRE(app.session().set_engine_mode("RELATIVISTIC"));
+    app.session().set_throttle(1.0);
+    for (int i = 0; i < 5; ++i) {
+        flight->press(app::Key::Period);
+    }
+    const double warp = app.controls().warp();
+    INFO(app::fmt::format("warp %.0fx", warp));
+    double peak_beta = 0.0;
+    for (int frame = 0; frame < 4000 && app.session().snapshot().propellant_kg > 0.0; ++frame) {
+        flight->frames(1);
+        peak_beta = std::max(peak_beta, app.session().snapshot().beta);
+    }
+    flight->frames(10);
+    const auto s = app.session().snapshot();
+    INFO(app::fmt::format("propellant %.3f kg, beta %.6f, gamma-1 %.4f, proper time %.3f d, coordinate %.3f d",
+                          s.propellant_kg, s.beta, s.lorentz_factor_minus_one, s.proper_time_s / 86400.0,
+                          s.elapsed_s / 86400.0));
+    CHECK(s.propellant_kg < 1.0);
+    CHECK(peak_beta < 1.0);
+    CHECK(std::isfinite(s.lorentz_factor_minus_one));
+    CHECK_NEAR_REL(s.beta, std::tanh(0.95 * std::log(20.0)), 2.0e-3,
+                   "the rocket equation's 0.99328 c; the bound covers Earth's and the Sun's gravity "
+                   "during the first minutes of the burn, which the flat-space prediction leaves out");
+    CHECK(s.proper_time_s < s.elapsed_s);
+}

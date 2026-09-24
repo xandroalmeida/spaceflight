@@ -150,6 +150,17 @@ bool FlightSession::configure(const std::string& kernel_directory, const std::st
         config.absolute_tolerance_proper_time = 1.0e-9;
         config.minimum_mass = craft_->dry_mass();
         config.max_step = time::Duration::seconds(3600.0);
+        // Special-relativistic kinematics: the integrator carries u = gamma v
+        // internally (the state it hands back is still v), thrust enters through
+        // the boost, and no amount of it takes the ship to c --
+        // the Newtonian default let 8 years of CRUISE reach 1.5 c and three days
+        // of RELATIVISTIC pass c. Gravity stays the full multibody field with J2,
+        // added as a coordinate acceleration: an approximation whose error is of
+        // order beta^2 g, and in this Solar System the ship is fast only where g
+        // is weak (docs/physics/relativistic-propulsion.md section 9). The flag
+        // is the caller owning that claim, as the propagator asks it to.
+        config.kinematics = propagation::Kinematics::SpecialRelativistic;
+        config.allow_gravity_with_relativistic_kinematics = true;
         propagator_ = std::make_unique<propagation::DormandPrince54Propagator>(*forces_, config);
         propagator_->set_inertia(inertia_.get());
 
@@ -810,7 +821,7 @@ bool FlightSession::begin_planning(celestial::BodyId target, double periapsis_al
     request.catalog = catalog_.get();
     request.craft = craft_.get();
     request.j2_bodies = {celestial::bodies::earth};
-    request.integrator = propagator_->config();
+    request.integrator = planning_integrator();
     request.initial = state_;
     request.epoch = clock_->coordinate_time();
     request.center = celestial::bodies::earth;
@@ -960,7 +971,7 @@ PlanSummary FlightSession::plan_transfer(const std::string& target_body, double 
         // against a different force model than the one that flies the result is
         // how a corrected trajectory stops being corrected.
         request.j2_bodies = {celestial::bodies::earth};
-        request.integrator = propagator_->config();
+        request.integrator = planning_integrator();
         request.initial = state_;
         request.epoch = clock_->coordinate_time();
         request.center = celestial::bodies::earth;
@@ -1295,6 +1306,17 @@ std::vector<double> FlightSession::rcs_throttles() const {
     // which the drawn jet and the burnt propellant disagree.
     const auto open = rcs_force_->throttles(state_, clock_->coordinate_time());
     return std::vector<double>(open.begin(), open.end());
+}
+
+propagation::IntegratorConfig FlightSession::planning_integrator() const {
+    // The Lambert planner reasons in two-body conics and hands its answer to a
+    // Newtonian corrector, and its campaigns were qualified that way. At a
+    // transfer's few km/s the relativistic flight differs from it by 1e-10, so it
+    // keeps its kinematics.
+    auto config = propagator_->config();
+    config.kinematics = propagation::Kinematics::Newtonian;
+    config.allow_gravity_with_relativistic_kinematics = false;
+    return config;
 }
 
 math::Vec3 FlightSession::proper_acceleration_body() const {
