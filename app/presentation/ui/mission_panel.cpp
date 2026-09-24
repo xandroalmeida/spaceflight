@@ -59,6 +59,12 @@ void MissionPanel::step_altitude(int direction) {
     altitude_index_ = ((altitude_index_ + direction) % n + n) % n;
 }
 
+void MissionPanel::toggle_transfer_kind(bool currently_direct) {
+    if (on_transfer_kind_requested) {
+        on_transfer_kind_requested(!currently_direct);
+    }
+}
+
 std::string MissionPanel::orbit_label() const { return fmt::format("%.0f km circular", current_altitude_km()); }
 
 int MissionPanel::default_altitude_for(const std::string& target) const {

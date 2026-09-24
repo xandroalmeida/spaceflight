@@ -144,6 +144,9 @@ void FlightApp::wire_controls() {
     mission_panel_.on_target_changed = [this](const std::string& target) { set_target(target); };
     mission_panel_.on_closed = [this] { show_panel(Panel::Mission, false); };
     mission_panel_.on_point_requested = [this](const std::string& mode) { controls_->point(mode); };
+    mission_panel_.on_transfer_kind_requested = [this](bool direct) {
+        controls_->set_engine_mode(direct ? FlightSession::DIRECT_TRANSFER_MODE : "IMPULSE");
+    };
 
     mission_panel_.set_targets(session_.selectable_targets(), session_.target_body());
 

@@ -75,7 +75,11 @@ public:
     // SimulationClock refuses a warp that is not strictly positive -- a stopped
     // clock is not a slow clock.
     void set_paused(bool value) { paused_ = value; }
+    // Both refuse while a plan is armed: the plan was made for the engine that
+    // was selected, and flying its burns on another mode's thrust is a
+    // different -- and unplanned -- trajectory.
     void cycle_engine_mode();
+    void set_engine_mode(const std::string& mode);
     void set_warp_index(int index);
 
     [[nodiscard]] double warp() const { return WARP_LEVELS[static_cast<std::size_t>(warp_index_)]; }

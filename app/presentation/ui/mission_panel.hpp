@@ -67,11 +67,17 @@ public:
     std::function<void(const std::string&)> on_target_changed;
     std::function<void()> on_closed;
     std::function<void(const std::string& mode)> on_point_requested;
+    // The TRANSFER row: Lambert (a conic, seconds of burn, days of coast) or
+    // Direct (guided thrust the whole way). It is not the panel's state -- it
+    // follows the engine mode, and asking for the other one asks for the mode
+    // that plans it.
+    std::function<void(bool direct)> on_transfer_kind_requested;
 
     void set_targets(const std::vector<std::string>& names, const std::string& current);
     [[nodiscard]] std::string current_target() const;
     void step_target(int direction);
     void step_altitude(int direction);
+    void toggle_transfer_kind(bool currently_direct);
     [[nodiscard]] double current_altitude_km() const {
         return ALTITUDES_KM[static_cast<std::size_t>(altitude_index_)];
     }

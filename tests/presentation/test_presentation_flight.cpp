@@ -805,6 +805,14 @@ TEST(the_computer_flies_a_direct_relativistic_transfer_to_the_moon) {
     CHECK(plan.time_of_flight_s < 3600.0);
     REQUIRE(session.arm_plan());
 
+    // Armed, the engine mode is locked -- by the key and by the panel alike: the
+    // plan's burns were made for this engine.
+    flight->press(app::Key::G);
+    CHECK_EQ(session.engine_mode(), std::string{"RELATIVISTIC"});
+    CHECK(has_message(app, "engine mode locked"));
+    app.mission_panel().toggle_transfer_kind(true);
+    CHECK_EQ(session.engine_mode(), std::string{"RELATIVISTIC"});
+
     const double start = session.snapshot().elapsed_s;
     double peak_real_g = 0.0;
     double peak_cabin_g = 0.0;
@@ -847,4 +855,23 @@ TEST(the_computer_flies_a_direct_relativistic_transfer_to_the_moon) {
     CHECK_NEAR_ABS(orbit.periapsis_m / 1000.0 - moon_radius_km, 100.0, 5.0,
                    "the requested 100 km, as flown by the game; the plan's own flight measured it under 1 km off");
     CHECK_NEAR_ABS(orbit.apoapsis_m / 1000.0 - moon_radius_km, 100.0, 5.0, "and its apoapsis");
+}
+
+TEST(the_mission_computer_offers_the_direct_transfer_by_name) {
+    // The TRANSFER row: DIRECT is the RELATIVISTIC engine, LAMBERT anything
+    // else, and the row's arrows switch the engine the way G does.
+    auto flight = make_flight();
+    auto& app = flight->app;
+    auto& session = app.session();
+    flight->frames(2);
+    CHECK(session.transfer_kind() == navigation::TransferKind::Lambert);
+
+    app.mission_panel().toggle_transfer_kind(false);
+    CHECK_EQ(session.engine_mode(), std::string{"RELATIVISTIC"});
+    CHECK(session.transfer_kind() == navigation::TransferKind::Direct);
+    CHECK(has_message(app, "ENGINE RELATIVISTIC"));
+
+    app.mission_panel().toggle_transfer_kind(true);
+    CHECK_EQ(session.engine_mode(), std::string{"IMPULSE"});
+    CHECK(session.transfer_kind() == navigation::TransferKind::Lambert);
 }

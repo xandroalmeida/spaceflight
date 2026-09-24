@@ -244,6 +244,15 @@ void Interface::mission_panel(app::FlightApp& app) {
     };
     const std::string target = panel.targets().empty() ? std::string{"—"} : app::fmt::upper(panel.current_target());
     row("TARGET", target, palette::TARGET, 1, [&](int d) { panel.step_target(d); });
+    // How the computer will get there, read from the engine mode: RELATIVISTIC
+    // plans a direct transfer, anything else a Lambert conic. The arrows ask for
+    // the other one, which switches the engine the way G does.
+    {
+        const bool direct = app.session().transfer_kind() == navigation::TransferKind::Direct;
+        const std::string kind = direct ? "DIRECT · 100 g" : "LAMBERT · " + app.session().engine_mode();
+        row("TRANSFER", kind, direct ? palette::ENGINE_ANNIHILATION : palette::PRIMARY, 3,
+            [&](int) { panel.toggle_transfer_kind(direct); });
+    }
     row("TARGET ORBIT", panel.orbit_label(), palette::PRIMARY, 2, [&](int d) { panel.step_altitude(d); });
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0F, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(panel.plan_button_text().c_str()).x - 20.0F));

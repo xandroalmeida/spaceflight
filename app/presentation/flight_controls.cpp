@@ -151,8 +151,25 @@ void FlightControls::set_warp_index(int index) {
 }
 
 void FlightControls::cycle_engine_mode() {
+    if (session_.has_plan()) {
+        message("PLAN ARMED -- engine mode locked to " + session_.engine_mode(), MessageLevel::Warning);
+        return;
+    }
     session_.cycle_engine_mode();
     message("ENGINE " + session_.engine_mode(), MessageLevel::Info);
+}
+
+void FlightControls::set_engine_mode(const std::string& mode) {
+    if (mode == session_.engine_mode()) {
+        return;
+    }
+    if (session_.has_plan()) {
+        message("PLAN ARMED -- engine mode locked to " + session_.engine_mode(), MessageLevel::Warning);
+        return;
+    }
+    if (session_.set_engine_mode(mode)) {
+        message("ENGINE " + session_.engine_mode(), MessageLevel::Info);
+    }
 }
 
 }  // namespace sf::app

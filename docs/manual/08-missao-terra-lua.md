@@ -145,7 +145,11 @@ que diz se o simulador prevê a própria física.
 
 ## Com o motor em `RELATIVISTIC`: a viagem direta
 
-Selecione `RELATIVISTIC` com `{{key:engine_mode}}` **antes** de planejar, e o
+No computador de bordo (`{{key:nav_panel}}`), a linha **TRANSFER**, logo
+abaixo de TARGET, diz como o computador vai chegar lá: `LAMBERT` ou
+`DIRECT · 100 g`. As setas ◀ ▶ trocam uma pela outra — e trocam o motor junto,
+porque a viagem direta é o que o modo `RELATIVISTIC` planeja (a tecla
+`{{key:engine_mode}}` faz o mesmo, e a linha acompanha). Com `DIRECT`, o
 computador muda de estratégia: em vez de uma transferência com alguns segundos de
 queima e dias de voo livre, ele planeja uma **viagem direta** — o motor empurra o
 caminho inteiro, guiado, acelerando no primeiro terço e freando no resto, e chega
@@ -166,8 +170,9 @@ Durante a queima o motor mostra a pluma, o som e o empuxo; o acelerômetro marca
 aceleração real (75 g e subindo) e a cabine fica em 1 g, pelo compensador inercial.
 A nave vira sozinha a um terço do caminho, para começar a frear.
 
-⚠️ Não troque o modo do motor depois de armar: o plano foi feito para o motor que
-estava selecionado.
+Com o plano armado o modo do motor fica **travado** — pela tecla e pelo painel —,
+porque o plano foi feito para o motor que estava selecionado. Aborte o plano para
+trocar.
 
 ## Abortar
 
