@@ -1,6 +1,7 @@
 #include "core/navigation/mission_planner.hpp"
 
 #include "core/coordinates/reference_frame.hpp"
+#include "core/navigation/direct_transfer.hpp"
 #include "core/trajectory/orbital_elements.hpp"
 #include "core/units/constants.hpp"
 
@@ -354,6 +355,9 @@ MissionPlanResult plan_mission(const SimulationState& state,
         throw std::invalid_argument(
             "plan_mission: no spacecraft; a transfer is a property of a ship as much as "
             "of a geometry");
+    }
+    if (request.kind == TransferKind::Direct) {
+        return plan_direct_mission(state, request);
     }
     if (request.time_of_flight.days.empty()) {
         throw std::invalid_argument(

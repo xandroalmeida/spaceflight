@@ -92,6 +92,8 @@ target_sources(test_planner_equivalence PRIVATE
     "${CMAKE_SOURCE_DIR}/app/session/transfer_bridge.cpp")
 # Flies the full production search twice, once per caller.
 set_tests_properties(scientific.planner_equivalence PROPERTIES TIMEOUT 600)
+spaceflight_add_test(scientific direct_transfer)
+set_tests_properties(scientific.direct_transfer PROPERTIES TIMEOUT 1800)
 spaceflight_add_test(scientific blackbody_colour)
 spaceflight_add_test(scientific terrell_rotation)
 spaceflight_add_test(scientific relativistic_sky)

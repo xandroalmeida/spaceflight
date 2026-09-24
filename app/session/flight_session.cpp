@@ -162,6 +162,9 @@ bool FlightSession::configure(const std::string& kernel_directory, const std::st
         config.kinematics = propagation::Kinematics::SpecialRelativistic;
         config.allow_gravity_with_relativistic_kinematics = true;
         propagator_ = std::make_unique<propagation::DormandPrince54Propagator>(*forces_, config);
+        // The executor turns a guided command into the thrust that produces it,
+        // and that conversion depends on the kinematics.
+        executor_->set_kinematics(config.kinematics);
         propagator_->set_inertia(inertia_.get());
 
         clock_ = std::make_unique<simulation::SimulationClock>(epoch_time);
@@ -346,6 +349,21 @@ void FlightSession::advance(double wall_seconds) {
             if (pointing_ != nullptr) {
                 if (const auto command = mission_.pointing_command(); command.has_value()) {
                     pointing_->set_command(*command);
+                }
+                // A guided burn turns as it goes -- and a third of the way it
+                // turns right round -- so its direction is the law's, asked of
+                // the executor every frame, until the engine stops.
+                if (executor_ != nullptr && plan_ != nullptr) {
+                    const auto now = clock_->coordinate_time();
+                    for (const auto& maneuver : plan_->maneuvers()) {
+                        if (maneuver.guidance == navigation::GuidanceMode::Rendezvous && now < maneuver.cutoff()) {
+                            attitude::PointingCommand command{};
+                            command.mode = navigation::GuidanceMode::Inertial;
+                            command.inertial_direction = executor_->thrust_direction(state_, now, maneuver);
+                            pointing_->set_command(command);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -822,6 +840,7 @@ bool FlightSession::begin_planning(celestial::BodyId target, double periapsis_al
     request.craft = craft_.get();
     request.j2_bodies = {celestial::bodies::earth};
     request.integrator = planning_integrator();
+    request.kind = transfer_kind();
     request.initial = state_;
     request.epoch = clock_->coordinate_time();
     request.center = celestial::bodies::earth;
@@ -972,6 +991,7 @@ PlanSummary FlightSession::plan_transfer(const std::string& target_body, double 
         // how a corrected trajectory stops being corrected.
         request.j2_bodies = {celestial::bodies::earth};
         request.integrator = planning_integrator();
+        request.kind = transfer_kind();
         request.initial = state_;
         request.epoch = clock_->coordinate_time();
         request.center = celestial::bodies::earth;
@@ -1030,6 +1050,10 @@ PlanSummary FlightSession::plan() const {
     out.armed = mission_.armed();
     out.time_of_flight_s = m.time_of_flight_s;
     out.time_of_flight_days = m.time_of_flight_s / 86400.0;
+    out.direct = m.direct;
+    out.station = m.station;
+    out.peak_speed_ms = m.peak_speed;
+    out.arrival_miss_m = m.arrival_miss;
     out.transfer_angle_deg = m.transfer_angle.degrees();
     out.branch = m.branch == trajectory::TransferDirection::Prograde ? "prograde" : "retrograde";
 
@@ -1319,19 +1343,39 @@ propagation::IntegratorConfig FlightSession::planning_integrator() const {
     return config;
 }
 
+math::Vec3 FlightSession::propulsive_thrust() const {
+    if (clock_ == nullptr) {
+        return {};
+    }
+    // The force model's own answers, not a second derivation: the engine's
+    // evaluate() knows that an empty tank gives no thrust (current_thrust() only
+    // knows the throttle), and the executor is what flies a plan -- a planned
+    // burn is thrust too, and reading only the pilot's engine left every planned
+    // burn without a plume, a sound or an accelerometer reading.
+    const auto t = clock_->coordinate_time();
+    math::Vec3 force{};
+    if (main_engine_ != nullptr) {
+        force += main_engine_->evaluate(state_, t).proper_thrust;
+    }
+    if (executor_ != nullptr) {
+        force += executor_->evaluate(state_, t).proper_thrust;
+    }
+    return force;
+}
+
+navigation::TransferKind FlightSession::transfer_kind() const {
+    return craft_ != nullptr && craft_->mode_name() == DIRECT_TRANSFER_MODE ? navigation::TransferKind::Direct
+                                                                            : navigation::TransferKind::Lambert;
+}
+
 math::Vec3 FlightSession::proper_acceleration_body() const {
     const double mass = snapshot_.spacecraft.mass;
     if (!(mass > 0.0) || clock_ == nullptr) {
         return {};
     }
-    // Both terms are the force model's own answers at the snapshot's state and
-    // epoch, not a second derivation of them: the engine's evaluate() is what
-    // knows that an empty tank gives no thrust (current_thrust() only knows the
-    // throttle), and the RCS gets the same throttles the integrator is fed.
-    math::Vec3 force{};
-    if (main_engine_ != nullptr) {
-        force = math::Vec3::unit_x() * main_engine_->evaluate(state_, clock_->coordinate_time()).proper_thrust.norm();
-    }
+    // The propulsive thrust, turned into the body frame, plus the RCS's net force
+    // from the same throttles the integrator is fed.
+    math::Vec3 force = state_.attitude.orientation.rotate_inverse(propulsive_thrust());
     if (rcs_ != nullptr) {
         force += rcs_->evaluate(rcs_throttles()).force_body;
     }
@@ -1884,7 +1928,9 @@ SnapshotView FlightSession::snapshot() const {
     out.mass_kg = craft.mass;
     out.propellant_kg = craft.propellant;
     out.delta_v_budget_ms = craft.delta_v_budget;
-    out.thrust_n = main_engine_ != nullptr ? main_engine_->current_thrust() : 0.0;
+    // What the force model applies -- the pilot's engine and a planned burn --
+    // and zero with the tank empty, whatever the throttle says.
+    out.thrust_n = propulsive_thrust().norm();
     out.throttle = throttle();
     out.engine_mode = engine_mode();
     out.mass_flow_kg_s = craft.mass_flow;

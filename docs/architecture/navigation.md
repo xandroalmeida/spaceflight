@@ -183,6 +183,22 @@ qual limite lateral vale é quem sabe qual trecho está sendo integrado. Sem arm
 o executor responde por consulta ao tempo — correto como função de `t`, e caro
 como dinâmica.
 
+### 5.2 Guiagem de encontro: o empuxo que se recalcula
+
+`GuidanceMode::Rendezvous` é o único modo em que o executor decide também a
+**intensidade**: a cada avaliação ele calcula, pela lei de energia mínima com
+aceleração terminal nula, a aceleração coordenada que leva a nave ao estado de
+chegada prescrito relativo ao destino, converte em empuxo próprio exatamente para
+a cinemática em uso (`set_kinematics`; `F∥ = γ³ m a∥`, `F⊥ = γ² m a⊥`) e limita
+ao teto do motor. O consumo acompanha o empuxo pedido. É o que a transferência
+direta voa ([`direct-transfer-guidance.md`](../physics/direct-transfer-guidance.md)).
+
+A lei é contínua no estado e no tempo, então dentro de um trecho armado a força
+continua suave, como o integrador exige. A transferência direta a escreve em
+**dois** trechos com a mesma lei — `injection` e `insertion` —, e a emenda não é
+descontinuidade nenhuma: é só o nome que muda, para que as fases da missão saibam
+qual metade é qual.
+
 ## 6. O planejador
 
 `TrajectoryPlanner` produz `ManeuverPlan` a partir de objetivos. No Milestone 1:
@@ -193,6 +209,12 @@ como dinâmica.
 | transferência circular↔circular coplanar | Hohmann de dois impulsos | este, §7 |
 | escapar da Terra | queima tangencial até `energia ≥ 0` | este, §7 |
 | interceptar um corpo | Lambert + targeting diferencial | `docs/physics/lambert.md` §6 |
+
+Com o motor em RELATIVÍSTICO o computador de bordo pede uma **transferência
+direta** (`TransferKind::Direct`, `core/navigation/direct_transfer.hpp`): empuxo
+guiado o caminho inteiro, em vez de uma cônica de Lambert. Ela passa pela mesma
+porta — `plan_mission` — e devolve o mesmo `MissionPlanResult`, então armar,
+executar, as fases e o painel não sabem a diferença.
 
 O planejador recebe um `EphemerisProvider` e o estado atual; devolve dados. Ele
 **não** propaga a nave para "ver se dá certo" — quem verifica é quem chamou, e a

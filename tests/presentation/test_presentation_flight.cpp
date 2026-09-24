@@ -781,3 +781,70 @@ TEST(the_game_flies_relativistic_kinematics_and_never_reaches_c) {
                    "during the first minutes of the burn, which the flat-space prediction leaves out");
     CHECK(s.proper_time_s < s.elapsed_s);
 }
+
+TEST(the_computer_flies_a_direct_relativistic_transfer_to_the_moon) {
+    // The whole loop in the game's own session: RELATIVISTIC selected, the
+    // computer asked for the Moon, the plan armed and flown under warp to a
+    // finished mission -- and, while the guided burn runs, the ship visibly
+    // pushing: thrust, plume intensity, a hundred g on the hull and one in the
+    // cabin.
+    auto flight = make_flight();
+    auto& app = flight->app;
+    auto& session = app.session();
+    flight->frames(2);
+    REQUIRE(session.set_engine_mode("RELATIVISTIC"));
+
+    const auto plan = session.plan_transfer("Moon", 100.0, 100.0, 2.0);
+    INFO(app::fmt::format("plan: valid %d direct %d, %.1f min, %.1f km/s, %.1f kg, miss %.2f m, pe %.1f km, ap %.1f km -- %s",
+                          plan.valid ? 1 : 0, plan.direct ? 1 : 0, plan.time_of_flight_s / 60.0,
+                          plan.total_delta_v / 1000.0, plan.propellant_required_kg, plan.arrival_miss_m,
+                          plan.predicted_periapsis_m / 1000.0, plan.predicted_apoapsis_m / 1000.0,
+                          session.last_error().c_str()));
+    REQUIRE(plan.valid);
+    CHECK(plan.direct);
+    CHECK(plan.time_of_flight_s < 3600.0);
+    REQUIRE(session.arm_plan());
+
+    const double start = session.snapshot().elapsed_s;
+    double peak_real_g = 0.0;
+    double peak_cabin_g = 0.0;
+    double peak_thrust = 0.0;
+    double peak_beta = 0.0;
+    session.set_time_warp(10.0);
+    for (int frame = 0; frame < 20000; ++frame) {
+        flight->frames(1);
+        const auto s = session.snapshot();
+        peak_thrust = std::max(peak_thrust, s.thrust_n);
+        peak_beta = std::max(peak_beta, s.beta);
+        peak_real_g = std::max(peak_real_g, app.instrument_data().proper_acceleration_ms2 / units::g0);
+        peak_cabin_g = std::max(peak_cabin_g, app.instrument_data().cabin_acceleration_ms2 / units::g0);
+        const auto phase = session.mission_phase();
+        if (phase == "COMPLETE" || phase == "FAILED" || phase == "ABORTED") {
+            break;
+        }
+        // In orbit, the mission is declared after one revolution: two hours of
+        // coasting, flown faster.
+        if (phase == "ORBIT_INSERTION" && session.time_warp() < 100.0) {
+            session.set_time_warp(100.0);
+        }
+    }
+    const auto orbit = session.orbit_about_target();
+    const double elapsed_min = (session.snapshot().elapsed_s - start) / 60.0;
+    INFO(app::fmt::format("phase %s after %.1f min; peak thrust %.3e N, real %.1f g, cabin %.3f g, beta %.5f; "
+                          "orbit about %s: pe %.1f km, ap %.1f km, e %.5f",
+                          session.mission_phase().c_str(), elapsed_min, peak_thrust, peak_real_g, peak_cabin_g,
+                          peak_beta, orbit.body.c_str(), orbit.periapsis_m / 1000.0, orbit.apoapsis_m / 1000.0,
+                          orbit.eccentricity));
+    CHECK_EQ(session.mission_phase(), std::string{"COMPLETE"});
+    CHECK(peak_thrust > 1.0e7);          // the planned burn shows as thrust
+    CHECK(peak_real_g > 50.0);           // the hull feels the engine
+    CHECK(peak_cabin_g <= 1.0 + 1e-9);   // the crew, one g at most
+    CHECK(peak_beta < 0.01);
+    REQUIRE(orbit.valid);
+    CHECK_EQ(orbit.body, std::string{"Moon"});
+    // orbit_about_target reports radii from the Moon's centre.
+    const double moon_radius_km = 1737.4;
+    CHECK_NEAR_ABS(orbit.periapsis_m / 1000.0 - moon_radius_km, 100.0, 5.0,
+                   "the requested 100 km, as flown by the game; the plan's own flight measured it under 1 km off");
+    CHECK_NEAR_ABS(orbit.apoapsis_m / 1000.0 - moon_radius_km, 100.0, 5.0, "and its apoapsis");
+}

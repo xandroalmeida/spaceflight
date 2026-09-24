@@ -28,6 +28,7 @@ GuidanceMode reversed(GuidanceMode mode) {
         // the VECTOR, and the hull's nose is flipped by turning the ship round,
         // which is the attitude controller's business and not a planner's.
         case GuidanceMode::Hull:       return GuidanceMode::Hull;
+        case GuidanceMode::Rendezvous: return GuidanceMode::Rendezvous;
     }
     return mode;
 }

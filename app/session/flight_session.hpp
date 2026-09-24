@@ -174,6 +174,13 @@ struct PlanSummary {
     double rcs_duty_cycle{0.0};
     double torque_saturation{0.0};
 
+    // Direct transfers (continuous guided thrust): the plan is not a conic, and
+    // these say so.
+    bool direct{false};
+    bool station{false};
+    double peak_speed_ms{0.0};
+    double arrival_miss_m{0.0};
+
     std::string phase;
     int burns{0};
     bool burning{false};
@@ -546,6 +553,13 @@ public:
     // force: it changes nothing the integrator sees, and the trajectory is flown
     // with the whole proper acceleration. Below the limit it does nothing.
     static constexpr double CABIN_LIMIT_MS2 = units::g0;
+    // The main engine's thrust, the pilot's and the plan's together, as the force
+    // model applies it at the snapshot's state and epoch -- inertial frame [N].
+    [[nodiscard]] math::Vec3 propulsive_thrust() const;
+    // The mode whose engine can push the whole way: planning with it selected
+    // asks for a direct transfer instead of a Lambert conic.
+    static constexpr const char* DIRECT_TRANSFER_MODE = "RELATIVISTIC";
+    [[nodiscard]] navigation::TransferKind transfer_kind() const;
     [[nodiscard]] math::Vec3 cabin_acceleration_body() const;
 
     // --- orbit geometry (Milestone 7) ---------------------------------------

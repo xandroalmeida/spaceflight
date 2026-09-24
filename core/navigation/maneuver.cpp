@@ -30,6 +30,7 @@ std::string_view to_string(GuidanceMode mode) {
         case GuidanceMode::RadialOut:  return "RADIAL_OUT";
         case GuidanceMode::RadialIn:   return "RADIAL_IN";
         case GuidanceMode::Hull:       return "HULL";
+        case GuidanceMode::Rendezvous: return "RENDEZVOUS";
     }
     return "?";
 }
@@ -44,6 +45,7 @@ std::optional<GuidanceMode> guidance_from_string(std::string_view name) {
     if (key == "radial_out" || key == "radialout") return GuidanceMode::RadialOut;
     if (key == "radial_in" || key == "radialin") return GuidanceMode::RadialIn;
     if (key == "hull") return GuidanceMode::Hull;
+    if (key == "rendezvous") return GuidanceMode::Rendezvous;
     return std::nullopt;
 }
 
@@ -58,6 +60,11 @@ void Maneuver::validate() const {
     }
     if (!duration.is_finite() || !ignition.is_finite()) {
         throw std::invalid_argument("maneuver \"" + name + "\": non-finite epoch or duration");
+    }
+    if (guidance == GuidanceMode::Rendezvous && !(arrival > cutoff())) {
+        throw std::invalid_argument("maneuver \"" + name +
+                                    "\": RENDEZVOUS guidance needs its arrival after the cutoff "
+                                    "(the law diverges as the time to go reaches zero)");
     }
     if (guidance == GuidanceMode::Inertial && inertial_direction.norm() <= 0.0) {
         throw std::invalid_argument("maneuver \"" + name +

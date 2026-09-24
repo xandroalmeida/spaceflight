@@ -69,6 +69,7 @@ sf::navigation::MissionRequest request_for(const SceneTransferRequest& request) 
     // tolerance are left at the request type's defaults -- which ARE the values
     // the 365/365 campaign was qualified with.  The cockpit does not get to
     // override them and must not grow a dial for any of them; see the header.
+    plan.kind = request.kind;
     plan.spacecraft.vehicle = request.craft;
     plan.spacecraft.execution = request.execution;
     plan.spacecraft.pointing = request.pointing;

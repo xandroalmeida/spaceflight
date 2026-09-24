@@ -95,6 +95,8 @@ struct SceneTransferRequest {
     // has an attitude controller and the pointing lag is real -- and it is the
     // model docs/validation/autopilot-hardening.md qualified.
     sf::navigation::ExecutionModel execution{sf::navigation::ExecutionModel::Autopilot};
+    // Lambert, or continuous guided thrust the whole way (direct_transfer.hpp).
+    sf::navigation::TransferKind kind{sf::navigation::TransferKind::Lambert};
     sf::attitude::PointingGains pointing{};
 
     // The cockpit draws the planned arc, so it asks for one.

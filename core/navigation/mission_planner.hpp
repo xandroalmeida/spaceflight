@@ -312,7 +312,14 @@ struct SearchEffort {
 // ---------------------------------------------------------------------------
 // The request (section 4).
 // ---------------------------------------------------------------------------
+// Which kind of transfer to plan. Lambert is the conic with an injection and a
+// capture and days of coast; Direct is continuous guided thrust the whole way,
+// for an engine strong enough to push that long (core/navigation/
+// direct_transfer.hpp).
+enum class TransferKind { Lambert, Direct };
+
 struct MissionRequest {
+    TransferKind kind{TransferKind::Lambert};
     celestial::BodyId origin{celestial::bodies::earth};
     celestial::BodyId destination{celestial::bodies::moon};
 
@@ -437,6 +444,13 @@ struct MissionMetrics {
 
     // Autopilot only; zero for the other two models, where the guidance law IS
     // the thrust direction and there is nothing to lag.
+    // Direct transfers only (TransferKind::Direct).
+    bool direct{false};
+    bool station{false};                 // arrived at a point, not in an orbit
+    double peak_speed{0.0};              // [m/s] relative to the origin, over the flight
+    double arrival_miss{0.0};            // [m]   from the prescribed arrival point
+    double arrival_speed_error{0.0};     // [m/s] from the prescribed arrival velocity
+
     units::Angle pointing_error_mean{units::Angle::radians(0.0)};
     units::Angle pointing_error_peak{units::Angle::radians(0.0)};
     double rcs_propellant{0.0};      // [kg]

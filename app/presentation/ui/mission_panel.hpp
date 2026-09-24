@@ -114,6 +114,7 @@ public:
 private:
     [[nodiscard]] int default_altitude_for(const std::string& target) const;
     void format(const PlanSummary& plan);
+    void format_direct(const PlanSummary& plan);
 
     std::vector<std::string> targets_;
     int target_index_{0};

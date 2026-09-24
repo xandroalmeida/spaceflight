@@ -143,6 +143,32 @@ periapsis, apoapsis, excentricidade, inclinação, propelente e Δv de captura, 
 a diferença entre o que o planejador disse e o que a integração fez. É a linha
 que diz se o simulador prevê a própria física.
 
+## Com o motor em `RELATIVISTIC`: a viagem direta
+
+Selecione `RELATIVISTIC` com `{{key:engine_mode}}` **antes** de planejar, e o
+computador muda de estratégia: em vez de uma transferência com alguns segundos de
+queima e dias de voo livre, ele planeja uma **viagem direta** — o motor empurra o
+caminho inteiro, guiado, acelerando no primeiro terço e freando no resto, e chega
+já em órbita.
+
+| destino | viagem direta a 100 g | por Lambert |
+|---|---|---|
+| Lua | ~40 min | 3 a 5 dias |
+| Mercúrio, Vênus, Marte | ~16 a 21 h | meses |
+
+O painel mostra `FLIGHT TIME` em minutos ou horas, a velocidade máxima, o Δv de
+aceleração e de frenagem, o propelente e a órbita prevista — tudo medido num voo
+de verificação que o computador faz antes de oferecer o plano. Em Fobos e Deimos
+não existe órbita a essas altitudes (a esfera de Hill de Fobos tem 16 km), e o
+plano chega a um **ponto de estacionamento**, parado em relação à lua, e diz isso.
+
+Durante a queima o motor mostra a pluma, o som e o empuxo; o acelerômetro marca a
+aceleração real (75 g e subindo) e a cabine fica em 1 g, pelo compensador inercial.
+A nave vira sozinha a um terço do caminho, para começar a frear.
+
+⚠️ Não troque o modo do motor depois de armar: o plano foi feito para o motor que
+estava selecionado.
+
 ## Abortar
 
 `{{key:mission_abort}}` cancela o plano e devolve a atitude ao piloto. A nave

@@ -242,6 +242,10 @@ void MissionPanel::format(const PlanSummary& p) {
     summary_.push_back(plain(""));
     summary_.push_back(row("DEPARTURE", departure > 0.0 ? "in " + fmt::duration(departure) : "passed"));
     summary_.push_back(row("ARRIVAL", arrival > 0.0 ? "in " + fmt::duration(arrival) : "passed"));
+    if (p.direct) {
+        format_direct(p);
+        return;
+    }
     summary_.push_back(row("FLIGHT TIME", fmt::format("%.2f days   %s branch", p.time_of_flight_days,
                                                       p.branch.empty() ? "?" : p.branch.c_str())));
     summary_.push_back(row("TRANSFER ANGLE", fmt::format("%.1f°", p.transfer_angle_deg)));
@@ -268,6 +272,43 @@ void MissionPanel::format(const PlanSummary& p) {
     summary_.push_back(row("  ECC", fmt::format("%.5f", p.predicted_eccentricity)));
     summary_.push_back(row("  INC", fmt::format("%.2f°   RAAN %.1f°", p.predicted_inclination_deg,
                                                 p.predicted_raan_deg)));
+}
+
+void MissionPanel::format_direct(const PlanSummary& p) {
+    // A direct transfer is not a conic: no branch, no transfer angle, no coast.
+    // It is one guided burn the whole way -- accelerating for the first third,
+    // braking for the rest -- and what the pilot needs is how long, how fast and
+    // what it costs (docs/physics/direct-transfer-guidance.md).
+    summary_.push_back(row("FLIGHT TIME", fmt::duration(p.time_of_flight_s) + "   continuous thrust"));
+    summary_.push_back(row("PEAK SPEED", fmt::speed(p.peak_speed_ms)));
+    summary_.push_back(plain(""));
+    summary_.push_back(row("ACCELERATE", fmt::format("%.1f km/s over ", p.injection_delta_v / 1000.0) +
+                                             fmt::duration(p.injection_duration_s)));
+    summary_.push_back(row("BRAKE", fmt::format("%.1f km/s over ", p.insertion_delta_v / 1000.0) +
+                                        fmt::duration(p.insertion_duration_s)));
+    {
+        TextLine total = row("TOTAL ΔV", "");
+        total.back().text = "  ";
+        total.push_back(TextSpan{fmt::format("%.1f km/s", p.total_delta_v / 1000.0), kTotal});
+        total.push_back(TextSpan{" of " + fmt::speed(p.delta_v_available) + " available", palette::PRIMARY});
+        summary_.push_back(total);
+    }
+    summary_.push_back(plain(""));
+    summary_.push_back(row("PROPELLANT", fmt::format("%.1f kg required, %.1f kg left after", p.propellant_required_kg,
+                                                     p.propellant_remaining_kg)));
+    summary_.push_back(plain(""));
+    if (p.station) {
+        summary_.push_back(plain("STATION POINT AT ARRIVAL -- no orbit fits inside its Hill sphere", kLabel));
+        summary_.push_back(row("  DISTANCE", fmt::distance(p.predicted_periapsis_m) + " above the surface"));
+    } else {
+        summary_.push_back(plain("PREDICTED ORBIT AT ARRIVAL", kLabel));
+        summary_.push_back(row("  PE", fmt::distance(p.predicted_periapsis_m)));
+        summary_.push_back(row("  AP", fmt::distance(p.predicted_apoapsis_m)));
+        summary_.push_back(row("  ECC", fmt::format("%.5f", p.predicted_eccentricity)));
+        summary_.push_back(row("  INC", fmt::format("%.2f°   RAAN %.1f°", p.predicted_inclination_deg,
+                                                    p.predicted_raan_deg)));
+    }
+    summary_.push_back(row("  MISS", fmt::format("%.1f m from the arrival point, as flown", p.arrival_miss_m)));
 }
 
 }  // namespace sf::app

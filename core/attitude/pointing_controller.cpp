@@ -42,6 +42,10 @@ std::optional<Vec3> PointingController::direction_for(navigation::GuidanceMode m
         // and would report zero error from any attitude.  Answering nullopt sends
         // it down the HOLD path, which is the honest reading.
         case navigation::GuidanceMode::Hull:       return std::nullopt;
+        // A rendezvous direction needs the arrival and the ephemeris, which the
+        // maneuver carries and a pointing command does not: the caller asks the
+        // executor for it and commands it as INERTIAL, every frame.
+        case navigation::GuidanceMode::Rendezvous: return std::nullopt;
         case navigation::GuidanceMode::Inertial:   break;
     }
     return command_.inertial_direction.normalized();

@@ -8,6 +8,7 @@
 #include "core/ephemeris/ephemeris_provider.hpp"
 #include "core/gravity/force_model.hpp"
 #include "core/navigation/maneuver.hpp"
+#include "core/propagation/spacecraft_propagator.hpp"
 #include "core/spacecraft/spacecraft.hpp"
 
 namespace sf::navigation {
@@ -30,6 +31,27 @@ public:
     [[nodiscard]] math::Vec3 thrust_direction(const propagation::PropagationState& state,
                                               time::CoordinateTime t,
                                               const Maneuver& maneuver) const;
+
+    // The rest-frame thrust vector a RENDEZVOUS maneuver asks for at this state,
+    // already limited to what the engine gives at the maneuver's throttle [N].
+    // docs/physics/direct-transfer-guidance.md sections 2 and 3.
+    [[nodiscard]] math::Vec3 rendezvous_thrust(const propagation::PropagationState& state,
+                                               time::CoordinateTime t, const Maneuver& maneuver) const;
+    // The rest-frame thrust that produces exactly `coordinate_acceleration` for
+    // a ship moving at `velocity` (coordinate), under `kinematics` [N].
+    [[nodiscard]] static math::Vec3 proper_thrust_for(const math::Vec3& coordinate_acceleration,
+                                                      const math::Vec3& velocity, double mass,
+                                                      propagation::Kinematics kinematics);
+    // The coordinate acceleration the law commands, before any conversion.
+    [[nodiscard]] math::Vec3 rendezvous_acceleration(const propagation::PropagationState& state,
+                                                     time::CoordinateTime t,
+                                                     const Maneuver& maneuver) const;
+
+    // Which kinematics the integrator runs, so that a commanded coordinate
+    // acceleration becomes the rest-frame thrust that produces exactly it:
+    // F = m a under Newton, F = gamma m M^-1 du/dt under special relativity.
+    void set_kinematics(propagation::Kinematics kinematics) { kinematics_ = kinematics; }
+    [[nodiscard]] propagation::Kinematics kinematics() const noexcept { return kinematics_; }
 
     // Selects which one-sided limit to evaluate at a switch instant.
     //
@@ -70,6 +92,7 @@ private:
     coordinates::ReferenceFrame frame_;
     const Maneuver* armed_{nullptr};
     bool use_armed_{false};
+    propagation::Kinematics kinematics_{propagation::Kinematics::Newtonian};
 };
 
 }  // namespace sf::navigation
