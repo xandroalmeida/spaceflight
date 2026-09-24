@@ -47,7 +47,7 @@ câmera não muda um número do estado.
 | `Ctrl` | fecha o acelerador |
 | `Z` | acelerador cheio |
 | `X` | corte do motor |
-| `G` | modo IMPULSE / CRUISE |
+| `G` | modo IMPULSE / CRUISE / RELATIVISTIC |
 | `V` | RCS ligado / desligado |
 | `B` | RCS rotação / translação |
 

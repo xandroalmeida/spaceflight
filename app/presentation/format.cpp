@@ -176,7 +176,10 @@ std::string g_load(double ms2) {
     if (std::abs(g) < 10.0) {
         return format("%.2f g", g);
     }
-    return format("%.1f g", g);
+    if (std::abs(g) < 1000.0) {
+        return format("%.1f g", g);
+    }
+    return format("%.0f g", g);
 }
 
 std::string force(double newtons) {

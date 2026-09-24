@@ -50,7 +50,7 @@
     "key": "X"
   },
   "engine_mode": {
-    "description": "modo IMPULSE / CRUISE",
+    "description": "modo IMPULSE / CRUISE / RELATIVISTIC",
     "group": "MOTOR",
     "key": "G"
   },

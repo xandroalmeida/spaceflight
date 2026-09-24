@@ -250,6 +250,42 @@ artefato de modelagem: é a equação do foguete mais `F = ma`. Verificado em
 O mesmo tanque em modo IMPULSO chega a `β = 0,0896`. Empuxo nenhum conserta uma
 velocidade de exaustão baixa.
 
+### 4.7 Uma segunda usina: o modo RELATIVÍSTICO
+
+Oito anos de queima são o preço de 11 kN. Mais empuxo com a mesma `w` só existe
+com **mais potência**, e mais potência não é um terceiro ponto de operação da
+usina de 900 GW: a potência fixa, subir `w` para perto de `c` **baixa** o empuxo
+(§4.5). Então o modo novo declara uma usina própria — ficção declarada, um
+reator de aniquilação matéria–antimatéria atrás do mesmo bocal — e a invariante
+de §4.5 passa a valer **por usina**: cada modo diz em que usina roda (`"plant"`,
+`"main"` se omitido), e o construtor exige potência igual dentro de cada uma.
+Um modo que consome outra potência sem dizer de onde ela vem continua recusado.
+
+| | RELATIVÍSTICO |
+|---|---|
+| usina | `annihilation`, 4,26·10¹⁵ W (4 730× a de fusão) |
+| `w` | 0,95 c (`γ_w` = 3,20) |
+| `q_max` | 6,8866·10⁻² kg/s |
+| **empuxo** | 1,9613·10⁷ N — **100 g** na nave cheia, **2 000 g** no casco vazio |
+| `Δφ` com razão 20:1 | 0,95 · ln 20 = 2,8459 |
+| **`β` alcançável** | **0,99328** |
+| queimar o tanque | 3,19 dias de relógio de bordo; 0,9 c em 2,65 dias |
+
+A ficção é **só a potência**. Empuxo, consumo e cinemática são os mesmos de
+sempre: `F = η q w`, `dm/dt = −q`, e o integrador em `u = γv` que não deixa `β`
+chegar a 1. O teste `the_relativistic_mode_at_a_hundred_g_obeys_the_same_rocket_equation`
+voa o tanque inteiro em espaço plano e confere, a meio da queima e no fim:
+
+```
+1 dia coordenado:   m = 14 147 kg,  β = 0,317549  (previsto 0,317549)
+20 dias coordenados: m = 1 000 kg,  β = 0,993276  (previsto 0,993276)
+                     relógio de bordo: 4,87 dias
+```
+
+Nenhuma tripulação sobrevive a 100–2 000 g. O que a torna possível é outra
+ficção, igualmente declarada e igualmente sem efeito na trajetória: o
+compensador inercial ([`inertial-compensator.md`](inertial-compensator.md)).
+
 ## 5. Throttle e consumo
 
 ```

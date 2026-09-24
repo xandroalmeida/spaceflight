@@ -141,16 +141,22 @@ As doze lâmpadas de RCS acendem pelo **acionamento**, não pela tecla: elas vê
 comando puro em um eixo abre dois bicos; um comando diagonal abre quatro, a
 frações diferentes. É isso que se vê.
 
-`ACCELERATION` é o que a tripulação **sente**: a aceleração própria, em g, com
-m/s² embaixo. Só as forças não gravitacionais sobre a massa — o motor ao longo
-do nariz e a força líquida do RCS —, que é o que um acelerômetro a bordo leria.
+`ACCEL  REAL` tem duas leituras, em g. Em cima a **real**: a aceleração própria
+do casco, com a qual a trajetória é integrada. Embaixo `CABIN`: o que a
+tripulação sente depois do compensador inercial (ficção declarada,
+[`inertial-compensator.md`](../physics/inertial-compensator.md)), igual à real
+até 1 g e 1 g acima disso; enquanto ele atua, a real fica âmbar e `IC` acende.
+A real são só as forças não gravitacionais sobre a massa — o motor ao longo
+do nariz e a força líquida do RCS —, que é o que um acelerômetro no casco leria.
 Em queda livre, que é quase o voo inteiro, ela é zero. Os dois termos vêm do
 próprio modelo de forças no instante do snapshot
 (`FlightSession::proper_acceleration_body`): o do motor pelo `evaluate()`, que
 sabe que tanque vazio não empurra, e o do RCS pelas mesmas aberturas que o
 integrador recebe. Uma translação por RCS aparece (centésimos de m/s²); uma
 rotação pura não, porque os bicos disparam em binários cujas forças se anulam.
-Fora do cockpit, o HUD mínimo mostra o mesmo número na linha do acelerador.
+Fora do cockpit, o HUD mínimo mostra a real na linha do acelerador e, enquanto o
+compensador atua, `IC  cabin 1.00 g` no canto superior esquerdo. No `F3` estão
+as três: a coordenada, a própria e a da cabine.
 
 ⚠️ **Não** é a aceleração coordenada do modelo de forças, que numa órbita de
 400 km vale 8,7 m/s² porque inclui a gravidade; mostrar esse número como

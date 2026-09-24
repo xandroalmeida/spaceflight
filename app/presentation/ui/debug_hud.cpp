@@ -125,7 +125,13 @@ std::vector<std::string> hud_lines(const FlightApp& flight, bool compact) {
         "reference      " + s.reference,
         format("altitude       %.3f km", s.altitude_m / 1000.0),
         format("speed          %.3f m/s", s.speed_ms),
-        format("acceleration   %.6f m/s^2", s.acceleration_ms2),
+        // Three accelerations, named: the coordinate one includes gravity (8.7
+        // m/s^2 in orbit with the engine off); the proper one is the hull's
+        // accelerometer; the cabin's is what is left after the compensator.
+        format("coord. accel   %.6f m/s^2", s.acceleration_ms2),
+        format("proper accel   %.6f m/s^2", flight.instrument_data().proper_acceleration_ms2),
+        format("cabin accel    %.6f m/s^2%s", flight.instrument_data().cabin_acceleration_ms2,
+               flight.instrument_data().compensator_active ? "  (compensator)" : ""),
         "",
         format("apoapsis       %.3f km", s.apoapsis_m / 1000.0),
         format("periapsis      %.3f km", s.periapsis_m / 1000.0),

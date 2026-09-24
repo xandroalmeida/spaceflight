@@ -73,12 +73,21 @@ inline constexpr Colour ENGINE{0.984F, 0.831F, 0.596F};       // main engine, no
 // The main engine's colour follows the regime of its exhaust velocity, on the
 // plume and on the instruments alike (scene/spacecraft_visual.cpp says why each
 // gas glows the colour it does): a chemical flame, a dense hydrogen plasma
-// (IMPULSE, the Mk I/II), a relativistic beam (CRUISE).
+// (IMPULSE, the Mk I/II), a relativistic beam (CRUISE), an annihilation beam
+// close to c (RELATIVISTIC).
 inline constexpr double ENGINE_FUSION_FROM_C = 1.0e-3;
 inline constexpr double ENGINE_BEAM_FROM_C = 0.2;
+inline constexpr double ENGINE_ANNIHILATION_FROM_C = 0.9;
 inline constexpr Colour ENGINE_CHEMICAL{1.0F, 0.60F, 0.26F};
 inline constexpr Colour ENGINE_FUSION{1.0F, 0.52F, 0.84F};
 inline constexpr Colour ENGINE_BEAM{0.36F, 0.62F, 1.0F};
+inline constexpr Colour ENGINE_ANNIHILATION{0.82F, 0.74F, 1.0F};
+// The annihilation reactor's glow in the mouth of the bell. A STYLE, chosen --
+// the blue of the engines in Star Wars -- and not a computed colour: the chamber
+// is at rest in the ship, so no Doppler factor applies to it, and what an
+// antimatter reaction zone would look like in the visible is not known.
+inline constexpr Colour ENGINE_REACTOR{0.30F, 0.58F, 1.0F};
+inline constexpr Colour ENGINE_REACTOR_CORE{0.78F, 0.90F, 1.0F};
 
 [[nodiscard]] constexpr Colour engine(double exhaust_velocity_c) {
     if (exhaust_velocity_c <= 0.0) {
@@ -87,7 +96,10 @@ inline constexpr Colour ENGINE_BEAM{0.36F, 0.62F, 1.0F};
     if (exhaust_velocity_c < ENGINE_FUSION_FROM_C) {
         return ENGINE_CHEMICAL;
     }
-    return exhaust_velocity_c < ENGINE_BEAM_FROM_C ? ENGINE_FUSION : ENGINE_BEAM;
+    if (exhaust_velocity_c < ENGINE_BEAM_FROM_C) {
+        return ENGINE_FUSION;
+    }
+    return exhaust_velocity_c < ENGINE_ANNIHILATION_FROM_C ? ENGINE_BEAM : ENGINE_ANNIHILATION;
 }
 inline constexpr Colour RCS{0.761F, 0.878F, 0.976F};          // RCS jet
 

@@ -675,3 +675,82 @@ galáctico — sobre 400 eixos aleatórios, a fração num cone de 25,2° tem m�
 É a melhor espécie de teste: tolerância **zero**, origem #1 da política de §32 — o
 resultado é exato, e um erro de sinal ou de convenção `n̂`/`ŝ` quebraria a
 invariância na hora.
+
+## 13. A luz do próprio jato: fonte em movimento, observador parado
+
+Tudo acima é um **observador** em movimento diante de fontes paradas: a nave
+vendo as estrelas. O modo RELATIVÍSTICO
+([`propulsion-model.md`](propulsion-model.md) §4.7) traz o caso inverso para
+dentro da cena: a exaustão sai a `w = 0,95 c` no referencial da nave, e toda
+câmera do jogo anda com a nave. A **fonte** se move, o observador está parado.
+
+### 13.1 O fator Doppler
+
+Com `n̂` a direção de propagação (do jato para a câmera) no referencial da câmera,
+e `β_s` a velocidade do jato,
+
+```
+D = 1 / ( γ (1 − β_s·n̂) )
+```
+
+`relativity::doppler_factor_of_moving_source`. É o **mesmo** número que
+`doppler_factor` dá no referencial do jato, onde a câmera se move a `−β_s` e o
+fóton viaja na direção aberrada `n̂'`; o teste
+`a_moving_source_seen_from_rest_is_the_same_doppler_seen_from_its_own_frame`
+confere as duas contas uma contra a outra, em 13 ângulos e três velocidades. A
+`0,95 c`:
+
+| câmera | `D` | `T' = D·12 000 K` |
+|---|---|---|
+| atrás da nave, o jato vindo na direção dela | `√((1+β)/(1−β))` = 6,24 | 74 900 K: violeta-branco |
+| de lado | `1/γ` = 0,312 | 3 750 K: laranja |
+| à frente, o jato se afastando | `√((1−β)/(1+β))` = 0,160 | 1 920 K: vermelho escuro |
+
+De lado o jato é **desviado para o vermelho**: é o efeito Doppler transversal,
+que um modelo newtoniano não tem.
+
+### 13.2 O brilho: um jato estacionário é `D³`, não `D⁴`
+
+Uma bolha em movimento brilha `D⁴` vezes mais (bolométrico, §10). Um jato
+**estacionário** — emissores passando por uma região que fica onde está — perde
+uma potência de `D`: a emissividade de cada emissor transforma-se como `D³`, e
+a coluna na linha de visada é a do observador; o `D` a mais da bolha é a
+compressão do comprimento aparente de algo que se desloca, e um fluxo contínuo
+não se desloca. Na banda visível:
+
+```
+I'_V / I_V  =  D³ · η(D T) / η(T)
+```
+
+`render::ln_band_limited_steady_jet`, em log pelo mesmo motivo de §10.1. O teste
+`a_steady_jet_beams_one_power_of_d_less_than_a_moving_blob` confere que ela
+difere de `ln_band_limited_beaming` exatamente por `ln D`.
+
+### 13.3 O que é escolhido e o que não é
+
+**Escolhida:** a temperatura de repouso da emissão do feixe, 12 000 K
+(`EnginePlume::BEAM_REST_TEMPERATURE_K`). Uma exaustão de aniquilação real brilha
+quase nada no visível; o número diz "um plasma branco-azulado no seu próprio
+referencial", e é o único parâmetro livre.
+
+**Escolhido também, e só por estilo:** o brilho azul na boca da tubeira — o disco
+e o halo da câmara de reação, o motor de Star Wars (`palette::ENGINE_REACTOR`).
+A câmara está parada na nave, então não há `D` a aplicar, e ninguém sabe como uma
+zona de aniquilação brilharia no visível; o azul é declarado como escolha. É ele,
+e não o jato, que ilumina o casco: visto do casco, de lado, o feixe está em
+`D = 1/γ`, avermelhado e fraco.
+
+**Não escolhidos:** a cor na tela (corpo negro em `D·T`) e o brilho (o de §13.2,
+passado pela mesma resposta de detector do céu, §10.4, com o meio da curva no
+brilho de repouso). A 0,95 c, de trás o feixe fica ofuscante (1,5 de 2), e de
+frente vira um fio que mal se vê (1,6·10⁻⁴).
+
+**Simplificação, dita:** um ponto a um terço do jato representa o jato inteiro
+na conta do ângulo. Num jato de 84 m visto a dezenas de metros o ângulo muda ao
+longo dele, e cada fragmento deveria ter o seu `D`; fazer isso por fragmento é o
+passo seguinte.
+
+**Dívida:** o CRUZEIRO (0,5 c) também deveria ter `D` entre 0,58 e 1,73, mas o
+seu estilo é de linhas de Balmer, e não de corpo negro, e um espectro de linhas
+não se desloca por temperatura. Ele continua com a cor fixa até ter um espectro
+próprio.

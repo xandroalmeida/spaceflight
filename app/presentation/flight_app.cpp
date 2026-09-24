@@ -286,6 +286,10 @@ void FlightApp::update_ship(double delta) {
     plume_->set_mode(s.exhaust_velocity_c, s.max_thrust_n);
     plume_->set_thrust(s.thrust_n);
     plume_->advance(delta);
+    // The camera, in the engine mount's frame: the ship-centred near camera
+    // taken into the body frame, then moved to the nozzle.
+    plume_->set_viewer(ship_basis_.transposed() * camera_.near_camera().position -
+                       SpacecraftVisual::engine_mount().origin);
     rcs_visual_->set_throttles(rcs_throttles_);
     spacecraft_->advance(delta);
 
@@ -407,6 +411,8 @@ void FlightApp::update_instruments() {
     // that "proper acceleration" would be saying the crew in orbit feels almost
     // a g, which is exactly the opposite of what happens.
     data.proper_acceleration_ms2 = session_.proper_acceleration_body().norm();
+    data.cabin_acceleration_ms2 = session_.cabin_acceleration_body().norm();
+    data.compensator_active = data.proper_acceleration_ms2 > FlightSession::CABIN_LIMIT_MS2;
 
     // Closing with the target: the rate at which the distance falls. The
     // projection of the relative velocity onto the line of sight.

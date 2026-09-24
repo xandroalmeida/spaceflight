@@ -128,4 +128,18 @@ struct PlanckTable {
 [[nodiscard]] double ln_band_limited_beaming(const PlanckTable& table, double rest_temperature,
                                              double doppler);
 
+// The same question for a STEADY, optically thin jet: emitters that stream
+// through a region that stays where it is, like an engine's exhaust seen from
+// the ship. The emissivity of each emitter transforms as D^3 (bolometric), and
+// the column along the line of sight is the observer's; the extra power of D
+// that a single moving blob gets is the compression of its apparent length,
+// which a steady flow does not have. So the surface brightness in the band is
+//
+//     I'_V / I_V  =  D^3 * eta(D T) / eta(T)
+//
+// -- one power of D below ln_band_limited_beaming. Computed from
+// blackbody_sample rather than the table, because the jet asks it once per frame
+// and not once per star (docs/physics/relativistic-rendering.md section 13).
+[[nodiscard]] double ln_band_limited_steady_jet(double rest_temperature, double doppler);
+
 }  // namespace sf::render

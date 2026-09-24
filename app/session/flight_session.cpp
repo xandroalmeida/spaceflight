@@ -111,12 +111,16 @@ bool FlightSession::configure(const std::string& kernel_directory, const std::st
         rcs_force_ = std::make_unique<attitude::RcsForce>(*rcs_, *pointing_);
         forces_->add_reference(*rcs_force_);
 
-        // Fusion Torch Mk III: two operating points of one 900 GW plant.
+        // Fusion Torch Mk III: two operating points of one 900 GW plant, and a
+        // second, antimatter plant behind the same nozzle.
         //
-        //   IMPULSE  w = 0.03 c, 200 kN  -- one g on this 20-tonne ship, burns in
-        //                                   minutes, budget 0.0899 c
-        //   CRUISE   w = 0.5 c,  11.2 kN -- a third of a g falling to nothing over
-        //                                   years, budget 0.9048 c
+        //   IMPULSE       w = 0.03 c, 200 kN  -- one g on this 20-tonne ship,
+        //                                        burns in minutes, budget 0.0899 c
+        //   CRUISE        w = 0.5 c,  11.2 kN -- a twentieth of a g, for years,
+        //                                        budget 0.9048 c
+        //   RELATIVISTIC  w = 0.95 c, 19.6 MN -- 100 g rising to 2000 g, on a
+        //                                        4.3 PW plant: 0.9 c in 2.65 days,
+        //                                        budget 0.9933 c
         //
         // 1 tonne of hull and 19 of propellant. Reaching beta = 0.9 needs BOTH the
         // exhaust velocity and the mass ratio, and eight years of burning; that
@@ -124,7 +128,9 @@ bool FlightSession::configure(const std::string& kernel_directory, const std::st
         // (config/engines/torch-mk3.json).
         const propulsion::MultiModeEngine main{
             {{"IMPULSE", propulsion::EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
-             {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}}}};
+             {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}},
+             {"RELATIVISTIC", propulsion::EngineSpec{"RELATIVISTIC", 6.8866239e-02, 0.95, 1.0},
+              "annihilation"}}};
         craft_ = std::make_unique<spacecraft::Spacecraft>("Torch", 1000.0, 19000.0, main);
         main_engine_ = std::make_unique<propulsion::MainEngineForce>(*craft_);
         forces_->add_reference(*main_engine_);
@@ -1308,6 +1314,14 @@ math::Vec3 FlightSession::proper_acceleration_body() const {
         force += rcs_->evaluate(rcs_throttles()).force_body;
     }
     return force / mass;
+}
+
+math::Vec3 FlightSession::cabin_acceleration_body() const {
+    const math::Vec3 real = proper_acceleration_body();
+    const double magnitude = real.norm();
+    // The compensator takes the EXCESS, along the same direction: the crew still
+    // feels which way the ship is pushing, at no more than one g.
+    return magnitude <= CABIN_LIMIT_MS2 ? real : real * (CABIN_LIMIT_MS2 / magnitude);
 }
 
 std::vector<RenderVec3> FlightSession::orbit_track(int samples) const {

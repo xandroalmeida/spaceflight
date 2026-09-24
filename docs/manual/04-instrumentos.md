@@ -78,15 +78,20 @@ As doze lâmpadas de RCS acendem pelo **acionamento**, não pela tecla. Um coman
 puro em um eixo abre dois propulsores; um comando diagonal abre quatro, em
 frações diferentes. É isso que se vê, e é isso que está queimando propelente.
 
-`ACCELERATION` é o que você **sente** a bordo: a aceleração própria, em g, com
-m/s² embaixo. Só conta o que empurra a nave — o motor e a translação por RCS —,
-que é o que um acelerômetro leria. A gravidade não entra: em órbita, com o motor
+`ACCEL  REAL` mostra duas acelerações, em g. Em cima, a **real**: a do casco, a
+que um acelerômetro preso a ele leria e a que de fato move a nave. Embaixo,
+`CABIN`: a que você **sente**. As duas são iguais até 1 g; acima disso o
+compensador inercial segura a cabine em 1 g, a leitura real fica âmbar e `IC`
+acende. Em `RELATIVISTIC` você lê `100.0 g` em cima e `CABIN 1.00 g  IC`
+embaixo — e a nave está mesmo a 100 g. Só conta o que empurra a nave — o motor
+e a translação por RCS. A gravidade não entra: em órbita, com o motor
 desligado, você está em queda livre e a leitura é zero, embora a Terra esteja
 puxando a nave a quase 9 m/s². Em `IMPULSE` a pleno, com o tanque cheio, é cerca
 de 1 g, e sobe à medida que o propelente acaba e a nave fica mais leve; em
-`CRUISE`, alguns centésimos. Girar a nave não aparece: os propulsores disparam em
-pares que se anulam. Fora do cockpit, o mesmo número fica na linha do acelerador
-do HUD.
+`CRUISE`, alguns centésimos; em `RELATIVISTIC`, 100 g subindo a 2 000 g. Girar a
+nave não aparece: os propulsores disparam em pares que se anulam. Fora do
+cockpit, a real fica na linha do acelerador do HUD e a da cabine no canto
+superior esquerdo, enquanto o compensador atua.
 
 A célula de relatividade tem `β`, `γ−1` e a diferença entre o relógio coordenado
 e o próprio. A 7,7 km/s isso dá `1,0e-4`, `5,1e-9` e dezenas de femtossegundos:

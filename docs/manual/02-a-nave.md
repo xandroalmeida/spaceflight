@@ -40,14 +40,23 @@ de uma cápsula e apertada pelos de uma estação, que é a proporção certa pa
 
 ## O motor
 
-Um reator de fusão com dois pontos de operação, e `{{key:engine_mode}}` alterna
-entre eles. Os dois convertem a mesma potência (900 GW); o que muda é como ela é
-gasta — muita massa devagar, ou pouca massa depressa.
+Três modos, e `{{key:engine_mode}}` passa de um para o outro. Os dois primeiros
+são o mesmo reator de fusão de 900 GW; o que muda é como a potência é gasta —
+muita massa devagar, ou pouca massa depressa. O terceiro é outro reator, de
+aniquilação matéria–antimatéria, 4 730 vezes mais potente, atrás do mesmo bocal.
 
 | modo | empuxo | exaustão | para quê |
 |---|---|---|---|
 | `IMPULSE` | 200 kN | 0,030 c | manobras. Um g nesta nave; queima em minutos |
-| `CRUISE` | 11,2 kN | 0,5 c | viagem longa. Um terço de g caindo a nada ao longo de anos |
+| `CRUISE` | 11,2 kN | 0,5 c | viagem longa. Um vigésimo de g, ao longo de anos |
+| `RELATIVISTIC` | 19,6 MN | 0,95 c | velocidade relativística. 100 g, subindo a 2 000 g; 0,9 c em menos de três dias |
+
+`RELATIVISTIC` é ficção declarada — ninguém sabe construir esse reator —, mas a
+física do voo não é: a nave chega a 0,993 c com o tanque inteiro e nunca a c, e
+o relógio de bordo atrasa exatamente o que a relatividade diz. A 100 g ninguém
+a bordo sobreviveria; quem os mantém vivos é o **compensador inercial**, outra
+ficção declarada, que deixa a cabine sentir no máximo 1 g sem mudar em nada a
+trajetória (ver *Instrumentos*).
 
 O orçamento de Δv é absurdo para uma viagem à Lua: cerca de 0,09 c em `IMPULSE`,
 vinte e seis mil quilômetros por segundo. Uma transferência translunar inteira
@@ -64,6 +73,7 @@ está, e a mesma cor aparece na barra do acelerador e no empuxo do painel.
 |---|---|---|
 | rosa-magenta | `IMPULSE` — plasma de fusão denso | hidrogênio que esfria e se recombina brilha nas linhas de Balmer: o vermelho H-alfa mais o azul-violeta, que o olho soma em rosa |
 | azul-branco | `CRUISE` — feixe relativístico | a 0,5 c o jato é tão fino e rápido que nada se recombina à vista da nave: brilha o feixe ionizado, estreito e longo |
+| depende de onde você olha | `RELATIVISTIC` — feixe de aniquilação | a 0,95 c o jato é visto na sua própria luz com efeito Doppler: de trás da nave, com o jato vindo na sua direção, violeta-branco e ofuscante; de lado, laranja; de frente, com o jato se afastando, um fio vermelho que mal se vê. Na boca da tubeira, o reator brilha azul de qualquer ângulo |
 | âmbar | motores químicos | uma chama no vácuo, que sem ar em volta se abre num cone largo e tênue |
 
 Em `CRUISE` a pluma a pleno acelerador é uma pluma inteira, não uma pluma

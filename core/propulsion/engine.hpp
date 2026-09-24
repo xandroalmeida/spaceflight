@@ -101,16 +101,23 @@ private:
 // The equal-power invariant is CHECKED, not assumed. Two operating points that
 // draw different power are not one engine with a switch -- they are two engines,
 // and the constructor says so.
-// See docs/physics/propulsion-model.md section 4.6.
+//
+// A ship may carry more than one power plant behind the same nozzle, and then
+// each mode names the plant it runs on (`plant`, "main" unless said). The
+// invariant holds WITHIN a plant: IMPULSE and CRUISE share the fusion plant and
+// must draw the same power; a mode on a second plant draws that plant's power,
+// and saying which plant it is is what stops a mode from conjuring power.
+// See docs/physics/propulsion-model.md sections 4.5 and 4.7.
 class MultiModeEngine {
 public:
     struct Mode {
         std::string name;
         EngineSpec spec;
+        std::string plant{"main"};
     };
 
-    // Throws std::invalid_argument if the modes draw different converted power,
-    // if there are none, or if two share a name.
+    // Throws std::invalid_argument if two modes of the same plant draw different
+    // converted power, if there are none, or if two share a name.
     explicit MultiModeEngine(std::vector<Mode> modes, std::size_t initial = 0);
 
     // Convenience for the common case of an engine with a single setting.
@@ -132,8 +139,11 @@ public:
     bool select(const std::string& name);
     void cycle();
 
-    // The converted power all modes share [W].
+    // The converted power of the plant the current mode runs on [W].
     [[nodiscard]] double power() const;
+    // The converted power of a named plant [W]; throws if no mode runs on it.
+    [[nodiscard]] double power(const std::string& plant) const;
+    [[nodiscard]] const std::string& current_plant() const { return modes_.at(selected_).plant; }
 
     [[nodiscard]] std::string describe() const;
 

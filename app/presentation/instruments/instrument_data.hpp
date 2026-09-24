@@ -56,9 +56,13 @@ struct InstrumentData {
     bool cockpit_view{false};
     bool paused{false};
 
-    // PROPER acceleration, what an accelerometer on board would read: only the
+    // PROPER acceleration, what an accelerometer on the hull would read: only the
     // NON-gravitational forces over the mass. Zero in free fall.
     double proper_acceleration_ms2{0.0};
+    // What the crew feels: the same, after the inertial compensator (fiction,
+    // docs/physics/inertial-compensator.md) has taken everything above one g.
+    double cabin_acceleration_ms2{0.0};
+    bool compensator_active{false};
     // The rate at which the distance to the target falls: the relative velocity
     // projected on the line of sight.
     double closing_speed_ms{0.0};

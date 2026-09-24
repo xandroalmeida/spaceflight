@@ -1,5 +1,9 @@
 #include "app/presentation/scene/spacecraft_visual.hpp"
 
+#include "core/relativity/optics.hpp"
+#include "core/render/blackbody.hpp"
+#include "core/render/tone_response.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -304,14 +308,37 @@ namespace {
 //   Relativistic  at 0.5 c the stream is so thin and so fast that nothing
 //                 recombines in sight of the ship: what glows is the fully
 //                 ionised beam itself, blue-white, a needle, and very long.
-const std::array<EnginePlume::Style, 3> kStyles = {{
+//   Annihilation  at 0.95 c the beam is thinner and longer still, and its
+//                 colours here are placeholders: the real ones are computed
+//                 every frame from the Doppler factor towards the camera
+//                 (EnginePlume::set_viewer). Seen from astern, with the jet
+//                 coming at the camera, D = 6.2: a black body of 74 000 K,
+//                 violet-white and blinding. Side-on, D = 1/gamma = 0.31:
+//                 3 700 K, orange. From ahead, the jet leaving, D = 0.16: 1 900 K,
+//                 a dim red thread. Nothing about it is chosen but the rest
+//                 temperature.
+const std::array<EnginePlume::Style, 4> kStyles = {{
     {EnginePlume::Kind::Chemical, "chemical", Colour{1.0F, 0.93F, 0.76F}, palette::ENGINE_CHEMICAL,
      Colour{0.72F, 0.28F, 0.10F}, 0.8, 0.42, 2.8, 0.55, 0.35, 0.6},
     {EnginePlume::Kind::FusionDense, "fusion", Colour{0.98F, 0.93F, 1.0F}, palette::ENGINE_FUSION,
      Colour{0.58F, 0.36F, 1.0F}, 1.4, 0.38, 2.0, 0.95, 0.25, 0.9},
     {EnginePlume::Kind::Relativistic, "relativistic", Colour{0.88F, 0.95F, 1.0F}, palette::ENGINE_BEAM,
      Colour{0.30F, 0.30F, 0.95F}, 2.6, 0.26, 0.55, 0.75, 0.08, 2.0},
+    {EnginePlume::Kind::Annihilation, "annihilation", Colour{1.0F, 1.0F, 1.0F}, palette::ENGINE_ANNIHILATION,
+     palette::ENGINE_ANNIHILATION, 6.0, 0.18, 0.30, 0.9, 0.03, 4.0},
 }};
+
+// Linear light to the sRGB encoding the materials are written in. Colour
+// bookkeeping, not physics: blackbody_sample answers in linear sRGB.
+float encode_srgb(double linear) {
+    const double v = std::clamp(linear, 0.0, 1.0);
+    return static_cast<float>(v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055);
+}
+
+Colour scaled(const Colour& colour, double factor) {
+    const auto f = static_cast<float>(factor);
+    return Colour{colour.r * f, colour.g * f, colour.b * f, colour.a};
+}
 
 }  // namespace
 
@@ -322,7 +349,10 @@ const EnginePlume::Style& EnginePlume::style_for(double exhaust_velocity_c) {
     if (exhaust_velocity_c < palette::ENGINE_BEAM_FROM_C) {
         return kStyles[1];
     }
-    return kStyles[2];
+    if (exhaust_velocity_c < palette::ENGINE_ANNIHILATION_FROM_C) {
+        return kStyles[2];
+    }
+    return kStyles[3];
 }
 
 EnginePlume::EnginePlume(MeshLibrary& meshes) : style_(&style_for(0.03)) {
@@ -338,18 +368,49 @@ EnginePlume::EnginePlume(MeshLibrary& meshes) : style_(&style_for(0.03)) {
         });
     }
     glow_mesh_ = meshes.sphere(1.0, 2.0, 24, 12);
+    reactor_mesh_ = meshes.sphere(1.0, 2.0, 32, 16);
 }
 
 void EnginePlume::set_thrust(double thrust_n) { set_intensity(thrust_n / reference_n_); }
 
 void EnginePlume::set_mode(double exhaust_velocity_c, double max_thrust_n) {
     style_ = &style_for(exhaust_velocity_c);
+    exhaust_beta_ = exhaust_velocity_c;
     if (max_thrust_n > 0.0) {
         reference_n_ = max_thrust_n;
     }
 }
 
 void EnginePlume::set_intensity(double value) { intensity_ = std::clamp(value, 0.0, 1.0); }
+
+void EnginePlume::set_viewer(const Vec3& camera_in_mount) {
+    // The jet streams away along -x at the exhaust velocity, in the ship's frame
+    // -- which is the camera's frame too, since every camera here rides with the
+    // ship. Seen from where the camera is, a point a third of the way down the
+    // jet stands for all of it: the angle changes along an 84 m jet seen from
+    // tens of metres, and that simplification is named here rather than hidden.
+    const Vec3 middle{-std::max(length(), 1.0) * 0.35, 0.0, 0.0};
+    const Vec3 towards_camera = camera_in_mount - middle;
+    if (towards_camera.norm_squared() <= 0.0) {
+        return;
+    }
+    const Vec3 beta{-exhaust_beta_, 0.0, 0.0};
+    doppler_ = relativity::doppler_factor_of_moving_source(towards_camera, beta);
+    if (style_->kind != Kind::Annihilation) {
+        return;
+    }
+    ln_beam_brightness_ = render::ln_band_limited_steady_jet(BEAM_REST_TEMPERATURE_K, doppler_);
+    const auto sample = render::blackbody_sample(relativity::shifted_temperature(BEAM_REST_TEMPERATURE_K, doppler_));
+    beam_colour_ = Colour{encode_srgb(sample.rgb.r), encode_srgb(sample.rgb.g), encode_srgb(sample.rgb.b), 1.0F};
+}
+
+double EnginePlume::beam_brightness() const {
+    // The sky's own detector curve with its half point at the rest brightness:
+    // 1 when D = 1, saturating towards 2 when the beam comes at the camera, and
+    // falling smoothly to nothing when it leaves. A compression, not a clamp --
+    // the same one that keeps the forward sky at 0.99 c on screen.
+    return 2.0 * render::detector_response_from_ln(ln_beam_brightness_, 1.0);
+}
 
 void EnginePlume::advance(double delta) {
     // The clock of the streaks. It feeds NOTHING back: it is a drawing time, and
@@ -422,6 +483,18 @@ std::vector<Part> EnginePlume::parts() const {
     core.material.plume.streaks = 9.0;
     core.material.plume.turbulence = st.turbulence * 0.6;
 
+    if (st.kind == Kind::Annihilation) {
+        // The whole beam in the colour its own light arrives in, and as bright
+        // as it arrives: the Doppler factor decides both.
+        const double k = beam_brightness();
+        sheath.material.plume.near = beam_colour_;
+        sheath.material.plume.far = scaled(beam_colour_, 0.55);
+        sheath.material.plume.energy *= k;
+        core.material.plume.near = beam_colour_;
+        core.material.plume.far = beam_colour_;
+        core.material.plume.energy *= k;
+    }
+
     // The exit plane: where the gas is densest and hottest, a soft ball of light
     // in the mouth of the bell.
     const double r = st.nozzle_radius * (1.1 + 0.4 * intensity_);
@@ -433,8 +506,40 @@ std::vector<Part> EnginePlume::parts() const {
     glow.material.plume.decay = 0.0;
     glow.material.plume.tail_fade = 2.0;
     glow.material.plume.turbulence = 0.0;
+    if (st.kind != Kind::Annihilation) {
+        return {sheath, core, glow};
+    }
+    glow.material.plume.near = beam_colour_;
+    glow.material.plume.far = beam_colour_;
+    glow.material.plume.energy *= beam_brightness();
 
-    return {sheath, core, glow};
+    // The reactor, in the mouth of the bell: a blue disc filling the exit and a
+    // wide, faint halo round it -- the Star Wars engine. It sits inside the bell
+    // (+x from the exit plane, towards the throat), is at rest in the ship and
+    // so has no Doppler factor: it is the same blue from every side, and it is
+    // the one chosen colour in this mode (palette::ENGINE_REACTOR).
+    const double mouth = SpacecraftVisual::BELL_EXIT_RADIUS * 0.92;
+    Part disc = plume(reactor_mesh_, Transform3{Basis::diagonal(Vec3{0.35, mouth, mouth}), Vec3{0.45, 0.0, 0.0}});
+    disc.material.plume.near = palette::ENGINE_REACTOR_CORE;
+    disc.material.plume.far = palette::ENGINE_REACTOR;
+    disc.material.plume.energy = 2.2 * (0.4 + 0.6 * intensity_);
+    disc.material.plume.edge_power = 0.6;   // flat: the whole mouth lit, not a ball
+    disc.material.plume.decay = 0.0;
+    disc.material.plume.tail_fade = 2.0;
+    disc.material.plume.turbulence = 0.0;
+
+    const double halo_radius = SpacecraftVisual::BELL_EXIT_RADIUS * 2.2;
+    Part halo = plume(reactor_mesh_, Transform3{Basis::diagonal(Vec3{halo_radius * 0.6, halo_radius, halo_radius}),
+                                                Vec3{-halo_radius * 0.25, 0.0, 0.0}});
+    halo.material.plume.near = palette::ENGINE_REACTOR;
+    halo.material.plume.far = palette::ENGINE_REACTOR;
+    halo.material.plume.energy = 0.45 * (0.4 + 0.6 * intensity_);
+    halo.material.plume.edge_power = 4.0;   // soft: bright at the centre, gone at the rim
+    halo.material.plume.decay = 0.0;
+    halo.material.plume.tail_fade = 2.0;
+    halo.material.plume.turbulence = 0.0;
+
+    return {sheath, core, glow, disc, halo};
 }
 
 PointLight EnginePlume::light() const {
@@ -442,6 +547,12 @@ PointLight EnginePlume::light() const {
     // how it lights the hull from behind, which is what makes the plume read as
     // being behind the ship. Its colour is the running mode's.
     const double len = std::min(length(), MAX_LENGTH);
+    if (style_->kind == Kind::Annihilation) {
+        // What lights the hull is the reactor in the mouth of the bell, not the
+        // jet: the beam is thin and, seen side-on from the hull, red-shifted and
+        // dim (D = 1/gamma). So the light sits at the nozzle, in the reactor's blue.
+        return PointLight{Vec3{0.5, 0.0, 0.0}, palette::ENGINE_REACTOR, visible() ? 4.5 * intensity_ : 0.0, 30.0};
+    }
     return PointLight{Vec3{-len * 0.35, 0.0, 0.0}, style_->sheath, visible() ? 3.5 * intensity_ : 0.0, 34.0};
 }
 

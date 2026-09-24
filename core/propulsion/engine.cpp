@@ -154,19 +154,28 @@ void MultiModeEngine::validate() const {
         }
     }
 
-    // One power plant. Modes that draw different power are different engines.
-    const double reference = modes_.front().spec.converted_power_at(1.0);
+    // One power plant per `plant`. Modes of the same plant that draw different
+    // power are different engines; modes of different plants are allowed to.
     for (const auto& mode : modes_) {
+        const Mode* reference = nullptr;
+        for (const auto& other : modes_) {
+            if (other.plant == mode.plant) {
+                reference = &other;
+                break;
+            }
+        }
+        const double expected = reference->spec.converted_power_at(1.0);
         const double power = mode.spec.converted_power_at(1.0);
-        const double difference = std::abs(power - reference) / reference;
+        const double difference = std::abs(power - expected) / expected;
         if (difference > 0.01) {
             std::ostringstream os;
             os << "MultiModeEngine: mode \"" << mode.name << "\" converts " << power
-               << " W while \"" << modes_.front().name << "\" converts " << reference
-               << " W (" << difference * 100.0
+               << " W while \"" << reference->name << "\", on the same plant \"" << mode.plant
+               << "\", converts " << expected << " W (" << difference * 100.0
                << "% apart). Modes are operating points of ONE power plant: raising the exhaust "
-                  "velocity must lower the mass flow, not conjure extra power "
-                  "(docs/physics/propulsion-model.md section 4.6)";
+                  "velocity must lower the mass flow, not conjure extra power. A mode that "
+                  "really runs on a different reactor has to say so with \"plant\" "
+                  "(docs/physics/propulsion-model.md sections 4.5 and 4.7)";
             throw std::invalid_argument(os.str());
         }
     }
@@ -183,7 +192,7 @@ MultiModeEngine MultiModeEngine::from_json(const config::json::Value& value,
     for (const auto& entry : list->as_array(context + ".modes")) {
         EngineSpec spec = EngineSpec::from_json(entry, context + ".modes[]");
         const std::string name = spec.name();
-        modes.push_back(Mode{name, std::move(spec)});
+        modes.push_back(Mode{name, std::move(spec), entry.string_or("plant", "main")});
     }
 
     MultiModeEngine engine{std::move(modes)};
@@ -213,16 +222,25 @@ bool MultiModeEngine::select(const std::string& name) {
 
 void MultiModeEngine::cycle() { selected_ = (selected_ + 1) % modes_.size(); }
 
-double MultiModeEngine::power() const { return modes_.front().spec.converted_power_at(1.0); }
+double MultiModeEngine::power() const { return current().converted_power_at(1.0); }
+
+double MultiModeEngine::power(const std::string& plant) const {
+    for (const auto& mode : modes_) {
+        if (mode.plant == plant) {
+            return mode.spec.converted_power_at(1.0);
+        }
+    }
+    throw std::invalid_argument("MultiModeEngine::power: no mode runs on plant \"" + plant + "\"");
+}
 
 std::string MultiModeEngine::describe() const {
     std::ostringstream os;
-    os << std::setprecision(6) << modes_.size() << " mode(s) sharing " << power() << " W:";
+    os << std::setprecision(6) << modes_.size() << " mode(s):";
     for (std::size_t i = 0; i < modes_.size(); ++i) {
         const auto& spec = modes_[i].spec;
-        os << "\n  " << (i == selected_ ? "> " : "  ") << modes_[i].name << ": w = "
-           << spec.exhaust_velocity_fraction_c() << " c, thrust " << spec.max_thrust()
-           << " N, Isp " << spec.specific_impulse() << " s";
+        os << "\n  " << (i == selected_ ? "> " : "  ") << modes_[i].name << " [" << modes_[i].plant
+           << ", " << spec.converted_power_at(1.0) << " W]: w = " << spec.exhaust_velocity_fraction_c()
+           << " c, thrust " << spec.max_thrust() << " N, Isp " << spec.specific_impulse() << " s";
     }
     return os.str();
 }

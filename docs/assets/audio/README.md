@@ -77,7 +77,9 @@ defeito: um salto de 11347 na volta, contra passos de ~1500 no resto.)
   na escala de IMPULSO, os 11 kN do CRUZEIRO eram inaudíveis. Trocar de modo com
   o motor aceso é um cruzamento de ~120 ms, não um corte. O CRUZEIRO toca a 60 %
   do volume do IMPULSO no máximo — mais baixo porque é muito menos empuxo pelo
-  mesmo casco, mas não na proporção de 1:18, porque aí não se ouviria.
+  mesmo casco, mas não na proporção de 1:18, porque aí não se ouviria. O
+  RELATIVISTIC ainda não tem gravação própria: toca o estrondo do IMPULSO uma
+  quinta abaixo (0,62× a 0,72×), mais grave e mais pesado que os modos de fusão.
 * **RCS.** Dois sons: o golpe da válvula (`rcs_thump`) quando o piloto dispara, e
   o sopro (`rcs_hiss`) enquanto QUALQUER bico está aberto — o do piloto
   automático também. O sopro cresce com a raiz do número de bicos.

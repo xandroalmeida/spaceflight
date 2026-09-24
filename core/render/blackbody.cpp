@@ -189,4 +189,9 @@ double ln_band_limited_beaming(const PlanckTable& table, double rest_temperature
            table.sample_ln_band_efficiency(rest_temperature);
 }
 
+double ln_band_limited_steady_jet(double rest_temperature, double doppler) {
+    return 3.0 * std::log(doppler) + blackbody_sample(rest_temperature * doppler).ln_band_efficiency -
+           blackbody_sample(rest_temperature).ln_band_efficiency;
+}
+
 }  // namespace sf::render

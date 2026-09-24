@@ -15,6 +15,7 @@
 #include "app/presentation/instruments/displays.hpp"
 #include "app/presentation/scene/celestial_view.hpp"
 #include "app/presentation/scene/planet_textures.hpp"
+#include "app/presentation/scene/spacecraft_visual.hpp"
 #include "app/presentation/ui/debug_hud.hpp"
 #include "core/ephemeris/spice_kernel_set.hpp"
 #include "core/render/star_catalog.hpp"
@@ -561,7 +562,10 @@ TEST(the_accelerometer_reads_what_the_crew_feels_not_gravity) {
     app::RecordingCanvas strip;
     const app::Vec2 strip_size{1280.0, 122.0};
     system.draw(strip, strip_size, app.instrument_data());
-    CHECK(strip.contains_text("ACCELERATION"));
+    CHECK(strip.contains_text("ACCEL  REAL"));
+    // IMPULSE on the full ship is 10.0 m/s^2, a hair over one g: the
+    // compensator already trims it, and the cabin reads exactly 1.00 g.
+    CHECK(strip.contains_text("CABIN " + app::fmt::g_load(std::min(expected, units::g0))));
     CHECK(strip.contains_text(app::fmt::g_load(expected)));
     const double pad = strip_size.y * 0.07;
     const double column = (strip_size.x - pad * 2.0) / app::SystemDisplay::COLUMNS;
@@ -612,4 +616,134 @@ TEST(the_accelerometer_reads_what_the_crew_feels_not_gravity) {
     INFO(app::fmt::format("RCS rotation: %.3e m/s^2", proper()));
     CHECK(proper() < 1e-9);
     flight->keys.down.clear();
+}
+
+TEST(the_relativistic_mode_pushes_at_a_hundred_g_and_the_cabin_feels_one) {
+    auto flight = make_flight();
+    auto& app = flight->app;
+    flight->frames(2);
+
+    // G runs through all three modes and back.
+    CHECK_EQ(app.session().engine_mode(), std::string{"IMPULSE"});
+    flight->press(app::Key::G);
+    CHECK_EQ(app.session().engine_mode(), std::string{"CRUISE"});
+    flight->press(app::Key::G);
+    CHECK_EQ(app.session().engine_mode(), std::string{"RELATIVISTIC"});
+
+    flight->press(app::Key::Z);
+    flight->frames(5);
+    const auto s = app.session().snapshot();
+    const double real = app.session().proper_acceleration_body().norm();
+    const double cabin = app.session().cabin_acceleration_body().norm();
+    INFO(app::fmt::format("real %.3f g, cabin %.6f g, mass %.1f kg", real / units::g0, cabin / units::g0, s.mass_kg));
+    CHECK(real / units::g0 > 99.0);
+    CHECK(std::abs(real - s.thrust_n / s.mass_kg) < 1e-9 * real);
+    CHECK_NEAR_REL(cabin, units::g0, 1e-12, "the compensator leaves exactly one g in the cabin");
+    CHECK(app.session().cabin_acceleration_body().x > 0.0);   // still felt along the push
+    CHECK(app.instrument_data().compensator_active);
+
+    // Both readings on the panel, inside their columns -- with the longest mode
+    // name there is.
+    app::SystemDisplay system;
+    app::RecordingCanvas strip;
+    const app::Vec2 strip_size{1280.0, 122.0};
+    system.draw(strip, strip_size, app.instrument_data());
+    CHECK(strip.contains_text("ENGINE  RELATIVISTIC"));
+    CHECK(strip.contains_text(app::fmt::g_load(real)));
+    CHECK(strip.contains_text("CABIN 1.00 g  IC"));
+    const double pad = strip_size.y * 0.07;
+    const double column = (strip_size.x - pad * 2.0) / app::SystemDisplay::COLUMNS;
+    for (const auto& text : strip.texts) {
+        const int index = static_cast<int>((text.baseline.x - pad) / column);
+        const double end = text.baseline.x + strip.text_width(text.text, text.px);
+        INFO("'" + text.text + app::fmt::format("' ends at %.0f px, its column at %.0f px", end, pad + column * (index + 1)));
+        CHECK(end <= pad + column * (index + 1));
+    }
+
+    // Outside, the HUD's throttle cell carries the real one, clear of its own
+    // label and of the propellant cell; the cabin's is in the corner.
+    app::MinimalHud hud;
+    app::RecordingCanvas screen;
+    auto data = app.instrument_data();
+    data.cockpit_view = false;
+    const app::Vec2 screen_size{1280.0, 720.0};
+    hud.draw(screen, screen_size, data);
+    double label_end = 0.0;
+    for (const auto& text : screen.texts) {
+        if (text.text == "THROTTLE") {
+            label_end = text.baseline.x + screen.text_width(text.text, text.px);
+        }
+    }
+    bool found = false;
+    for (const auto& text : screen.texts) {
+        if (text.text == app::fmt::g_load(real)) {
+            found = true;
+            INFO("'" + text.text + app::fmt::format("' from %.0f px, the label ends at %.0f px", text.baseline.x, label_end));
+            CHECK(text.baseline.x > label_end);
+            CHECK(text.baseline.x + screen.text_width(text.text, text.px) < screen_size.x * 0.88);
+        }
+    }
+    CHECK(found);
+    CHECK(screen.contains_text("IC  cabin 1.00 g"));
+}
+
+TEST(the_annihilation_beam_is_seen_in_its_own_doppler_shifted_light) {
+    // 0.95 c of exhaust: gamma = 3.20. What the camera sees depends on where it
+    // is, by a factor no painted colour could fake.
+    app::MeshLibrary meshes;
+    app::EnginePlume plume{meshes};
+    plume.set_mode(0.95, 1.9613e7);
+    plume.set_intensity(1.0);
+    CHECK(plume.style().kind == app::EnginePlume::Kind::Annihilation);
+
+    // Astern, far down the jet's axis: the beam comes straight at the camera.
+    plume.set_viewer(Vec3{-5000.0, 0.0, 0.0});
+    const double astern = plume.doppler();
+    const auto astern_colour = plume.beam_colour();
+    const double astern_brightness = plume.beam_brightness();
+    // Ahead of the ship: the beam leaves.
+    plume.set_viewer(Vec3{5000.0, 0.0, 0.0});
+    const double ahead = plume.doppler();
+    const auto ahead_colour = plume.beam_colour();
+    const double ahead_brightness = plume.beam_brightness();
+    // Side-on, level with the middle of the jet.
+    plume.set_viewer(Vec3{-std::max(app::EnginePlume::MAX_LENGTH * 6.0, 1.0) * 0.35, 5000.0, 0.0});
+    const double side = plume.doppler();
+
+    INFO(app::fmt::format("D astern %.3f, side %.3f, ahead %.3f; brightness astern %.3f, ahead %.2e", astern, side,
+                          ahead, astern_brightness, ahead_brightness));
+    CHECK_NEAR_REL(astern, std::sqrt(1.95 / 0.05), 1e-6, "sqrt((1+b)/(1-b)) = 6.24");
+    CHECK_NEAR_REL(ahead, std::sqrt(0.05 / 1.95), 1e-6, "its reciprocal, 0.160");
+    CHECK_NEAR_REL(side, std::sqrt(1.0 - 0.95 * 0.95), 1e-6, "1/gamma: the transverse Doppler effect");
+
+    // Blinding and blue-white from astern, a dim red thread from ahead.
+    CHECK(astern_brightness > 1.5);
+    CHECK(ahead_brightness < 0.05);
+    CHECK(astern_colour.b > astern_colour.r);
+    CHECK(ahead_colour.r > ahead_colour.b);
+
+    // The reactor in the mouth of the bell glows blue, the same blue from every
+    // side: it is at rest in the ship, so no Doppler factor applies to it. It is
+    // what lights the hull.
+    const auto disc_colour = [&] {
+        const auto parts = plume.parts();
+        REQUIRE(parts.size() == 5U);
+        return parts[3].material.plume.far;
+    };
+    plume.set_viewer(Vec3{-5000.0, 0.0, 0.0});
+    const auto from_astern = disc_colour();
+    plume.set_viewer(Vec3{5000.0, 0.0, 0.0});
+    const auto from_ahead = disc_colour();
+    CHECK(from_astern.b > from_astern.r);
+    CHECK(from_astern.r == from_ahead.r);
+    CHECK(from_astern.b == from_ahead.b);
+    CHECK(plume.light().colour.b > plume.light().colour.r);
+    CHECK(plume.light().energy > 0.0);
+
+    // The fusion modes keep their painted look: the viewer does not touch them.
+    plume.set_mode(0.5, 11198.7);
+    CHECK(plume.style().kind == app::EnginePlume::Kind::Relativistic);
+    const auto parts = plume.parts();
+    REQUIRE(!parts.empty());
+    CHECK(parts[0].material.plume.near.b == app::EnginePlume::style_for(0.5).sheath.b);
 }

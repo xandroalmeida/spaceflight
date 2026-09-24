@@ -265,7 +265,9 @@ void SystemDisplay::engine(double x, double width, double h) {
     const double inset = width * 0.06;
     const double throttle = data_->s.throttle;
     const double thrust = data_->s.thrust_n;
-    label(Vec2{x + inset, h * 0.26}, "MAIN ENGINE  " + (data_->s.engine_mode.empty() ? std::string{"?"} : data_->s.engine_mode), h);
+    // "ENGINE" and not "MAIN ENGINE": with RELATIVISTIC the longer label ran
+    // past the cell at seven columns.
+    label(Vec2{x + inset, h * 0.26}, "ENGINE  " + (data_->s.engine_mode.empty() ? std::string{"?"} : data_->s.engine_mode), h);
 
     // The throttle rule (rule 14). The bar is the COMMAND; the word next to it
     // is the STATE, which comes from the thrust the core is actually producing.
@@ -345,12 +347,18 @@ void SystemDisplay::rcs(double x, double width, double h) {
 }
 
 void SystemDisplay::acceleration(double x, double width, double h) {
-    // What the crew FEELS: the proper acceleration, in g because that is the
-    // unit a body reads it in. Zero in free fall -- which is most of the flight,
-    // and is exactly what has to read (see FlightSession::proper_acceleration_body).
-    const double a = data_->proper_acceleration_ms2;
-    cell(x, width, h, "ACCELERATION", fmt::g_load(a), a > 0.0 ? palette::PRIMARY : palette::SECONDARY);
-    value(Vec2{x + width * 0.06, h * 0.86}, fmt::format("%.3f m/s²", a), h, palette::SECONDARY, 0.125);
+    // Two readings, in g because that is the unit a body reads it in. On top the
+    // REAL one, the hull's accelerometer: the proper acceleration the trajectory
+    // is flown with, zero in free fall. Below it what the CABIN feels, after the
+    // inertial compensator -- the same number up to one g, and one g above it,
+    // with IC lit while the compensator is taking the rest.
+    const double real = data_->proper_acceleration_ms2;
+    const double cabin = data_->cabin_acceleration_ms2;
+    const bool compensating = data_->compensator_active;
+    cell(x, width, h, "ACCEL  REAL", fmt::g_load(real),
+         compensating ? palette::WARNING : (real > 0.0 ? palette::PRIMARY : palette::SECONDARY));
+    value(Vec2{x + width * 0.06, h * 0.86}, "CABIN " + fmt::g_load(cabin) + (compensating ? "  IC" : ""), h,
+          compensating ? palette::OK : palette::SECONDARY, 0.125);
 }
 
 void SystemDisplay::relativity(double x, double width, double h) {
@@ -434,8 +442,11 @@ void MinimalHud::throttle(Vec2 at, double width, double u) {
     // The g the crew feels, on the label's line at the cell's right edge:
     // outside the cockpit this strip is the only place it reads, and after the
     // thrust on the value line it ran into the propellant cell.
-    const double felt = data_->proper_acceleration_ms2;
-    draw_text_at(at + Vec2{width, 0.0}, fmt::g_load(felt), 3.4, felt > 0.0 ? palette::PRIMARY : palette::SECONDARY,
+    // The REAL one here; the cabin's, when the compensator is taking the
+    // excess, in the top-left corner -- both on this line ran over the label.
+    const double real = data_->proper_acceleration_ms2;
+    draw_text_at(at + Vec2{width, 0.0}, fmt::g_load(real), 3.4,
+                 data_->compensator_active ? palette::WARNING : (real > 0.0 ? palette::PRIMARY : palette::SECONDARY),
                  Align::Right);
     draw_bar(Rect2{at + Vec2{0.0, u * 2.0}, Vec2{width, u * 3.4}}, throttle_value,
              thrust > 0.0 ? palette::engine(data_->s.exhaust_velocity_c) : palette::DIM);
@@ -454,6 +465,12 @@ void MinimalHud::corner_top_left() {
         return;
     }
     draw_text_at(at + Vec2{0.0, u * 6.5}, data_->camera_mode + "  " + data_->rcs_activity, 4.0, palette::SECONDARY);
+    // The inertial compensator, only while it works: below one g the cabin
+    // feels exactly the real acceleration, and one reading says it all.
+    if (data_->compensator_active) {
+        draw_text_at(at + Vec2{0.0, u * 12.5}, "IC  cabin " + fmt::g_load(data_->cabin_acceleration_ms2), 4.0,
+                     palette::OK);
+    }
 }
 
 void MinimalHud::corner_top_right() {

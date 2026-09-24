@@ -15,6 +15,7 @@
 #include "core/render/tone_response.hpp"
 #include "tests/support/test_harness.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <utility>
@@ -318,5 +319,24 @@ TEST(the_response_curve_compresses_instead_of_cutting) {
                        expected, 5.0e-4,
                        "the exposure table of section 10.4, recomputed; the bound is the "
                        "three decimals the table is printed to");
+    }
+}
+
+TEST(a_steady_jet_beams_one_power_of_d_less_than_a_moving_blob) {
+    // A steady flow and a moving body differ by the apparent-length factor D:
+    // D^3 eta(DT)/eta(T) against D^4 eta(DT)/eta(T). The table-based blob and the
+    // sample-based jet must agree on everything but that one power.
+    const auto table = render::build_planck_table();
+    for (const double t : {3000.0, 12000.0, 30000.0}) {
+        for (const double d : {0.16, 0.31, 1.0, 3.2, 6.2}) {
+            const double jet = render::ln_band_limited_steady_jet(t, d);
+            const double blob = render::ln_band_limited_beaming(table, t, d);
+            CHECK_NEAR_ABS(jet, blob - std::log(d), std::max(1.0e-3, 1.0e-4 * std::abs(blob)),
+                           "one power of D apart; the bound is the table's interpolation of "
+                           "ln eta -- 1e-3 absolute, or 1e-4 relative where ln eta runs to -39 "
+                           "at 480 K -- three orders below what the eye resolves");
+        }
+        CHECK_NEAR_ABS(render::ln_band_limited_steady_jet(t, 1.0), 0.0, 1.0e-15,
+                       "D = 1 changes nothing, exactly");
     }
 }

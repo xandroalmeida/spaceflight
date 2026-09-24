@@ -76,6 +76,22 @@ namespace sf::relativity {
     return doppler_factor(-to_source, beta);
 }
 
+// The other way round: a SOURCE moving at `beta_source`, seen by an observer at
+// rest, with the photon travelling along `propagation` in the observer's frame
+// (from the source towards the observer). Then
+//
+//   D = 1 / ( gamma (1 - beta_s.n) )
+//
+// It is the SAME number doppler_factor() gives in the source's rest frame, where
+// the observer moves at -beta_s and the photon travels along the aberrated n';
+// the test checks the two against each other. Used for the engine's own jet,
+// seen from a camera that rides with the ship (docs/physics/relativistic-
+// rendering.md section 13): a source moving towards the observer has D > 1.
+[[nodiscard]] inline double doppler_factor_of_moving_source(const math::Vec3& propagation,
+                                                            const math::Vec3& beta_source) {
+    return 1.0 / (gamma_from_beta(beta_source) * (1.0 - dot(beta_source, propagation.normalized())));
+}
+
 // Bolometric intensity transforms as D^4, because I_nu/nu^3 is invariant. The
 // fourth power is what makes the forward sky 400x brighter at beta = 0.9.
 [[nodiscard]] inline double beaming_factor(double doppler) {

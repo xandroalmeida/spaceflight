@@ -32,7 +32,7 @@ const std::vector<Binding>& bindings() {
         {"throttle_down", Key::Ctrl, false, false, false, "MOTOR", "fecha o acelerador"},
         {"throttle_full", Key::Z, false, false, false, "MOTOR", "acelerador cheio"},
         {"engine_cutoff", Key::X, false, false, false, "MOTOR", "corte do motor"},
-        {"engine_mode", Key::G, false, false, false, "MOTOR", "modo IMPULSE / CRUISE"},
+        {"engine_mode", Key::G, false, false, false, "MOTOR", "modo IMPULSE / CRUISE / RELATIVISTIC"},
         {"rcs_toggle", Key::V, false, false, false, "MOTOR", "RCS ligado / desligado"},
         {"rcs_mode", Key::B, false, false, false, "MOTOR", "RCS rotação / translação"},
 

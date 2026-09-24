@@ -260,3 +260,30 @@ TEST(aberration_and_doppler_are_consistent_with_each_other) {
                        "different places");
     }
 }
+
+TEST(a_moving_source_seen_from_rest_is_the_same_doppler_seen_from_its_own_frame) {
+    // The engine's jet is a SOURCE moving past a camera at rest. The closed form
+    // 1/(gamma(1 - beta.n)) must agree with doing it the long way: go to the
+    // source's rest frame (aberrate the photon), where the observer moves at
+    // -beta, and use the observer's formula there.
+    for (const double b : {0.03, 0.5, 0.95}) {
+        const Vec3 beta{-b, 0.0, 0.0};   // the jet leaves the ship along -x
+        for (int k = 0; k <= 12; ++k) {
+            const double angle = units::pi * k / 12.0;
+            const Vec3 n{std::cos(angle), std::sin(angle), 0.0};   // jet -> camera
+            const double closed = relativity::doppler_factor_of_moving_source(n, beta);
+            const double long_way =
+                relativity::doppler_factor(relativity::aberrate_propagation(n, beta), beta * -1.0);
+            CHECK_NEAR_REL(closed, long_way, 1.0e-12,
+                           "the same D from the observer's frame and from the source's");
+        }
+        const double gamma = 1.0 / std::sqrt(1.0 - b * b);
+        CHECK_NEAR_REL(relativity::doppler_factor_of_moving_source(-Vec3::unit_x(), beta),
+                       std::sqrt((1.0 + b) / (1.0 - b)), 1.0e-12,
+                       "the jet coming straight at the camera: D = sqrt((1+b)/(1-b))");
+        CHECK_NEAR_REL(relativity::doppler_factor_of_moving_source(Vec3::unit_x(), beta),
+                       std::sqrt((1.0 - b) / (1.0 + b)), 1.0e-12, "and going straight away");
+        CHECK_NEAR_REL(relativity::doppler_factor_of_moving_source(Vec3::unit_y(), beta), 1.0 / gamma,
+                       1.0e-12, "seen side-on it is redshifted, 1/gamma: the transverse effect");
+    }
+}

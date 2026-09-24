@@ -4,6 +4,7 @@
 #include "core/propulsion/engine.hpp"
 #include "core/spacecraft/spacecraft.hpp"
 #include "core/units/constants.hpp"
+#include "tests/support/source_fixture.hpp"
 #include "tests/support/test_harness.hpp"
 
 #include <cmath>
@@ -301,4 +302,62 @@ TEST(a_two_mode_ship_reports_a_different_budget_in_each_mode) {
                    "0.5 * ln(20) = 1.4979 of rapidity is beta = 0.9048. The Newtonian budget of "
                    "1.5c is meaningless as a speed and perfectly meaningful as rapidity -- which "
                    "is why the relativistic rocket equation is written in it");
+}
+
+TEST(a_second_power_plant_is_declared_not_conjured) {
+    using sf::propulsion::MultiModeEngine;
+
+    // The Mk III's RELATIVISTIC mode draws 4730 times the fusion plant's power.
+    // As a third mode of that plant it is refused; on a plant of its own it is
+    // legal -- and the invariant still binds IMPULSE and CRUISE to each other.
+    const EngineSpec impulse{"IMPULSE", 0.0222376, 0.03, 1.0};
+    const EngineSpec cruise{"CRUISE", 7.470950e-05, 0.5, 1.0};
+    const EngineSpec relativistic{"RELATIVISTIC", 6.8866239e-02, 0.95, 1.0};
+
+    CHECK_THROWS_AS(MultiModeEngine({{"IMPULSE", impulse}, {"CRUISE", cruise}, {"RELATIVISTIC", relativistic}}),
+                    std::invalid_argument);
+
+    MultiModeEngine engine{
+        {{"IMPULSE", impulse}, {"CRUISE", cruise}, {"RELATIVISTIC", relativistic, "annihilation"}}};
+    CHECK_EQ(engine.size(), std::size_t{3});
+    CHECK_EQ(engine.current_plant(), std::string{"main"});
+    CHECK_NEAR_REL(engine.power(), engine.power("main"), 1.0e-15, "power() is the current mode's plant");
+    CHECK_NEAR_REL(engine.power("annihilation") / engine.power("main"), 4732.0, 1.0e-3,
+                   "the antimatter plant converts 4.26e15 W against the fusion plant's 9.0e11 W");
+    CHECK_THROWS_AS(static_cast<void>(engine.power("warp")), std::invalid_argument);
+
+    CHECK(engine.select("RELATIVISTIC"));
+    CHECK_EQ(engine.current_plant(), std::string{"annihilation"});
+    CHECK_NEAR_REL(engine.current().max_thrust(), 20000.0 * sf::units::g0 * 100.0, 1.0e-7,
+                   "100 g on the full 20-tonne ship: F = eta q w with w = 0.95 c");
+
+    // The cycle runs through all three and back.
+    engine.cycle();
+    CHECK_EQ(engine.current_mode(), std::string{"IMPULSE"});
+
+    // A fourth mode on the annihilation plant that draws a different power is
+    // refused exactly as on the main plant.
+    const EngineSpec greedy{"GREEDY", 0.2, 0.95, 1.0};
+    CHECK_THROWS_AS(MultiModeEngine({{"IMPULSE", impulse},
+                                     {"RELATIVISTIC", relativistic, "annihilation"},
+                                     {"GREEDY", greedy, "annihilation"}}),
+                    std::invalid_argument);
+
+    // And the budget is the relativistic rocket's: (eta w/c) ln 20 of rapidity.
+    Spacecraft ship{"torch", 1000.0, 19000.0, engine};
+    ship.select_mode("RELATIVISTIC");
+    const double rapidity = ship.delta_v_budget(ship.initial_mass()) / sf::units::c;
+    CHECK_NEAR_REL(std::tanh(rapidity), 0.99328, 1.0e-5, "tanh(0.95 ln 20): 0.9933 c, never c");
+}
+
+TEST(the_mk3_config_file_carries_the_second_plant) {
+    using sf::propulsion::MultiModeEngine;
+    const std::string text = sft::read_repository_file("config/engines/torch-mk3.json");
+    REQUIRE(!text.empty());
+    const auto root = sf::config::json::parse(text);
+    const auto engine = MultiModeEngine::from_json(*root.get("engine"), "torch-mk3.json");
+    CHECK_EQ(engine.size(), std::size_t{3});
+    CHECK_EQ(engine.modes()[2].name, std::string{"RELATIVISTIC"});
+    CHECK_EQ(engine.modes()[2].plant, std::string{"annihilation"});
+    CHECK_EQ(engine.modes()[0].plant, std::string{"main"});
 }

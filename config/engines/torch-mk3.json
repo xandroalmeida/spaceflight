@@ -28,6 +28,26 @@
   // (eta w/c) ln(m0/m1), and both factors have to be large: 0.5 c of exhaust AND
   // 19 tonnes of propellant on a 1-tonne hull. The years of burn are the honest
   // consequence of finite thrust, not a modelling artefact.
+  //
+  // RELATIVISTIC -- a SECOND power plant behind the same nozzle.
+  //
+  // Fiction, declared: a matter-antimatter reactor converting 4.26e15 W, 4730
+  // times the fusion plant, with the jet at 0.95 c. It is not a third operating
+  // point of the 900 GW plant -- at fixed power, raising w LOWERS the thrust, so
+  // no setting of that plant gives more than CRUISE's 11 kN at this exhaust
+  // velocity. It says so with "plant", and the equal-power invariant is checked
+  // within each plant (docs/physics/propulsion-model.md section 4.7).
+  //
+  //   w                    0.95 c
+  //   q_max                6.8866e-2 kg/s
+  //   thrust               1.9613e7 N    100 g on the full 20-tonne ship,
+  //                                      2000 g on the empty hull
+  //   budget at 20:1       0.9933 c      (eta w/c) ln 20 = 2.846 of rapidity
+  //   burn to empty        3.19 days     0.9 c after 2.65 days
+  //
+  // What the crew feels is limited to 1 g by the inertial compensator, which is
+  // fiction too and acts on the crew only: the ship's trajectory is integrated
+  // with the whole 100-2000 g (docs/physics/inertial-compensator.md).
   "engine": {
     "mode": "IMPULSE",
     "modes": [
@@ -41,6 +61,13 @@
         "name": "CRUISE",
         "max_mass_flow_kg_s": 7.470950e-05,
         "exhaust_velocity_fraction_c": 0.5,
+        "efficiency": 1.0
+      },
+      {
+        "name": "RELATIVISTIC",
+        "plant": "annihilation",
+        "max_mass_flow_kg_s": 6.8866239e-02,
+        "exhaust_velocity_fraction_c": 0.95,
         "efficiency": 1.0
       }
     ]

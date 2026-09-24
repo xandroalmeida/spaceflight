@@ -19,6 +19,7 @@
 #include "core/attitude/inertia.hpp"
 #include "core/attitude/pointing_controller.hpp"
 #include "core/attitude/rcs.hpp"
+#include "core/units/constants.hpp"
 #include "core/celestial/body_catalog.hpp"
 #include "core/celestial/solar_system.hpp"
 #include "core/ephemeris/spice_ephemeris_provider.hpp"
@@ -537,6 +538,15 @@ public:
     // acceleration. The RCS term is zero for a pure rotation (the couples
     // cancel) and is the whole reading during a translation.
     [[nodiscard]] math::Vec3 proper_acceleration_body() const;
+
+    // ⚠️ FICTION, declared (docs/physics/inertial-compensator.md): the inertial
+    // compensator. It acts on the crew and the cabin ONLY, cancelling whatever
+    // part of the ship's proper acceleration exceeds CABIN_LIMIT_MS2, so that the
+    // RELATIVISTIC mode's 100-2000 g arrive as at most one g. It is an internal
+    // force: it changes nothing the integrator sees, and the trajectory is flown
+    // with the whole proper acceleration. Below the limit it does nothing.
+    static constexpr double CABIN_LIMIT_MS2 = units::g0;
+    [[nodiscard]] math::Vec3 cabin_acceleration_body() const;
 
     // --- orbit geometry (Milestone 7) ---------------------------------------
     // The osculating ellipse, sampled. In scene units, ready to draw.

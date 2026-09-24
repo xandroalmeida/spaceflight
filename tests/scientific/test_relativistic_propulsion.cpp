@@ -500,6 +500,65 @@ TEST(burning_the_whole_tank_in_cruise_mode_reaches_the_predicted_beta) {
     CHECK(dilation > 0.5);
 }
 
+TEST(the_relativistic_mode_at_a_hundred_g_obeys_the_same_rocket_equation) {
+    // The Mk III's third mode, on its own antimatter plant: w = 0.95 c and 19.6 MN,
+    // 100 g on the full ship and 2000 g on the empty hull. The fiction is the
+    // plant's power; the kinematics are not allowed to be fiction. Integrated in
+    // flat spacetime like the cruise case, it must land on
+    //
+    //     phi = 0.95 ln(m0/m) at every instant, and tanh(0.95 ln 20) = 0.99328
+    //
+    // when the tank runs dry -- after 3.19 days of the ship's clock -- and never
+    // on c, however hard it pushes.
+    const propulsion::MultiModeEngine engine{
+        {{"IMPULSE", propulsion::EngineSpec{"IMPULSE", 0.0222376, 0.03, 1.0}},
+         {"CRUISE", propulsion::EngineSpec{"CRUISE", 7.470950e-05, 0.5, 1.0}},
+         {"RELATIVISTIC", propulsion::EngineSpec{"RELATIVISTIC", 6.8866239e-02, 0.95, 1.0}, "annihilation"}}};
+    spacecraft::Spacecraft ship{"torch", 1000.0, 19000.0, engine};
+    ship.select_mode("RELATIVISTIC");
+    CHECK_NEAR_REL(ship.engine().max_thrust() / ship.initial_mass(), 100.0 * units::g0, 1.0e-7,
+                   "100 g of proper acceleration at ignition");
+
+    propulsion::MainEngineForce main_engine{ship};
+    main_engine.set_throttle(1.0);
+    auto cfg = relativistic_config();
+    cfg.max_step = time::Duration::hours(1.0);
+    propagation::DormandPrince54Propagator propagator{main_engine, cfg};
+
+    propagation::PropagationState initial{};
+    initial.mass = ship.initial_mass();
+    const auto t0 = time::CoordinateTime::j2000();
+
+    // Mid-burn, at a day of coordinate time: still thrusting, and already on the
+    // rocket equation's curve with whatever mass is left.
+    const auto mid = propagator.propagate(initial, t0, t0 + time::Duration::days(1.0));
+    REQUIRE(mid.ok());
+    const double mid_beta = mid.state.state.velocity.norm() / c;
+    const double mid_phi = 0.95 * std::log(ship.initial_mass() / mid.state.mass);
+    std::ostringstream m;
+    m << "after 1 day: mass " << mid.state.mass << " kg, beta " << mid_beta << ", predicted "
+      << std::tanh(mid_phi);
+    INFO(m.str());
+    CHECK(mid.state.mass > ship.dry_mass());
+    CHECK_NEAR_REL(std::atanh(mid_beta), mid_phi, 1.0e-6,
+                   "rapidity = (eta w/c) ln(m0/m) mid-burn; the bound is the integrator's, as in "
+                   "the cruise case");
+
+    // Past the end of the burn: coasting at the budget.
+    const auto end = propagator.propagate(initial, t0, t0 + time::Duration::days(20.0));
+    REQUIRE(end.ok());
+    const double beta = end.state.state.velocity.norm() / c;
+    std::ostringstream e;
+    e << "after 20 days of coordinate time: mass " << end.state.mass << " kg, beta " << beta
+      << ", proper time " << end.state.proper_time.seconds() / 86400.0 << " days";
+    INFO(e.str());
+    CHECK_NEAR_REL(end.state.mass, ship.dry_mass(), 1.0e-9, "the tank runs dry");
+    CHECK_NEAR_REL(beta, std::tanh(0.95 * std::log(20.0)), 1.0e-6,
+                   "0.99328 c: the whole budget, and the same equation as cruise");
+    CHECK(beta < 1.0);
+    CHECK(end.state.proper_time.seconds() < time::Duration::days(20.0).seconds());
+}
+
 TEST(impulse_mode_cannot_reach_relativistic_speed_and_says_so_in_the_arithmetic) {
     // The other half of the trade: the high-thrust mode has the same tank and
     // gets nowhere near, because delta-phi is (w/c) ln(ratio) and w is 16.7x

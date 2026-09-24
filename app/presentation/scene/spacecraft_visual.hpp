@@ -110,7 +110,7 @@ public:
     static constexpr double CORE_FRACTION = 0.42;
 
     // One look per kind of exhaust. Colours sRGB-encoded.
-    enum class Kind { Chemical, FusionDense, Relativistic };
+    enum class Kind { Chemical, FusionDense, Relativistic, Annihilation };
     struct Style {
         Kind kind;
         const char* name;
@@ -126,7 +126,17 @@ public:
     };
     // The style for an exhaust velocity: below 0.001 c a chemical flame (the
     // Orbital Tug's 9 km/s), up to 0.2 c a dense fusion plasma (IMPULSE and the
-    // Mk I/II), above that a relativistic beam (CRUISE, 0.5 c).
+    // Mk I/II), up to 0.9 c a relativistic beam (CRUISE, 0.5 c), and above that
+    // an annihilation beam (RELATIVISTIC, 0.95 c) whose look is not fixed: it is
+    // the jet's own light, Doppler-shifted and beamed towards wherever the camera
+    // is (`set_viewer`).
+    //
+    // The Annihilation beam's rest-frame emission: a black body at this
+    // temperature. Its colour and brightness on screen are then NOT chosen --
+    // they are T' = D T and D^3 eta(D T)/eta(T), from core/relativity/optics.hpp
+    // and core/render/blackbody.hpp (docs/physics/relativistic-rendering.md
+    // section 13).
+    static constexpr double BEAM_REST_TEMPERATURE_K = 12000.0;
     [[nodiscard]] static const Style& style_for(double exhaust_velocity_c);
 
     explicit EnginePlume(MeshLibrary& meshes);
@@ -140,6 +150,16 @@ public:
     void set_mode(double exhaust_velocity_c, double max_thrust_n);
     void set_intensity(double value);
     void advance(double delta);
+    // Where the camera is, in the ENGINE MOUNT's frame (metres). Only the
+    // Annihilation beam uses it: at 0.95 c the jet's light depends on the angle
+    // it is seen from, by a factor of 250 between astern and ahead.
+    void set_viewer(const Vec3& camera_in_mount);
+    // The Doppler factor of the jet towards the camera, and the colour it gives.
+    [[nodiscard]] double doppler() const { return doppler_; }
+    [[nodiscard]] Colour beam_colour() const { return beam_colour_; }
+    // How bright the beam is relative to its rest frame, through the same
+    // detector response as the sky: 1 at D = 1, towards 2 blinding, towards 0 dark.
+    [[nodiscard]] double beam_brightness() const;
 
     [[nodiscard]] bool visible() const { return intensity_ > 0.0005; }
     [[nodiscard]] double intensity() const { return intensity_; }
@@ -163,10 +183,15 @@ private:
 
     std::vector<Meshes> meshes_;   // one pair per Kind, in Kind order
     std::string glow_mesh_;
+    std::string reactor_mesh_;
     const Style* style_;
     double reference_n_{IMPULSE_REFERENCE_N};
     double intensity_{0.0};
     double time_{0.0};
+    double exhaust_beta_{0.03};
+    double doppler_{1.0};
+    double ln_beam_brightness_{0.0};
+    Colour beam_colour_{palette::ENGINE_ANNIHILATION};
 };
 
 // The RCS jets, lit by the ACTUATOR (rule 15).

@@ -49,7 +49,11 @@ void AudioDirector::schedule_beep() {
 }
 
 void AudioDirector::set_engine(const std::string& mode, double thrust_n, double full_thrust_n) {
+    // RELATIVISTIC has no recording of its own yet: it plays the IMPULSE rumble
+    // pitched a fifth down, a deeper and heavier sound than either fusion mode,
+    // and crossfades from CRUISE like any other change of mode.
     const bool cruise = mode == "CRUISE";
+    const bool relativistic = mode == "RELATIVISTIC";
     const double fraction = full_thrust_n > 0.0 ? std::clamp(thrust_n / full_thrust_n, 0.0, 1.0) : 0.0;
     // The mode not in use fades out on the same time constant, so switching
     // mode with the engine lit is a crossfade and not a cut.
@@ -59,7 +63,8 @@ void AudioDirector::set_engine(const std::string& mode, double thrust_n, double 
     // The pitch rises a little with thrust. A fuller sound, and the only thing
     // here that corresponds to nothing physical -- said out loud rather than
     // buried.
-    sink_->set_loop("engine_impulse", kImpulseGain * impulse_level_ * gain, 0.92 + 0.16 * impulse_level_);
+    const double impulse_pitch = relativistic ? 0.62 + 0.10 * impulse_level_ : 0.92 + 0.16 * impulse_level_;
+    sink_->set_loop("engine_impulse", kImpulseGain * impulse_level_ * gain, impulse_pitch);
     sink_->set_loop("engine_cruise", kCruiseGain * cruise_level_ * gain, 0.96 + 0.08 * cruise_level_);
 }
 
