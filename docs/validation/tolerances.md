@@ -425,6 +425,12 @@ ponto de saturação, não `r < 1`.
 | Ballesteros em Vega e Aldebarã | 8 % rel. | medido +5,5 % e −4,3 %; é uma aproximação de duas bandas |
 | razão de Pogson | 10⁻¹⁴ rel. | cinco magnitudes são 100 **por definição** |
 
+### 3.20 Painel do motor (`tests/presentation/test_presentation_flight.cpp`)
+
+| Quantidade | Limite | Origem |
+|---|---|---|
+| acelerador exibido × empuxo máximo = empuxo, numa queima planejada | 10⁻¹² rel. | o empuxo é linear no acelerador (`EngineSpec::thrust_at`) e o acelerador exibido é a força do executor dividida pelo teto; a ida e volta é uma divisão e uma multiplicação, alguns ulps |
+
 
 ## 4. Quando uma tolerância pode mudar
 

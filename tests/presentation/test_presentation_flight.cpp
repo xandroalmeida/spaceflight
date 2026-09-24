@@ -818,10 +818,20 @@ TEST(the_computer_flies_a_direct_relativistic_transfer_to_the_moon) {
     double peak_cabin_g = 0.0;
     double peak_thrust = 0.0;
     double peak_beta = 0.0;
+    // The panel's throttle bar during the guided burn: the pilot's throttle is
+    // zero, and the bar has to show the executor's command, not 0 %.
+    double burn_throttle = 0.0;
+    double burn_thrust = 0.0;
+    double burn_max_thrust = 0.0;
     session.set_time_warp(10.0);
     for (int frame = 0; frame < 20000; ++frame) {
         flight->frames(1);
         const auto s = session.snapshot();
+        if (s.thrust_n > burn_thrust && session.throttle() == 0.0) {
+            burn_thrust = s.thrust_n;
+            burn_throttle = s.throttle;
+            burn_max_thrust = s.max_thrust_n;
+        }
         peak_thrust = std::max(peak_thrust, s.thrust_n);
         peak_beta = std::max(peak_beta, s.beta);
         peak_real_g = std::max(peak_real_g, app.instrument_data().proper_acceleration_ms2 / units::g0);
@@ -845,6 +855,10 @@ TEST(the_computer_flies_a_direct_relativistic_transfer_to_the_moon) {
                           orbit.eccentricity));
     CHECK_EQ(session.mission_phase(), std::string{"COMPLETE"});
     CHECK(peak_thrust > 1.0e7);          // the planned burn shows as thrust
+    REQUIRE(burn_thrust > 0.0);
+    CHECK(burn_throttle > 0.5);          // the bar is not at 0 % mid-burn
+    CHECK_NEAR_REL(burn_throttle * burn_max_thrust, burn_thrust, 1e-12,
+                   "thrust is linear in throttle, so throttle x ceiling is the same force; only rounding");
     CHECK(peak_real_g > 50.0);           // the hull feels the engine
     CHECK(peak_cabin_g <= 1.0 + 1e-9);   // the crew, one g at most
     CHECK(peak_beta < 0.01);

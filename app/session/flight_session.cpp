@@ -1931,7 +1931,17 @@ SnapshotView FlightSession::snapshot() const {
     // What the force model applies -- the pilot's engine and a planned burn --
     // and zero with the tank empty, whatever the throttle says.
     out.thrust_n = propulsive_thrust().norm();
-    out.throttle = throttle();
+    // The engine's command: the pilot's throttle plus the one a planned burn is
+    // flying. Reading only the pilot's left the panel at 0 % through a whole
+    // injection burn, with 70 g on the accelerometer. The executor has no
+    // throttle of its own, only a force; thrust is linear in throttle
+    // (EngineSpec::thrust_at), so the force over the ceiling IS its throttle.
+    double planned_throttle = 0.0;
+    if (executor_ != nullptr && clock_ != nullptr && craft_ != nullptr && craft_->engine().max_thrust() > 0.0) {
+        planned_throttle = executor_->evaluate(state_, clock_->coordinate_time()).proper_thrust.norm() /
+                           craft_->engine().max_thrust();
+    }
+    out.throttle = throttle() + planned_throttle;
     out.engine_mode = engine_mode();
     out.mass_flow_kg_s = craft.mass_flow;
     out.endurance_s = craft.endurance;
