@@ -1,6 +1,7 @@
 #include "app/presentation/scene/cockpit.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace sf::app {
@@ -195,16 +196,7 @@ void CockpitInterior::build_shell() {
                              materials_.cockpit_panel));
     }
 
-    // The aft bulkhead with the hatch to the habitat. Without it, looking back
-    // would show space from inside the ship.
-    parts_.push_back(box(Vec3{0.06, CABIN_HALF_WIDTH * 2.0, CEILING_Z - FLOOR_Z},
-                         translate(Vec3{AFT_X, 0.0, (CEILING_Z + FLOOR_Z) * 0.5}), materials_.cockpit_panel));
-
-    Part hatch{};
-    hatch.mesh = meshes_.cylinder(0.40, 0.40, 0.05, 24, 1, true, true);
-    hatch.transform = Transform3{Basis::from_euler_degrees(Vec3{0.0, 0.0, 90.0}), Vec3{AFT_X + 0.04, 0.0, -0.25}};
-    hatch.material = materials_.bare_metal;
-    parts_.push_back(hatch);
+    build_aft_bulkhead();
 
     // Overhead panel: a few breakers and nothing to press. A cabin without a
     // ceiling reads as an open set, and when the pilot looks up there has to be
@@ -217,6 +209,175 @@ void CockpitInterior::build_shell() {
                                  translate(Vec3{3.30 + row * 0.13, -0.56 + column * 0.16, CEILING_Z - 0.135}),
                                  materials_.bare_metal));
         }
+    }
+}
+
+void CockpitInterior::build_aft_bulkhead() {
+    // The aft bulkhead closes the whole end of the cabin, with a closed door to
+    // the habitat and two auxiliary panels. Everything is built from boxes: the
+    // first attempt used capped cylinders for a round hatch, and from the seat
+    // their faces did not show -- the pilot saw the wall through the door.
+    constexpr double face = AFT_X + 0.03;   // the bulkhead's cabin-side face
+    parts_.push_back(box(Vec3{0.06, CABIN_HALF_WIDTH * 2.0, CEILING_Z - FLOOR_Z},
+                         translate(Vec3{AFT_X, 0.0, (CEILING_Z + FLOOR_Z) * 0.5}), materials_.cabin_shell));
+
+    // Structural rails where the bulkhead meets the side walls, floor and
+    // ceiling. Their seams give the wall depth instead of one flat tile.
+    for (const double side : {-1.0, 1.0}) {
+        parts_.push_back(box(Vec3{0.11, 0.075, CEILING_Z - FLOOR_Z},
+                             translate(Vec3{face + 0.035, side * (CABIN_HALF_WIDTH - 0.035), 0.03}),
+                             materials_.frame_alloy));
+    }
+    for (const double z : {FLOOR_Z + 0.035, CEILING_Z - 0.035}) {
+        parts_.push_back(box(Vec3{0.11, CABIN_HALF_WIDTH * 2.0, 0.07}, translate(Vec3{face + 0.035, 0.0, z}),
+                             materials_.frame_alloy));
+    }
+
+    build_aft_door(face);
+    build_aft_instruments(face);
+}
+
+void CockpitInterior::build_aft_door(double face) {
+    // A pressure door, closed: 0.78 x 1.52 m over a 10 cm threshold, a person's
+    // width and as tall as leaves room for the seal lamp under the ceiling rail.
+    // The seat back stands in front of its middle, as it would in a two-metre
+    // cabin.
+    constexpr double width = 0.78;
+    constexpr double height = 1.52;
+    constexpr double bottom = FLOOR_Z + 0.10;
+    constexpr double centre_z = bottom + height * 0.5;
+    constexpr double jamb = 0.07;
+    const double top = bottom + height;
+
+    // The dark gap between leaf and frame: without it the leaf reads as a panel
+    // painted on the wall and not as something that opens.
+    parts_.push_back(box(Vec3{0.02, width, height}, translate(Vec3{face + 0.01, 0.0, centre_z}),
+                         materials_.window_seal));
+    for (const double side : {-1.0, 1.0}) {
+        parts_.push_back(box(Vec3{0.06, jamb, height + jamb * 2.0},
+                             translate(Vec3{face + 0.03, side * (width + jamb) * 0.5, centre_z}),
+                             materials_.frame_alloy));
+    }
+    for (const double z : {bottom - jamb * 0.5, top + jamb * 0.5}) {
+        parts_.push_back(box(Vec3{0.06, width + jamb * 2.0, jamb}, translate(Vec3{face + 0.03, 0.0, z}),
+                             materials_.frame_alloy));
+    }
+
+    // The leaf, 12 mm inside the frame all round, and two raised panels split by
+    // a stiffener: the proportions of a real hatch leaf.
+    parts_.push_back(box(Vec3{0.045, width - 0.024, height - 0.024}, translate(Vec3{face + 0.035, 0.0, centre_z}),
+                         materials_.frame_alloy));
+    for (const double z : {centre_z + 0.39, centre_z - 0.39}) {
+        parts_.push_back(box(Vec3{0.012, width - 0.16, 0.66}, translate(Vec3{face + 0.063, 0.0, z}),
+                             materials_.cockpit_panel));
+    }
+    parts_.push_back(box(Vec3{0.02, width - 0.08, 0.05}, translate(Vec3{face + 0.068, 0.0, centre_z}),
+                         materials_.machined_trim));
+
+    // Hinges on one side, the lever and three dogs on the other. The lever lies
+    // horizontal and the dogs bridge leaf and frame: both say "closed and locked"
+    // without a word written on the door.
+    const double hinge_y = width * 0.5 - 0.01;
+    for (const double z : {centre_z - 0.60, centre_z, centre_z + 0.60}) {
+        parts_.push_back(box(Vec3{0.05, 0.035, 0.13}, translate(Vec3{face + 0.07, hinge_y, z}),
+                             materials_.bare_metal));
+    }
+    const double latch_y = -width * 0.5;
+    for (const double z : {centre_z - 0.55, centre_z, centre_z + 0.55}) {
+        parts_.push_back(box(Vec3{0.03, 0.09, 0.05}, translate(Vec3{face + 0.07, latch_y, z}),
+                             materials_.bare_metal));
+    }
+    // The lever at chest height: lower, the seat back hides it from the pilot.
+    const double pivot_y = latch_y + 0.13;
+    const double lever_z = centre_z + 0.42;
+    parts_.push_back(box(Vec3{0.05, 0.07, 0.07}, translate(Vec3{face + 0.08, pivot_y, lever_z}),
+                         materials_.bare_metal));
+    parts_.push_back(box(Vec3{0.035, 0.24, 0.04}, translate(Vec3{face + 0.11, pivot_y + 0.10, lever_z}),
+                         materials_.machined_trim));
+
+    // Over the door, the seal state: green lit, red dark. Scenery like the rest
+    // of this wall -- the door never opens, so there is no state to read.
+    parts_.push_back(box(Vec3{0.03, 0.30, 0.09}, translate(Vec3{face + 0.015, 0.0, top + jamb + 0.08}),
+                         materials_.dark_composite));
+    parts_.push_back(box(Vec3{0.012, 0.10, 0.04}, translate(Vec3{face + 0.035, 0.07, top + jamb + 0.08}),
+                         ShipMaterials::emissive(palette::OK, 0.8)));
+    parts_.push_back(box(Vec3{0.012, 0.10, 0.04}, translate(Vec3{face + 0.035, -0.07, top + jamb + 0.08}),
+                         materials_.indicator_off));
+}
+
+void CockpitInterior::build_aft_instruments(double face) {
+    // Two auxiliary panels between the door frame and the side rails. They are
+    // passive: the flight is flown from the front panel (rule 24), and these
+    // only make the back of the cabin read as part of a working ship.
+    constexpr double panel_y = 0.71;
+    constexpr double panel_width = 0.42;
+    constexpr double panel_z = 0.18;
+    for (const double side : {-1.0, 1.0}) {
+        parts_.push_back(box(Vec3{0.04, panel_width, 0.86}, translate(Vec3{face + 0.02, side * panel_y, panel_z}),
+                             materials_.dark_composite));
+    }
+    const double front = face + 0.04;
+
+    // Environment panel: four square gauges, each a bezel, a dim face, a zero
+    // mark and a needle.
+    for (int i = 0; i < 4; ++i) {
+        const double y = panel_y + (i % 2 == 0 ? -0.095 : 0.095);
+        const double z = panel_z + (i < 2 ? 0.25 : 0.06);
+        parts_.push_back(box(Vec3{0.015, 0.16, 0.16}, translate(Vec3{front + 0.0075, y, z}),
+                             materials_.display_glass));
+        parts_.push_back(box(Vec3{0.006, 0.13, 0.13}, translate(Vec3{front + 0.018, y, z}),
+                             ShipMaterials::emissive(palette::BACKGROUND.lightened(0.08F), 0.35)));
+        parts_.push_back(box(Vec3{0.004, 0.008, 0.02}, translate(Vec3{front + 0.022, y, z + 0.052}),
+                             ShipMaterials::emissive(palette::NAV, 0.6)));
+        const double angle = -55.0 + 38.0 * i;
+        parts_.push_back(box(Vec3{0.004, 0.007, 0.05},
+                             Transform3{Basis::from_euler_degrees(Vec3{angle, 0.0, 0.0}), Vec3{front + 0.024, y, z}} *
+                                 translate(Vec3{0.0, 0.0, 0.022}),
+                             ShipMaterials::emissive(palette::PRIMARY, 0.7)));
+    }
+    for (int i = 0; i < 3; ++i) {
+        parts_.push_back(box(Vec3{0.012, 0.06, 0.03},
+                             translate(Vec3{front + 0.006, panel_y - 0.12 + i * 0.12, panel_z - 0.13}),
+                             i == 0 ? ShipMaterials::emissive(palette::OK, 0.6) : materials_.indicator_off));
+    }
+    for (int row = 0; row < 2; ++row) {
+        for (int column = 0; column < 5; ++column) {
+            parts_.push_back(box(Vec3{0.02, 0.04, 0.04},
+                                 translate(Vec3{front + 0.01, panel_y - 0.16 + column * 0.08,
+                                                panel_z - 0.24 - row * 0.08}),
+                                 materials_.bare_metal));
+        }
+    }
+
+    // Power and communications panel: a status screen with a few lines of
+    // "text", then a row of toggle switches and one of breakers.
+    const double y = -panel_y;
+    parts_.push_back(box(Vec3{0.015, 0.34, 0.22}, translate(Vec3{front + 0.0075, y, panel_z + 0.22}),
+                         materials_.display_glass));
+    parts_.push_back(box(Vec3{0.006, 0.30, 0.18}, translate(Vec3{front + 0.018, y, panel_z + 0.22}),
+                         ShipMaterials::emissive(palette::DISPLAY_GLOW, 0.5)));
+    const std::array<double, 5> lines = {0.22, 0.16, 0.24, 0.12, 0.19};
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        parts_.push_back(box(Vec3{0.004, lines[i], 0.012},
+                             translate(Vec3{front + 0.022, y - 0.12 + lines[i] * 0.5,
+                                            panel_z + 0.29 - static_cast<double>(i) * 0.032}),
+                             ShipMaterials::emissive(i == 0 ? palette::OK : palette::NAV, 0.7)));
+    }
+    for (int column = 0; column < 4; ++column) {
+        const double sy = y - 0.135 + column * 0.09;
+        parts_.push_back(box(Vec3{0.015, 0.05, 0.07}, translate(Vec3{front + 0.0075, sy, panel_z - 0.02}),
+                             materials_.bare_metal));
+        parts_.push_back(box(Vec3{0.045, 0.014, 0.014},
+                             Transform3{Basis::from_euler_degrees(Vec3{0.0, column == 2 ? 25.0 : -25.0, 0.0}),
+                                        Vec3{front + 0.03, sy, panel_z - 0.02}},
+                             materials_.machined_trim));
+        parts_.push_back(box(Vec3{0.012, 0.035, 0.018}, translate(Vec3{front + 0.006, sy, panel_z + 0.04}),
+                             column == 2 ? materials_.indicator_off : ShipMaterials::emissive(palette::OK, 0.5)));
+    }
+    for (int column = 0; column < 5; ++column) {
+        parts_.push_back(box(Vec3{0.02, 0.04, 0.04},
+                             translate(Vec3{front + 0.01, y - 0.16 + column * 0.08, panel_z - 0.18}),
+                             materials_.bare_metal));
     }
 }
 

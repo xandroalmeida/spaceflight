@@ -180,6 +180,9 @@ public:
 
 private:
     void build_shell();
+    void build_aft_bulkhead();
+    void build_aft_door(double face);
+    void build_aft_instruments(double face);
     void build_windows();
     void build_bay(Vec2 a, Vec2 b, int index);
     void bolt_ring(const Transform3& bay, Vec2 opening, double centre_z, int index);

@@ -106,9 +106,16 @@ void SpacecraftVisual::build_habitat() {
 
     // Three reinforcing hoops. A smooth nine-metre surface has no scale; the
     // hoops are what make the ship look the size it is.
+    //
+    // ⚠️ Without caps, for the same reason as the cockpit fairing: the forward
+    // hoop stands at x = 2.6, between the pilot's eye (3.15) and the cabin's aft
+    // bulkhead (2.30). With caps it was a 3.1 m opaque disc there, and looking
+    // back from the seat showed its dark metal instead of the bulkhead, the
+    // hatch and the seat back. A hoop is a band; from outside the caps were
+    // hidden inside the hull anyway.
     for (const double x : {-2.6, 0.0, 2.6}) {
         Part hoop{};
-        hoop.mesh = meshes_.cylinder(CORE_RADIUS + 0.06, CORE_RADIUS + 0.06, 0.18, 24, 1, true, true);
+        hoop.mesh = meshes_.cylinder(CORE_RADIUS + 0.06, CORE_RADIUS + 0.06, 0.18, 24, 1, false, false);
         hoop.transform = at(Vec3{x, 0.0, 0.0}, Vec3{0.0, 0.0, 90.0});
         hoop.material = materials_.bare_metal;
         parts_.push_back(hoop);

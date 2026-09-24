@@ -4,6 +4,24 @@ A geometria é **procedural** (regra 49): `app/presentation/scene/cockpit.cpp`
 constrói a casca, as janelas, o painel, os consoles, o assento e a luz a partir
 de primitivas. Não há modelo artístico e o M7 não espera por um.
 
+A parede traseira (x = 2,30 m) fecha toda a seção da cabine. No centro, uma
+porta de pressão retangular **fechada** (0,78 × 1,52 m sobre soleira de 10 cm):
+batente, fresta de vedação, folha com dois painéis e reforço, dobradiças de um
+lado, alavanca na altura do peito e três travas do outro, e uma lâmpada de
+vedação verde acima. A alavanca fica acima do encosto do assento porque, na
+altura usual, o encosto a esconde do piloto. Nas laterais, dois painéis
+auxiliares: ambiente (quatro mostradores, lâmpadas, disjuntores) e energia e
+comunicação (tela de status, interruptores, disjuntores). Tudo é cenográfico e
+não substitui os controles de voo do painel frontal. A parede é feita só de
+caixas: uma escotilha circular feita de cilindros com tampa não mostrava as
+faces vistas do assento.
+
+⚠️ O que escondia a parede não era a falta dela: o aro de reforço dianteiro do
+habitat (`SpacecraftVisual`, x = 2,6 m) era um cilindro **com tampas**, um disco
+opaco de 3,1 m entre o olho (x = 3,15) e a parede. Os aros agora não têm tampa
+— a mesma regra da carenagem do cockpit: peça que a câmera pode atravessar não
+tem tampa.
+
 ## Os ângulos não são decoração
 
 A câmera tem 75 graus verticais e a cabeça repousa 10 graus abaixo da linha do
