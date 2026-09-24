@@ -50,6 +50,9 @@ inline constexpr double C_MS = 299792458.0;
 [[nodiscard]] std::string countdown(double seconds);
 [[nodiscard]] std::string mass(double kg);
 [[nodiscard]] std::string force(double newtons);
+// An acceleration in standard gravities, `0.057 g`, with the digits the size
+// needs: an RCS translation is thousandths, IMPULSE on a light ship is twenty.
+[[nodiscard]] std::string g_load(double ms2);
 [[nodiscard]] std::string percent(double fraction);
 [[nodiscard]] std::string angle(double degrees);
 // Warp with a thousands separator, because `100000x` and `1000000x` are

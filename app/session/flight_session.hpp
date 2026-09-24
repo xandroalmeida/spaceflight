@@ -530,6 +530,14 @@ public:
     [[nodiscard]] std::vector<ThrusterView> rcs_thrusters() const;
     [[nodiscard]] std::vector<double> rcs_throttles() const;
 
+    // PROPER acceleration, body frame [m/s^2]: what an accelerometer bolted to
+    // the ship reads, and what the crew feels. Only the NON-gravitational forces
+    // -- the main engine along the nose (+x) and the RCS's net force -- over the
+    // mass. In free fall it is zero, whatever the orbit's coordinate
+    // acceleration. The RCS term is zero for a pure rotation (the couples
+    // cancel) and is the whole reading during a translation.
+    [[nodiscard]] math::Vec3 proper_acceleration_body() const;
+
     // --- orbit geometry (Milestone 7) ---------------------------------------
     // The osculating ellipse, sampled. In scene units, ready to draw.
     //

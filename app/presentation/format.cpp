@@ -1,5 +1,7 @@
 #include "app/presentation/format.hpp"
 
+#include "core/units/constants.hpp"
+
 #include <cctype>
 #include <cmath>
 #include <cstdarg>
@@ -161,6 +163,20 @@ std::string mass(double kg) {
         return format("%.1f kg", kg);
     }
     return format("%.2f t", kg / 1000.0);
+}
+
+std::string g_load(double ms2) {
+    if (!std::isfinite(ms2)) {
+        return "--";
+    }
+    const double g = ms2 / units::g0;
+    if (std::abs(g) < 0.1) {
+        return format("%.3f g", g);
+    }
+    if (std::abs(g) < 10.0) {
+        return format("%.2f g", g);
+    }
+    return format("%.1f g", g);
 }
 
 std::string force(double newtons) {

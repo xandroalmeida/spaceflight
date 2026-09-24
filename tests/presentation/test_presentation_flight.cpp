@@ -12,11 +12,13 @@
 #include "app/presentation/controls_doc.hpp"
 #include "app/presentation/flight_app.hpp"
 #include "app/presentation/format.hpp"
+#include "app/presentation/instruments/displays.hpp"
 #include "app/presentation/scene/celestial_view.hpp"
 #include "app/presentation/scene/planet_textures.hpp"
 #include "app/presentation/ui/debug_hud.hpp"
 #include "core/ephemeris/spice_kernel_set.hpp"
 #include "core/render/star_catalog.hpp"
+#include "core/units/constants.hpp"
 #include "tests/support/test_harness.hpp"
 
 #include <algorithm>
@@ -529,4 +531,85 @@ TEST(each_engine_mode_has_its_own_sound_and_the_ship_hums_inside_rule_36) {
     flight->frames(3 * 60 * 60);
     CHECK(std::none_of(audio.played.begin(), audio.played.end(),
                        [](const std::string& clip) { return clip.rfind("beep_", 0) == 0; }));
+}
+
+TEST(the_accelerometer_reads_what_the_crew_feels_not_gravity) {
+    auto flight = make_flight();
+    auto& app = flight->app;
+    flight->frames(2);
+    const auto proper = [&] { return app.session().proper_acceleration_body().norm(); };
+
+    // In orbit with the engine off the ship is in free fall: the coordinate
+    // acceleration is gravity's ~8.7 m/s^2, and the crew feels nothing.
+    CHECK(app.session().snapshot().acceleration_ms2 > 8.0);
+    CHECK_EQ(proper(), 0.0);
+    CHECK_EQ(app.instrument_data().proper_acceleration_ms2, 0.0);
+
+    // The engine at full throttle: thrust over mass, along the nose.
+    flight->press(app::Key::Z);
+    flight->frames(10);
+    const auto s = app.session().snapshot();
+    const double expected = s.thrust_n / s.mass_kg;
+    INFO(app::fmt::format("proper %.9f m/s^2, thrust/mass %.9f m/s^2", proper(), expected));
+    CHECK(std::abs(proper() - expected) < 1e-9 * expected);
+    CHECK(app.session().proper_acceleration_body().x > 0.0);
+    CHECK(expected / units::g0 > 0.5);
+
+    // What the panel shows is that number, in g, in a cell of its own -- and
+    // every text on the strip stays inside its column, at the widest reading.
+    app::SystemDisplay system;
+    app::RecordingCanvas strip;
+    const app::Vec2 strip_size{1280.0, 122.0};
+    system.draw(strip, strip_size, app.instrument_data());
+    CHECK(strip.contains_text("ACCELERATION"));
+    CHECK(strip.contains_text(app::fmt::g_load(expected)));
+    const double pad = strip_size.y * 0.07;
+    const double column = (strip_size.x - pad * 2.0) / app::SystemDisplay::COLUMNS;
+    for (const auto& text : strip.texts) {
+        const int index = static_cast<int>((text.baseline.x - pad) / column);
+        const double right = pad + column * (index + 1);
+        const double end = text.baseline.x + strip.text_width(text.text, text.px);
+        INFO("'" + text.text + app::fmt::format("' ends at %.0f px, its column at %.0f px", end, right));
+        CHECK(end <= right);
+    }
+
+    // Outside the cockpit the bottom strip carries it, next to the thrust, and
+    // the line does not run into the propellant cell.
+    app::MinimalHud hud;
+    app::RecordingCanvas screen;
+    auto data = app.instrument_data();
+    data.cockpit_view = false;
+    const app::Vec2 screen_size{1280.0, 720.0};
+    hud.draw(screen, screen_size, data);
+    bool found = false;
+    for (const auto& text : screen.texts) {
+        if (text.text.find(app::fmt::g_load(expected)) != std::string::npos) {
+            found = true;
+            CHECK(text.baseline.x + screen.text_width(text.text, text.px) < screen_size.x * 0.88);
+        }
+    }
+    CHECK(found);
+
+    // Cut-off: back to free fall, and zero again.
+    flight->press(app::Key::X);
+    flight->frames(2);
+    CHECK_EQ(proper(), 0.0);
+
+    // A translation by RCS is felt -- small, but not zero.
+    flight->keys.down.insert(app::Key::I);
+    flight->frames(10);
+    const double translation = proper();
+    INFO(app::fmt::format("RCS translation: %.3e m/s^2", translation));
+    CHECK(translation > 0.0);
+    flight->keys.down.clear();
+    flight->frames(10);
+
+    // A pure rotation is not: the RCS fires in couples, whose forces cancel.
+    flight->keys.down.insert(app::Key::W);
+    flight->frames(10);
+    const auto open = app.session().rcs_throttles();
+    CHECK(std::any_of(open.begin(), open.end(), [](double value) { return value > 0.002; }));
+    INFO(app::fmt::format("RCS rotation: %.3e m/s^2", proper()));
+    CHECK(proper() < 1e-9);
+    flight->keys.down.clear();
 }

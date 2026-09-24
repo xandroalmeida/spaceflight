@@ -1291,6 +1291,25 @@ std::vector<double> FlightSession::rcs_throttles() const {
     return std::vector<double>(open.begin(), open.end());
 }
 
+math::Vec3 FlightSession::proper_acceleration_body() const {
+    const double mass = snapshot_.spacecraft.mass;
+    if (!(mass > 0.0) || clock_ == nullptr) {
+        return {};
+    }
+    // Both terms are the force model's own answers at the snapshot's state and
+    // epoch, not a second derivation of them: the engine's evaluate() is what
+    // knows that an empty tank gives no thrust (current_thrust() only knows the
+    // throttle), and the RCS gets the same throttles the integrator is fed.
+    math::Vec3 force{};
+    if (main_engine_ != nullptr) {
+        force = math::Vec3::unit_x() * main_engine_->evaluate(state_, clock_->coordinate_time()).proper_thrust.norm();
+    }
+    if (rcs_ != nullptr) {
+        force += rcs_->evaluate(rcs_throttles()).force_body;
+    }
+    return force / mass;
+}
+
 std::vector<RenderVec3> FlightSession::orbit_track(int samples) const {
     std::vector<RenderVec3> out;
     if (builder_ == nullptr || catalog_ == nullptr || samples < 8) {

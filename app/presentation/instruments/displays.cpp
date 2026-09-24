@@ -242,7 +242,8 @@ void SystemDisplay::paint() {
     propellant(pad + column * 2.0, column, h);
     mass(pad + column * 3.0, column, h);
     rcs(pad + column * 4.0, column, h);
-    relativity(pad + column * 5.0, column, h);
+    acceleration(pad + column * 5.0, column, h);
+    relativity(pad + column * 6.0, column, h);
 }
 
 void SystemDisplay::label(Vec2 at, const std::string& text, double h, Colour colour) {
@@ -343,23 +344,31 @@ void SystemDisplay::rcs(double x, double width, double h) {
     value(Vec2{lamps_x, h * 0.86}, fmt::format("%d/%d", firing, total), h, palette::SECONDARY, 0.125);
 }
 
+void SystemDisplay::acceleration(double x, double width, double h) {
+    // What the crew FEELS: the proper acceleration, in g because that is the
+    // unit a body reads it in. Zero in free fall -- which is most of the flight,
+    // and is exactly what has to read (see FlightSession::proper_acceleration_body).
+    const double a = data_->proper_acceleration_ms2;
+    cell(x, width, h, "ACCELERATION", fmt::g_load(a), a > 0.0 ? palette::PRIMARY : palette::SECONDARY);
+    value(Vec2{x + width * 0.06, h * 0.86}, fmt::format("%.3f m/s²", a), h, palette::SECONDARY, 0.125);
+}
+
 void SystemDisplay::relativity(double x, double width, double h) {
     const double inset = width * 0.06;
     const double beta = data_->s.beta;
     const Colour colour = beta > 1.0e-3 ? palette::PRIMARY : palette::SECONDARY;
     label(Vec2{x + inset, h * 0.26}, "RELATIVITY", h);
-    // Rule 22 in full in one cell: beta, gamma-1, the difference between
-    // coordinate and proper time, and the proper acceleration. At 7.7 km/s that
-    // is 1.0e-4, 5.1e-9, tens of femtoseconds and zero -- and that is exactly
-    // what has to read. Two significant digits and not three: with three the
-    // two lines ran off the right edge. The technical read-out has every digit.
-    value(Vec2{x + inset, h * 0.55},
-          "β " + fmt::sci(beta, 2) + fmt::format("    a %.2f m/s²", data_->proper_acceleration_ms2), h,
-          colour, 0.13);
-    value(Vec2{x + inset, h * 0.86},
-          "γ-1 " + fmt::sci(data_->s.lorentz_factor_minus_one, 2) + "   Δt " +
-              fmt::sci(data_->s.clock_difference_s, 2) + " s",
-          h, palette::SECONDARY, 0.10);
+    // Rule 22 in one cell: beta, gamma-1 and the difference between coordinate
+    // and proper time. At 7.7 km/s that is 1.0e-4, 5.1e-9 and tens of
+    // femtoseconds -- and that is exactly what has to read. Two significant
+    // digits and not three: with three the lines ran off the right edge. One
+    // quantity per line since the strip went to seven columns: gamma-1 and dt
+    // on one line ran 11 px past the narrower cell.
+    value(Vec2{x + inset, h * 0.52}, "β " + fmt::sci(beta, 2), h, colour, 0.13);
+    value(Vec2{x + inset, h * 0.71}, "γ-1 " + fmt::sci(data_->s.lorentz_factor_minus_one, 2), h,
+          palette::SECONDARY, 0.10);
+    value(Vec2{x + inset, h * 0.90}, "Δt " + fmt::sci(data_->s.clock_difference_s, 2) + " s", h,
+          palette::SECONDARY, 0.10);
 }
 
 // --- MinimalHud ----------------------------------------------------------------
@@ -422,6 +431,12 @@ void MinimalHud::throttle(Vec2 at, double width, double u) {
     const double throttle_value = data_->s.throttle;
     const double thrust = data_->s.thrust_n;
     draw_text_at(at, "THROTTLE", 3.4, palette::SECONDARY);
+    // The g the crew feels, on the label's line at the cell's right edge:
+    // outside the cockpit this strip is the only place it reads, and after the
+    // thrust on the value line it ran into the propellant cell.
+    const double felt = data_->proper_acceleration_ms2;
+    draw_text_at(at + Vec2{width, 0.0}, fmt::g_load(felt), 3.4, felt > 0.0 ? palette::PRIMARY : palette::SECONDARY,
+                 Align::Right);
     draw_bar(Rect2{at + Vec2{0.0, u * 2.0}, Vec2{width, u * 3.4}}, throttle_value,
              thrust > 0.0 ? palette::engine(data_->s.exhaust_velocity_c) : palette::DIM);
     draw_text_at(at + Vec2{0.0, u * 9.6}, fmt::percent(throttle_value) + "   " + fmt::force(thrust), 4.0,

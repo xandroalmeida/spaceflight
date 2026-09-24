@@ -62,7 +62,7 @@ registrado como VISUAL_DEBT.
  ├────────────────┬────────────────┬────────────────────────────┤
  │    FLIGHT      │   NAVIGATION   │          TARGET            │
  ├────────────────┴────────────────┴────────────────────────────┤
- │ ENGINE │ THRUST │ PROPELLANT │ MASS │ RCS │ RELATIVITY       │
+ │ ENGINE │ THRUST │ PROPELLANT │ MASS │ RCS │ ACCEL │ RELATIV. │
  ├──────────────────────────────────────────────────────────────┤
  │ ENGINE   RCS   AP   NAV   MAP   WARP   MODE                  │
  └──────────────────────────────────────────────────────────────┘
@@ -130,7 +130,7 @@ previsão de chegada. Com um plano armado, a linha passa a mostrar a chegada do
 
 ## SYSTEMS — a faixa larga
 
-Seis células: motor, empuxo, propelente, massa, RCS, relatividade.
+Sete células: motor, empuxo, propelente, massa, RCS, aceleração, relatividade.
 
 A barra do acelerador é o **comando**; `THRUST` é o que o core está de facto a
 produzir. Os dois podem divergir — tanque vazio, motor desarmado — e é
@@ -141,18 +141,27 @@ As doze lâmpadas de RCS acendem pelo **acionamento**, não pela tecla: elas vê
 comando puro em um eixo abre dois bicos; um comando diagonal abre quatro, a
 frações diferentes. É isso que se vê.
 
-A célula de relatividade tem duas linhas e não mais: `β`, `γ−1`, a diferença
-entre o tempo coordenado e o próprio, e a aceleração própria. A física está lá e
-é real — a 7,7 km/s isso é `1,0e-4`, `5,1e-9`, dezenas de femtossegundos e zero —
-e ocupar metade do cockpit com ela em regime convencional seria uma afirmação
-falsa sobre a sua importância. Os valores com todos os dígitos estão em `F3`.
+`ACCELERATION` é o que a tripulação **sente**: a aceleração própria, em g, com
+m/s² embaixo. Só as forças não gravitacionais sobre a massa — o motor ao longo
+do nariz e a força líquida do RCS —, que é o que um acelerômetro a bordo leria.
+Em queda livre, que é quase o voo inteiro, ela é zero. Os dois termos vêm do
+próprio modelo de forças no instante do snapshot
+(`FlightSession::proper_acceleration_body`): o do motor pelo `evaluate()`, que
+sabe que tanque vazio não empurra, e o do RCS pelas mesmas aberturas que o
+integrador recebe. Uma translação por RCS aparece (centésimos de m/s²); uma
+rotação pura não, porque os bicos disparam em binários cujas forças se anulam.
+Fora do cockpit, o HUD mínimo mostra o mesmo número na linha do acelerador.
 
-⚠️ A aceleração ali é a **própria**: empuxo sobre massa, ou seja, só as forças
-não gravitacionais — o que um acelerômetro a bordo leria. Em queda livre ela é
-zero. **Não** é a aceleração coordenada do modelo de forças, que numa órbita de
+⚠️ **Não** é a aceleração coordenada do modelo de forças, que numa órbita de
 400 km vale 8,7 m/s² porque inclui a gravidade; mostrar esse número como
 aceleração própria diria que a tripulação sente quase um g, que é o contrário do
 que acontece.
+
+A célula de relatividade tem `β`, `γ−1` e a diferença entre o tempo coordenado e
+o próprio, uma por linha. A física está lá e é real — a 7,7 km/s isso é
+`1,0e-4`, `5,1e-9` e dezenas de femtossegundos — e ocupar metade do cockpit com
+ela em regime convencional seria uma afirmação falsa sobre a sua importância. Os
+valores com todos os dígitos estão em `F3`.
 
 ---
 

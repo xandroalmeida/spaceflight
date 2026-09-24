@@ -67,7 +67,8 @@ private:
     void draw_intercept(Vec2 at, double distance, double closing);
 };
 
-// The systems display: engine, propellant, RCS, relativity (rules 14, 15, 19, 22).
+// The systems display: engine, propellant, RCS, acceleration, relativity (rules
+// 14, 15, 19, 22).
 //
 // It is the panel's wide strip -- 1280 x 122, almost eleven to one -- and the
 // layout is written FOR that shape instead of inherited from the square
@@ -78,7 +79,7 @@ private:
 // it fits in a line, and that is what it deserves.
 class SystemDisplay final : public Instrument {
 public:
-    static constexpr int COLUMNS = 6;
+    static constexpr int COLUMNS = 7;
 
 protected:
     void paint() override;
@@ -93,6 +94,7 @@ private:
     void thrust(double x, double width, double h);
     void propellant(double x, double width, double h);
     void mass(double x, double width, double h);
+    void acceleration(double x, double width, double h);
     void rcs(double x, double width, double h);
     void relativity(double x, double width, double h);
 };

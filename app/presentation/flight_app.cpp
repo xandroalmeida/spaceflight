@@ -406,8 +406,7 @@ void FlightApp::update_instruments() {
     // acceleration and includes gravity -- 8.7 m/s^2 in a 400 km orbit. Labelling
     // that "proper acceleration" would be saying the crew in orbit feels almost
     // a g, which is exactly the opposite of what happens.
-    const double mass = std::max(s.mass_kg, 1.0);
-    data.proper_acceleration_ms2 = s.thrust_n / mass;
+    data.proper_acceleration_ms2 = session_.proper_acceleration_body().norm();
 
     // Closing with the target: the rate at which the distance falls. The
     // projection of the relative velocity onto the line of sight.

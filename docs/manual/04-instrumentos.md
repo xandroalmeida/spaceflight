@@ -66,7 +66,7 @@ mesma convenção de tela do mostrador de voo.
 
 ## `SYSTEMS` — a faixa larga
 
-Seis células: motor, empuxo, propelente, massa, RCS, relatividade.
+Sete células: motor, empuxo, propelente, massa, RCS, aceleração, relatividade.
 
 A barra do acelerador é o **comando**; `THRUST` é o que o motor está de fato
 produzindo. Os dois podem divergir — com o tanque vazio a barra sobe e o empuxo
@@ -78,9 +78,17 @@ As doze lâmpadas de RCS acendem pelo **acionamento**, não pela tecla. Um coman
 puro em um eixo abre dois propulsores; um comando diagonal abre quatro, em
 frações diferentes. É isso que se vê, e é isso que está queimando propelente.
 
-A célula de relatividade tem `β`, `γ−1`, a diferença entre o relógio coordenado e
-o próprio, e a aceleração **própria** — empuxo sobre massa, ou seja, só as forças
-não gravitacionais, que é o que um acelerômetro a bordo leria. Em queda livre ela
-é zero. A 7,7 km/s isso dá `1,0e-4`, `5,1e-9`, dezenas de femtossegundos e zero:
+`ACCELERATION` é o que você **sente** a bordo: a aceleração própria, em g, com
+m/s² embaixo. Só conta o que empurra a nave — o motor e a translação por RCS —,
+que é o que um acelerômetro leria. A gravidade não entra: em órbita, com o motor
+desligado, você está em queda livre e a leitura é zero, embora a Terra esteja
+puxando a nave a quase 9 m/s². Em `IMPULSE` a pleno, com o tanque cheio, é cerca
+de 1 g, e sobe à medida que o propelente acaba e a nave fica mais leve; em
+`CRUISE`, alguns centésimos. Girar a nave não aparece: os propulsores disparam em
+pares que se anulam. Fora do cockpit, o mesmo número fica na linha do acelerador
+do HUD.
+
+A célula de relatividade tem `β`, `γ−1` e a diferença entre o relógio coordenado
+e o próprio. A 7,7 km/s isso dá `1,0e-4`, `5,1e-9` e dezenas de femtossegundos:
 a física está lá, é real, e é pequena. Os valores com todos os dígitos estão em
 `{{key:debug_hud}}`.
