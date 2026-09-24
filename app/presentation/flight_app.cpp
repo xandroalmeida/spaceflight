@@ -465,8 +465,10 @@ std::pair<std::string, double> FlightApp::next_event() const {
 }
 
 void FlightApp::update_audio() {
-    audio_.set_engine_thrust(session_.snapshot().thrust_n);
+    const auto& s = session_.snapshot();
     audio_.set_interior(camera_.is_cockpit() && camera_.focus_index < 0);
+    audio_.set_engine(s.engine_mode, s.thrust_n, s.max_thrust_n);
+    audio_.set_rcs_activity(rcs_firing_count());
 }
 
 void FlightApp::watch_mission() {

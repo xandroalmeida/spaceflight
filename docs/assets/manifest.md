@@ -144,19 +144,25 @@ O shader lê os três canais como dado, sem decodificação sRGB, e normaliza; o
 
 ## Áudio
 
-Todos gerados proceduralmente por `scripts/generate_audio_placeholders.py` e
-commitados como WAV curtos. São **placeholders honestos**: ruído filtrado e
-envelopes, não gravações. Substituíveis um a um sem tocar em código.
+Duas origens, commitadas como WAV mono de 22 050 Hz. Os sons da nave vêm de
+gravações CC0 da Kenney e do Freesound, importadas e filtradas por
+`scripts/import_ship_audio.py`; os de interface continuam sendo
+**placeholders honestos** de `scripts/generate_audio_placeholders.py` — ruído
+filtrado e envelopes, não gravações. Substituíveis um a um sem tocar em código.
 
 | asset | estado | destino |
 |---|---|---|
-| `engine_loop` | `PLACEHOLDER` | `assets/audio/engine_loop.wav` |
-| `rcs_thump` | `PLACEHOLDER` | `assets/audio/rcs_thump.wav` |
+| `engine_impulse` | `INTEGRATED` — Kenney `spaceEngineLow_003`, CC0 | `assets/audio/engine_impulse.wav` |
+| `engine_cruise` | `INTEGRATED` — Kenney `spaceEngineSmall_000`, CC0 | `assets/audio/engine_cruise.wav` |
+| `rcs_thump` | `INTEGRATED` — Freesound 185515 (soneproject), CC0 | `assets/audio/rcs_thump.wav` |
+| `rcs_hiss` | `INTEGRATED` — Freesound 347576 (DJT4NN3R), CC0 | `assets/audio/rcs_hiss.wav` |
+| `equipment` | `INTEGRATED` — Freesound 675339 (craigsmith), CC0 | `assets/audio/equipment.wav` |
+| `ventilation` | `INTEGRATED` — Freesound 704393 (jgxxx), CC0 | `assets/audio/ventilation.wav` |
+| `beep_1` … `beep_4` | `INTEGRATED` — Kenney Interface Sounds, CC0 | `assets/audio/beep_N.wav` |
 | `switch_click` | `PLACEHOLDER` | `assets/audio/switch_click.wav` |
 | `button_press` | `PLACEHOLDER` | `assets/audio/button_press.wav` |
 | `warning_tone` | `PLACEHOLDER` | `assets/audio/warning_tone.wav` |
 | `computer_notify` | `PLACEHOLDER` | `assets/audio/computer_notify.wav` |
-| `ventilation` | `PLACEHOLDER` | `assets/audio/ventilation.wav` |
 
 ## Detalhe por categoria
 
@@ -164,7 +170,7 @@ envelopes, não gravações. Substituíveis um a um sem tocar em código.
 * [nave](spacecraft/) — [dimensões](spacecraft/dimensions.md), um prompt de textura, um brief de modelo 3D
 * [cockpit](cockpit/README.md) — geometria procedural, um prompt de textura
 * [UI](ui/README.md) — **nada** gerado externamente, e porquê
-* [áudio](audio/README.md) — sete placeholders sintetizados, e como substituí-los
+* [áudio](audio/README.md) — dez sons CC0 importados, quatro placeholders sintetizados, e como substituí-los
 
 ## Como as texturas são carregadas
 

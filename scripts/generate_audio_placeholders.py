@@ -77,62 +77,19 @@ def make_loopable(signal: list[float], crossfade: float = 0.15) -> list[float]:
 
     Um laço com uma descontinuidade produz um clique a cada volta, e a cada volta
     o ouvido aprende melhor a esperá-lo -- que é como um som ambiente passa de
-    imperceptível a insuportável em trinta segundos."""
+    imperceptível a insuportável em trinta segundos.
+
+    A cauda entra por baixo do COMEÇO e o laço é cortado onde ela começava: a
+    última amostra é signal[n - fade - 1] e a primeira, que vem logo depois na
+    volta, é a cauda em signal[n - fade] -- vizinhas no original. A versão que
+    cruzava a cauda no FIM terminava em signal[fade - 1] e voltava a signal[0],
+    um salto de 11347 contra um passo típico de ~1500 no engine_loop antigo."""
     n = len(signal)
     fade = int(n * crossfade)
     out = list(signal[:n - fade])
     for i in range(fade):
         t = i / fade
-        out.append(signal[n - fade + i] * (1.0 - t) + signal[i] * t)
-    return out
-
-
-def engine_loop() -> list[float]:
-    """Um motor de fusão a 200 kN, ouvido através da estrutura: quase tudo abaixo
-    de 200 Hz, com duas parciais que batem devagar uma contra a outra."""
-    n = int(RATE * 2.4)
-    rumble = low_pass(noise(n, 11), 90.0)
-    rumble = [s * 3.0 for s in rumble]
-    out = []
-    for i in range(n):
-        t = i / RATE
-        tone = 0.35 * math.sin(2.0 * math.pi * 47.0 * t)
-        tone += 0.22 * math.sin(2.0 * math.pi * 71.5 * t)
-        tone += 0.12 * math.sin(2.0 * math.pi * 143.0 * t)
-        # Uma modulação lenta de 1,7 Hz: sem ela o laço é um zumbido, e um
-        # zumbido constante o ouvido deixa de ouvir em dez segundos.
-        breathe = 1.0 + 0.10 * math.sin(2.0 * math.pi * 1.7 * t)
-        out.append((tone + rumble[i] * 0.5) * breathe)
-    return make_loopable(out)
-
-
-def ventilation() -> list[float]:
-    """A ventilação da cabine. Fraca, larga, sem tom nenhum: o som que se nota
-    quando ele para."""
-    n = int(RATE * 3.2)
-    air = low_pass(noise(n, 23), 1400.0)
-    air = high_pass(air, 120.0)
-    out = []
-    for i in range(n):
-        t = i / RATE
-        swirl = 1.0 + 0.16 * math.sin(2.0 * math.pi * 0.23 * t) \
-            + 0.09 * math.sin(2.0 * math.pi * 0.61 * t)
-        out.append(air[i] * swirl * 0.5)
-    return make_loopable(out)
-
-
-def rcs_thump() -> list[float]:
-    """Uma válvula a abrir e o propelente a sair: um golpe seco no casco seguido
-    de um sopro curto. É o que se ouve de DENTRO -- do lado de fora não há nada
-    para ouvir."""
-    n = int(RATE * 0.30)
-    hiss = high_pass(low_pass(noise(n, 37), 3200.0), 400.0)
-    out = []
-    for i in range(n):
-        t = i / RATE
-        knock = math.sin(2.0 * math.pi * 165.0 * t) * math.exp(-t * 90.0)
-        blow = hiss[i] * math.exp(-t * 16.0) * 0.8
-        out.append(knock * 0.9 + blow)
+        out[i] = signal[n - fade + i] * (1.0 - t) + signal[i] * t
     return out
 
 
@@ -169,9 +126,6 @@ def computer_notify() -> list[float]:
 
 
 if __name__ == "__main__":
-    write("engine_loop.wav", engine_loop())
-    write("ventilation.wav", ventilation())
-    write("rcs_thump.wav", rcs_thump())
     write("switch_click.wav", click(53, 2600.0, 150.0, 0.07))
     write("button_press.wav", click(59, 1500.0, 95.0, 0.10))
     write("warning_tone.wav", warning_tone())

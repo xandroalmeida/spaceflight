@@ -6,10 +6,13 @@ namespace sf::platform {
 namespace {
 
 const char* const kClips[][2] = {
-    {"engine", "audio/engine_loop.wav"},     {"ventilation", "audio/ventilation.wav"},
-    {"rcs", "audio/rcs_thump.wav"},          {"switch", "audio/switch_click.wav"},
-    {"button", "audio/button_press.wav"},    {"warning", "audio/warning_tone.wav"},
-    {"notify", "audio/computer_notify.wav"},
+    {"engine_impulse", "audio/engine_impulse.wav"}, {"engine_cruise", "audio/engine_cruise.wav"},
+    {"rcs", "audio/rcs_thump.wav"},                 {"rcs_hiss", "audio/rcs_hiss.wav"},
+    {"ventilation", "audio/ventilation.wav"},       {"equipment", "audio/equipment.wav"},
+    {"beep_1", "audio/beep_1.wav"},                 {"beep_2", "audio/beep_2.wav"},
+    {"beep_3", "audio/beep_3.wav"},                 {"beep_4", "audio/beep_4.wav"},
+    {"switch", "audio/switch_click.wav"},           {"button", "audio/button_press.wav"},
+    {"warning", "audio/warning_tone.wav"},          {"notify", "audio/computer_notify.wav"},
 };
 
 }  // namespace

@@ -90,9 +90,11 @@ pelo `SDL_AudioStream` para o formato do dispositivo. Não há passo de
 importação, e portanto nada de "forçar mono" ou "8 bits": o arquivo é o que
 soa.
 
-O laço de `engine_loop.wav` e `ventilation.wav` é definido **em código** — são os
-dois que `AudioDirector` toca por `set_loop` (`app/presentation/audio_director.cpp`),
-e `SdlAudio` re-enfileira o clip antes que ele acabe. Os outros são disparos.
+O laço é definido **em código**: `engine_impulse`, `engine_cruise`, `rcs_hiss`,
+`ventilation` e `equipment` são os que `AudioDirector` toca por `set_loop`
+(`app/presentation/audio_director.cpp`), e `SdlAudio` re-enfileira o clip antes
+que ele acabe. Os outros são disparos. Um arquivo de laço tem de ter o fim
+vizinho do começo — é o que `make_loopable()` garante.
 
 ## Verificação depois de trocar uma textura
 

@@ -19,6 +19,7 @@
 #include "core/render/star_catalog.hpp"
 #include "tests/support/test_harness.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <numbers>
@@ -462,4 +463,70 @@ TEST(the_mars_placeholder_is_mars_coloured) {
         return sum;
     };
     CHECK(brightness(1) > brightness(image.height / 2));
+}
+
+TEST(each_engine_mode_has_its_own_sound_and_the_ship_hums_inside_rule_36) {
+    auto flight = make_flight();
+    auto& app = flight->app;
+    auto& audio = flight->audio;
+    flight->frames(2);
+
+    // Before ignition: the hull hums, the engines are silent.
+    CHECK(audio.loops["ventilation"] > 0.0);
+    CHECK(audio.loops["equipment"] > 0.0);
+    CHECK_EQ(audio.loops["engine_impulse"], 0.0);
+    CHECK_EQ(audio.loops["engine_cruise"], 0.0);
+
+    // IMPULSE at full throttle: its sound, not the other one.
+    CHECK_EQ(app.session().engine_mode(), std::string{"IMPULSE"});
+    flight->press(app::Key::Z);
+    flight->frames(60);
+    CHECK(audio.loops["engine_impulse"] > 0.5);
+    CHECK(audio.loops["engine_cruise"] < 1e-6);
+
+    // CRUISE with the engine lit: 11 kN is scaled by CRUISE's full thrust, so it
+    // is heard, and IMPULSE fades rather than cutting.
+    flight->press(app::Key::G);
+    CHECK_EQ(app.session().engine_mode(), std::string{"CRUISE"});
+    flight->frames(1);
+    const double impulse_one_frame_later = audio.loops["engine_impulse"];
+    CHECK(impulse_one_frame_later > 0.3);
+    flight->frames(60);
+    CHECK(audio.loops["engine_cruise"] > 0.3);
+    CHECK(audio.loops["engine_impulse"] < 0.01);
+
+    // The cut-off follows the thrust down.
+    flight->press(app::Key::X);
+    flight->frames(60);
+    CHECK(audio.loops["engine_cruise"] < 0.01);
+
+    // The RCS hisses for as long as a nozzle is open, and stops after.
+    CHECK(audio.loops["rcs_hiss"] < 1e-6);
+    flight->keys.down.insert(app::Key::W);
+    flight->frames(20);
+    CHECK(audio.loops["rcs_hiss"] > 0.05);
+    flight->keys.down.clear();
+    flight->frames(40);
+    CHECK(audio.loops["rcs_hiss"] < 0.01);
+
+    // Equipment beeps now and then -- sporadic, not a rhythm: in three minutes
+    // at least two, and never closer together than the minimum interval.
+    audio.played.clear();
+    flight->frames(3 * 60 * 60);
+    const auto beeps = std::count_if(audio.played.begin(), audio.played.end(),
+                                     [](const std::string& clip) { return clip.rfind("beep_", 0) == 0; });
+    INFO(app::fmt::format("%d beeps in 180 s", static_cast<int>(beeps)));
+    CHECK(beeps >= 2);
+    CHECK(beeps <= static_cast<long>(180.0 / app::AudioDirector::BEEP_INTERVAL_MIN_S) + 1);
+
+    // Outside, nothing of the ship is heard: no hum, no beeps.
+    flight->press(app::Key::C);
+    CHECK(!app.camera().is_cockpit());
+    flight->frames(2);
+    CHECK_EQ(audio.loops["ventilation"], 0.0);
+    CHECK_EQ(audio.loops["equipment"], 0.0);
+    audio.played.clear();
+    flight->frames(3 * 60 * 60);
+    CHECK(std::none_of(audio.played.begin(), audio.played.end(),
+                       [](const std::string& clip) { return clip.rfind("beep_", 0) == 0; }));
 }

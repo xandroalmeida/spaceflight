@@ -17,7 +17,17 @@
 // For the same reason as the plume: with the tank empty the key keeps working
 // and the thrust is zero. A sound that followed the throttle would keep roaring
 // over an engine that is out.
+//
+// Each mode has its own sound, and each is scaled by ITS OWN full thrust: CRUISE
+// is 11 kN against IMPULSE's 200 kN, and on the IMPULSE scale it was inaudible.
+//
+// ## The ship is never silent inside
+//
+// Ventilation, electronics behind the panels and, every few seconds, a system
+// that beeps. The beeps are drawn from a fixed-seed generator, so a test sees
+// the same sequence every run.
 
+#include <random>
 #include <string>
 
 namespace sf::app {
@@ -41,14 +51,22 @@ public:
 
 class AudioDirector {
 public:
-    static constexpr double ENGINE_REFERENCE_N = 200000.0;
+    // Seconds between two equipment beeps: sporadic, so that each one is
+    // noticed as an event and not heard as a rhythm.
+    static constexpr double BEEP_INTERVAL_MIN_S = 15.0;
+    static constexpr double BEEP_INTERVAL_MAX_S = 45.0;
 
     explicit AudioDirector(AudioSink& sink) : sink_(&sink) {}
 
     void advance(double delta);
-    // `thrust_n` is the core's real thrust.
-    void set_engine_thrust(double thrust_n);
+    // `thrust_n` is the core's real thrust; `full_thrust_n` is what the CURRENT
+    // mode gives at full throttle. Once per frame.
+    void set_engine(const std::string& mode, double thrust_n, double full_thrust_n);
+    // The valve's knock, once per manual firing.
     void rcs_fired(int count);
+    // The gas, for as long as any nozzle is open -- the pilot's or the
+    // autopilot's. Once per frame.
+    void set_rcs_activity(int firing);
     void switch_flipped() { play("switch", 0.5, 1.0); }
     void button_pressed() { play("button", 0.45, 1.0); }
     void warning() { play("warning", 0.55, 1.0); }
@@ -66,12 +84,18 @@ private:
     void play(const std::string& clip, double level, double pitch);
     void apply_volumes();
 
+    void schedule_beep();
+
     AudioSink* sink_;
     double master_volume_{0.8};
     double effects_volume_{0.8};
     bool interior_{true};
-    double engine_level_{0.0};
+    double impulse_level_{0.0};
+    double cruise_level_{0.0};
+    double rcs_level_{0.0};
     double rcs_cooldown_{0.0};
+    std::minstd_rand beep_random_{20260923};
+    double beep_countdown_{BEEP_INTERVAL_MIN_S};
 };
 
 }  // namespace sf::app
