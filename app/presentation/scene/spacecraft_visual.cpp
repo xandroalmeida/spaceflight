@@ -209,7 +209,16 @@ void SpacecraftVisual::build_engine() {
     // The bell: narrow at the throat, open at the exit. ⚠️ The Godot version
     // passed the two radii the other way round and drew the bell with its mouth
     // at the throat, inside a lip two metres wide.
-    parts_.push_back(cylinder(BELL_EXIT_RADIUS, 0.85, ENGINE_EXIT, ENGINE_THROAT, true, materials_.engine_bell));
+    //
+    // Open at the exit: capped, the mouth was an opaque disc, and the reactor
+    // glow that sits inside the bell (EnginePlume, RELATIVISTIC) was drawn
+    // behind it -- the hull caught the blue light and the nozzle showed black.
+    // The throat stays capped. Without culling, so that the inner wall exists
+    // and catches the reactor's light.
+    Part bell = cylinder(BELL_EXIT_RADIUS, 0.85, ENGINE_EXIT, ENGINE_THROAT, false, materials_.engine_bell);
+    bell.mesh = meshes_.cylinder(0.85, BELL_EXIT_RADIUS, ENGINE_THROAT - ENGINE_EXIT, 24, 1, true, false);
+    bell.material.cull = Cull::None;
+    parts_.push_back(bell);
 
     Part lip{};
     lip.mesh = meshes_.torus(BELL_EXIT_RADIUS - 0.10, BELL_EXIT_RADIUS + 0.04, 24, 32);

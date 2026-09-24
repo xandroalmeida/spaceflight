@@ -62,7 +62,11 @@ void main() {
     float column = pow(abs(dot(N, V)), near_colour.w);
 
     float along = exp(-far_colour.w * t);
-    float tail = 1.0 - smoothstep(shape.x, 1.0, t);
+    // A fade start at or past the tip means "no fade" (the exit glow and the
+    // reactor disc pass 2). It has to be said explicitly: smoothstep with
+    // edge0 >= edge1 is undefined in GLSL, and on Metal it returned 1 -- tail 0,
+    // and those parts were never drawn.
+    float tail = shape.x < 1.0 ? 1.0 - smoothstep(shape.x, 1.0, t) : 1.0;
 
     // Streaks travel downstream; the angle round the axis decorrelates them so
     // they are filaments and not rings. Two octaves, and the amplitude grows
